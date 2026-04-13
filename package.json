@@ -1,6 +1,6 @@
 {
   "name": "sundaytask-presenter",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Present — a PH-first church presenter from Sunday Task",
   "main": "./out/main/index.js",
   "author": "Sunday Task",
