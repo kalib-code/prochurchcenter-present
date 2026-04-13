@@ -1,0 +1,77 @@
+name: release
+
+# Trigger on tag push (`v1.0.0`, `v1.0.1-beta`, etc).
+#
+# Cutting a release:
+#   1. Update version in package.json
+#   2. git commit -am "release: v1.0.0"
+#   3. git tag v1.0.0
+#   4. git push origin main --tags
+#
+# CI then takes over: builds for mac/win/linux in parallel, signs (if
+# certs are configured as secrets — see RELEASING.md), and uploads
+# installers + auto-update manifests to a DRAFT GitHub Release. After
+# all three jobs finish, manually review and publish the draft.
+#
+# Why draft mode: lets us verify all artifacts uploaded correctly
+# before the auto-updater starts handing them out to users.
+#
+# Security note: this workflow takes no untrusted input from issue
+# bodies / PR descriptions / commit messages. Every interpolation is
+# either matrix.os (our own definition) or secrets.* (passed via env,
+# never inlined into a run: command). Safe by construction.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # required for electron-builder to create the GitHub release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
+    name: Build and publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Phase 10b will add cert-decrypt steps here for mac (Apple
+      # Developer ID + notarization API key) and Windows (Sectigo PFX
+      # + password). Until those secrets exist, the build runs unsigned
+      # and electron-builder skips the signing steps automatically.
+
+      - name: Build and publish
+        env:
+          # GITHUB_TOKEN gives electron-builder write access to draft
+          # the release. No PAT needed for own-repo publishing.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable code-signing on macOS until the Apple Developer ID
+          # secret is added in Phase 10b. electron-builder treats
+          # CSC_IDENTITY_AUTO_DISCOVERY=false as "skip signing".
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm run build && pnpm exec electron-builder --publish always

@@ -1,0 +1,92 @@
+appId: com.sundaytask.present
+productName: Present
+copyright: © 2026 Sunday Task
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!scripts/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md,RELEASING.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!.github/*'
+asarUnpack:
+  - resources/**
+
+# ── Windows ─────────────────────────────────────────────────────────
+# Code signing not configured yet — Phase 10b. Without a cert, Windows
+# users will see a SmartScreen "publisher unknown" warning the first
+# time they install. They can click "More info → Run anyway" but it
+# adds friction. Cert purchase + CI secret setup is documented in
+# RELEASING.md.
+win:
+  executableName: Present
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+
+# ── macOS ───────────────────────────────────────────────────────────
+# Notarization disabled until an Apple Developer ID is purchased —
+# Phase 10b. Without it, macOS users see "Apple cannot check it for
+# malicious software" on first launch and must right-click → Open.
+# `category` follows Apple's LSApplicationCategoryType values.
+mac:
+  icon: build/icon.png
+  category: public.app-category.utilities
+  notarize: false
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ── Linux ───────────────────────────────────────────────────────────
+linux:
+  icon: build/icon.png
+  maintainer: sundaytask.com
+  category: Office
+  target:
+    - AppImage
+appImage:
+  artifactName: ${name}-${version}.${ext}
+
+npmRebuild: false
+
+# ── Auto-update / publish ───────────────────────────────────────────
+# GitHub Releases is the publish provider. CI builds for each platform
+# upload their installers + the `latest*.yml` manifest files that
+# electron-updater reads. The `releaseType: draft` setting means new
+# releases are created in DRAFT mode — we manually publish them after
+# verifying all three platforms uploaded successfully.
+#
+# After cloning the repo on a fresh machine: nothing to configure
+# locally. The publish provider is read from this YAML at build time.
+publish:
+  - provider: github
+    owner: kalib-code
+    repo: sundaytask-presenter
+    releaseType: draft

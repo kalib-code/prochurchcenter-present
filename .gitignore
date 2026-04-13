@@ -1,0 +1,20 @@
+node_modules
+dist
+out
+*.log
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.env
+.env.local
+
+# electron-builder release artifacts (per-OS installers + manifests)
+release/
+.electron-builder-cache/
+
+# Vite dep-optimizer cache (per-renderer subdir)
+src/renderer/node_modules/.vite/
+
+# Local-only updater config used by electron-vite dev (we don't ship it)
+dev-app-update.yml
