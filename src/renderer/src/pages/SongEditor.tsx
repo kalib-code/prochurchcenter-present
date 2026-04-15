@@ -21,7 +21,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { Song, SongLanguage, Theme, ThemeOverride } from '@shared/types'
-import type { UpdateSongPatch } from '@shared/ipc-contract'
+import type { SlidePayload, UpdateSongPatch } from '@shared/ipc-contract'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
@@ -29,6 +29,7 @@ import { useAutosave } from '../hooks/useAutosave'
 import { previewSongSlides } from '../lib/slideify'
 import { mergeThemeOverride } from '../lib/themeOverride'
 import { SlideCard } from '../components/SlideCard'
+import { SlideRenderer } from '../components/SlideRenderer'
 import { ThemeFields } from '../components/ThemeFields'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
@@ -159,6 +160,23 @@ export function SongEditor(): JSX.Element {
   // keystroke; throwaway render data that never gets persisted.
   const maxLines = settings?.maxLinesPerSlide ?? 4
   const previewSlides = previewSongSlides(draft.rawText, maxLines)
+
+  // Sample SlidePayload for the theme-override preview inside the left
+  // column. Prefer the song's own first slide (so the operator sees
+  // their actual lyrics styled with the override) and fall back to a
+  // generic placeholder if the textarea is empty — that way the
+  // preview is useful even before any lyrics are typed.
+  const themePreviewPayload: SlidePayload = previewSlides[0]
+    ? {
+        kind: 'text',
+        lines: previewSlides[0].lines,
+        sectionLabel: previewSlides[0].sectionLabel
+      }
+    : {
+        kind: 'text',
+        lines: ['Sample lyric line', 'Shows your theme override'],
+        sectionLabel: 'Preview'
+      }
 
   const handleDelete = async (): Promise<void> => {
     const ok = window.confirm(`Delete "${draft.title}"?`)
@@ -303,6 +321,7 @@ export function SongEditor(): JSX.Element {
               override={draft.themeOverride}
               globalTheme={globalTheme}
               onChange={(next) => patch({ themeOverride: next })}
+              previewPayload={themePreviewPayload}
             />
           )}
         </section>
@@ -469,9 +488,12 @@ function Field({
  *   - If override is null, show a single "Override global theme" button.
  *     Clicking seeds an EMPTY override ({}) so nothing changes
  *     immediately but the form appears, ready for edits.
- *   - If override is non-null, show the ThemeFields form (displaying
- *     the effective theme = global merged with override) plus a
- *     "Remove override" link that sets override back to null.
+ *   - If override is non-null, show a live preview panel (SlideRenderer
+ *     displaying the song's first slide styled with the effective
+ *     theme, so font/color/background tweaks are visible the instant
+ *     the operator makes them — this is what makes override editing
+ *     feel trustworthy) plus the ThemeFields form plus a "Remove
+ *     override" link that sets override back to null.
  *
  * When the user changes a field, we spread the patch into the current
  * override so previously-inherited fields only switch to custom when
@@ -486,11 +508,13 @@ function Field({
 function ThemeOverrideSection({
   override,
   globalTheme,
-  onChange
+  onChange,
+  previewPayload
 }: {
   override: ThemeOverride | null
   globalTheme: Theme
   onChange: (next: ThemeOverride | null) => void
+  previewPayload: SlidePayload
 }): JSX.Element {
   const isActive = override !== null
   // Effective theme for display: merge override on top of global using
@@ -549,7 +573,32 @@ function ThemeOverrideSection({
       </div>
 
       {isActive && (
-        <div className="mt-3">
+        <div className="mt-3 space-y-4">
+          {/* Live preview — a miniature SlideRenderer showing the
+              song's first slide styled with the effective (global +
+              override) theme. Matches what the projector will actually
+              render, so the operator can tweak font/background/color
+              and see the result without flipping between windows.
+              Aspect ratio locked to 16:9 to match a typical projector. */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-brand/80">
+                Live preview
+              </span>
+              <span className="text-[10px] text-muted-foreground/60">
+                Reflects every change instantly
+              </span>
+            </div>
+            <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border/60 shadow-[0_16px_40px_-28px_hsl(var(--brand)/0.5)]">
+              <SlideRenderer
+                payload={previewPayload}
+                mode="live"
+                theme={effective}
+                animate={false}
+              />
+            </div>
+          </div>
+
           <ThemeFields theme={effective} onChange={handleFieldChange} />
         </div>
       )}

@@ -78,6 +78,20 @@ export function OutputView(): JSX.Element {
     return mergeThemeOverride(theme, itemOverride)
   }, [theme, itemOverride])
 
+  // Don't render slides until the theme has loaded. Rendering with a
+  // null/fallback theme first and then swapping to the real theme is
+  // what caused the packaged-app "text stays tiny until you double-
+  // click" bug: slides that arrived BEFORE theme.load() resolved would
+  // render via FALLBACK_THEME, and by the time the real theme arrived
+  // the autofit measurements were already baked into a detached DOM
+  // element. A black hold-frame while loading is both correct (the
+  // operator hasn't actually "gone live" yet from a projector POV —
+  // the hero preview in main renderer is what they're looking at) and
+  // much simpler than trying to recover from a mid-flight theme swap.
+  if (!effectiveTheme) {
+    return <div className="h-screen w-screen bg-black" />
+  }
+
   return (
     <div className="h-screen w-screen">
       <SlideRenderer

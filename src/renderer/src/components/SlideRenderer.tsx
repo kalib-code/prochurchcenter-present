@@ -419,7 +419,7 @@ function AutoFitSlide({
         containerRef={containerRef}
         contentRef={contentRef}
         payload={payload}
-        fontSizePercent={theme.fontSizePercent}
+        theme={theme}
       />
     </div>
   )
@@ -446,56 +446,125 @@ function payloadKey(payload: SlidePayload): string {
  *   4. Verify — if still overflowing (can happen when shrinking un-wraps
  *      a line, reducing lines but potentially still overflowing), fine-tune
  *      in small linear steps
+ *
+ * ResizeObserver + retry-on-zero:
+ *   The first useLayoutEffect pass can land on a container that hasn't
+ *   been laid out yet (clientWidth/Height === 0). This is the packaged-
+ *   app bug: in dev, HMR + Fast Refresh cause enough re-renders that
+ *   one of them catches a laid-out container; in production, the
+ *   initial effect fires once against a hidden output window and if
+ *   we bail on minDim === 0 without any retry, the text stays at its
+ *   inherited browser font size forever. The ResizeObserver fires
+ *   again the moment the container gets a real size (ready-to-show,
+ *   display resize, bounds change), re-running the fit automatically.
  */
 function AutoFitController({
   containerRef,
   contentRef,
   payload,
-  fontSizePercent
+  theme
 }: {
   containerRef: React.RefObject<HTMLDivElement>
   contentRef: React.RefObject<HTMLDivElement>
   payload: SlidePayload
-  fontSizePercent: number
+  theme: Theme
 }): null {
+  // `theme` is intentionally a dependency of the whole effect below so
+  // ANY theme change re-runs the fit. Font family, fontSizePercent,
+  // textEffect (affects measured content width via stroke), textAlign
+  // (affects wrapping) — all of these matter. Taking the whole theme
+  // is simpler than enumerating every field and missing one.
+  const fontSizePercent = theme.fontSizePercent
+
   useLayoutEffect(() => {
-    const container = containerRef.current
-    const content = contentRef.current
-    if (!container || !content) return
+    // CRITICAL: read refs inside fit() on every call, not once at
+    // effect-start closure time. The previous version captured
+    // `container`/`content` at the top of the effect, so when the
+    // content div remounted due to a React key change (payload /
+    // fontFamily / fontSizePercent all feed into the key), the
+    // ResizeObserver callback would write font-size onto the OLD,
+    // now-detached element. The visible new element stayed at its
+    // inherited browser default (tiny). This is what caused the
+    // packaged-app "text is tiny until you resize the window" bug —
+    // resizing triggered a full React commit that re-ran this effect
+    // with fresh refs, not because resize itself was magic.
+    const fit = (): void => {
+      const container = containerRef.current
+      const content = contentRef.current
+      if (!container || !content) return
 
-    // Starting font size: 8% of the smaller container dimension, multiplied
-    // by the user's fontSizePercent setting. 100% = default, 150% = bigger.
-    const minDim = Math.min(container.clientWidth, container.clientHeight)
-    if (minDim === 0) return // container not laid out yet
-    const basePx = minDim * 0.08 * (fontSizePercent / 100)
+      // Starting font size: 8% of the smaller container dimension,
+      // multiplied by the user's fontSizePercent setting.
+      const minDim = Math.min(container.clientWidth, container.clientHeight)
+      if (minDim === 0) return // not laid out yet; ResizeObserver will retry
+      const basePx = minDim * 0.08 * (fontSizePercent / 100)
 
-    content.style.fontSize = `${basePx}px`
+      content.style.fontSize = `${basePx}px`
 
-    // Phase 1: one-shot ratio calc
-    const availableH = container.clientHeight
-    const availableW = container.clientWidth
-    const contentH = content.scrollHeight
-    const contentW = content.scrollWidth
+      // Phase 1: one-shot ratio calc
+      const availableH = container.clientHeight
+      const availableW = container.clientWidth
+      const contentH = content.scrollHeight
+      const contentW = content.scrollWidth
 
-    const ratioH = availableH / contentH
-    const ratioW = availableW / contentW
-    const exactRatio = Math.min(ratioH, ratioW, 1) * 0.97
+      if (contentH === 0 || contentW === 0) return // content not measurable yet
 
-    let size = basePx * exactRatio
-    content.style.fontSize = `${size}px`
+      const ratioH = availableH / contentH
+      const ratioW = availableW / contentW
+      const exactRatio = Math.min(ratioH, ratioW, 1) * 0.97
 
-    // Phase 2: verify + fine-tune. Up to 6 shrink passes at 0.97x each.
-    for (let i = 0; i < 6; i++) {
-      if (
-        content.scrollHeight <= container.clientHeight &&
-        content.scrollWidth <= container.clientWidth
-      ) {
-        break
-      }
-      size = size * 0.97
+      let size = basePx * exactRatio
       content.style.fontSize = `${size}px`
+
+      // Phase 2: verify + fine-tune. Up to 6 shrink passes at 0.97x each.
+      for (let i = 0; i < 6; i++) {
+        if (
+          content.scrollHeight <= container.clientHeight &&
+          content.scrollWidth <= container.clientWidth
+        ) {
+          break
+        }
+        size = size * 0.97
+        content.style.fontSize = `${size}px`
+      }
     }
-  }, [containerRef, contentRef, payload, fontSizePercent])
+
+    // Initial pass — runs synchronously after layout in the same frame.
+    fit()
+
+    // A handful of requestAnimationFrame retries handles the specific
+    // packaged-Electron timing where the output window's ready-to-show
+    // + setBounds + show() sequence happens just after React's first
+    // commit. The ResizeObserver below catches dimension *changes*,
+    // but if the window is already at its final size when React first
+    // paints and the layout just hasn't flushed yet, there's no resize
+    // event to catch. Three frames (~50ms) is enough to let the browser
+    // settle without the retries ever being user-visible.
+    let rafCount = 0
+    let rafId = 0
+    const tick = (): void => {
+      rafCount++
+      fit()
+      if (rafCount < 3) rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+
+    // Retry on any container resize. This also catches the case where
+    // the output window becomes visible mid-session or the operator
+    // drags the display. We observe the container element currently
+    // pointed to by the ref — if it changes later, the effect will
+    // re-run and reattach a fresh observer.
+    const container = containerRef.current
+    let ro: ResizeObserver | null = null
+    if (container) {
+      ro = new ResizeObserver(() => fit())
+      ro.observe(container)
+    }
+    return () => {
+      cancelAnimationFrame(rafId)
+      ro?.disconnect()
+    }
+  }, [containerRef, contentRef, payload, theme, fontSizePercent])
 
   return null
 }
