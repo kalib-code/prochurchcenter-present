@@ -88,5 +88,5 @@ npmRebuild: false
 publish:
   - provider: github
     owner: kalib-code
-    repo: sundaytask-presenter
+    repo: prochurchcenter-present
     releaseType: draft
