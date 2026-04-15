@@ -1,6 +1,6 @@
 {
   "name": "prochurchcenter-present",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "ProChurchCenter Present — a PH-first church presenter from Sunday Task",
   "main": "./out/main/index.js",
   "author": "ProChurchCenter",
