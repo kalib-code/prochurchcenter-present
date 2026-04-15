@@ -16,7 +16,22 @@ const DEFAULT_SETTINGS: Settings = {
   outputDisplayId: null,
   firstRunCompleted: false,
   activeThemeId: 'default',
-  maxLinesPerSlide: 4
+  maxLinesPerSlide: 4,
+  songTransitionSlide: true,
+  stageMonitorEnabled: false,
+  stageMonitorDisplayId: null,
+  lowerThirdsEnabled: false,
+  lowerThirdsDisplayId: null,
+  // Bright magenta-ish green that's effectively never present in
+  // photographic content. Standard chroma key for green-screen
+  // workflows; matches the OBS default for chroma key filter setup.
+  lowerThirdsChromaKey: '#00FF00',
+  lowerThirdsAlignment: 'left',
+  lowerThirdsFontSize: 36,
+  lowerThirdsTextColor: '#FFFFFF',
+  lowerThirdsBoxColor: '#0F121C',
+  lowerThirdsBoxOpacity: 92,
+  lowerThirdsTextEffect: 'shadow'
 }
 
 /**

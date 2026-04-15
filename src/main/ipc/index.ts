@@ -13,6 +13,7 @@ import { registerThemeHandlers } from './theme'
 import { registerOutputHandlers } from './output'
 import { registerDialogHandlers } from './dialog'
 import { registerBibleHandlers } from './bible'
+import { registerFontsHandlers } from './fonts'
 
 export function registerAllIpcHandlers(): void {
   registerSongHandlers()
@@ -22,4 +23,5 @@ export function registerAllIpcHandlers(): void {
   registerOutputHandlers()
   registerDialogHandlers()
   registerBibleHandlers()
+  registerFontsHandlers()
 }

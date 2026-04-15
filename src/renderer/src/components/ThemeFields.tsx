@@ -19,10 +19,12 @@
  * Settings page looks unchanged.
  */
 
+import { useEffect } from 'react'
 import type { Theme, TextAlign, TextPosition, TextEffect, Transition } from '@shared/types'
 import type { PickFileKind } from '@shared/ipc-contract'
+import { useFontsStore } from '../stores/useFontsStore'
 
-const FONT_OPTIONS: { label: string; value: string }[] = [
+const BUILT_IN_FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'System', value: 'system-ui, -apple-system, Segoe UI, sans-serif' },
   { label: 'Inter', value: 'Inter, system-ui, sans-serif' },
   { label: 'Helvetica', value: 'Helvetica Neue, Helvetica, Arial, sans-serif' },
@@ -40,6 +42,23 @@ interface ThemeFieldsProps {
 }
 
 export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element {
+  // Custom + system fonts come from the fonts store. Loaded lazily so
+  // theme editing for someone who's never opened Settings doesn't pay
+  // the cost of querying every font installed on their machine.
+  const customFonts = useFontsStore((s) => s.custom)
+  const systemFonts = useFontsStore((s) => s.system)
+  const loadingSystem = useFontsStore((s) => s.loadingSystem)
+  const systemError = useFontsStore((s) => s.systemError)
+  const loadSystem = useFontsStore((s) => s.loadSystem)
+  const uploadCustom = useFontsStore((s) => s.uploadCustom)
+  const deleteCustom = useFontsStore((s) => s.deleteCustom)
+
+  useEffect(() => {
+    if (systemFonts.length === 0 && !loadingSystem && !systemError) {
+      void loadSystem()
+    }
+  }, [systemFonts.length, loadingSystem, systemError, loadSystem])
+
   return (
     <div className="space-y-6">
       {/* Typography */}
@@ -50,15 +69,85 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
             onChange={(e) => onChange({ fontFamily: e.target.value })}
             className={selectClass}
           >
-            {FONT_OPTIONS.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-            {!FONT_OPTIONS.some((f) => f.value === theme.fontFamily) && (
-              <option value={theme.fontFamily}>Custom</option>
+            <optgroup label="Built-in">
+              {BUILT_IN_FONT_OPTIONS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </optgroup>
+            {customFonts.length > 0 && (
+              <optgroup label="Custom (uploaded)">
+                {customFonts.map((f) => (
+                  <option key={f.family} value={`"${f.family}"`}>
+                    {f.family}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {systemFonts.length > 0 && (
+              <optgroup label="System fonts">
+                {systemFonts.map((family) => (
+                  <option key={family} value={`"${family}"`}>
+                    {family}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {/* Fallback option for legacy themes whose fontFamily
+                doesn't match any of the above (e.g. older saved value). */}
+            {![...BUILT_IN_FONT_OPTIONS.map((f) => f.value),
+               ...customFonts.map((f) => `"${f.family}"`),
+               ...systemFonts.map((f) => `"${f}"`)].includes(theme.fontFamily) && (
+              <option value={theme.fontFamily}>Custom value</option>
             )}
           </select>
+        </Row>
+
+        <Row label="Custom fonts">
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                void uploadCustom()
+              }}
+              className="self-start rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
+            >
+              Upload font file…
+            </button>
+            <p className="text-[11px] text-muted-foreground/80">
+              .ttf, .otf, .woff, .woff2 — uploaded fonts are available
+              to every theme.
+            </p>
+            {customFonts.length > 0 && (
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {customFonts.map((f) => (
+                  <li
+                    key={f.family}
+                    className="flex items-center justify-between gap-2 rounded border border-border/40 bg-background/40 px-2 py-1 text-[11px]"
+                  >
+                    <span
+                      className="truncate"
+                      style={{ fontFamily: `"${f.family}"` }}
+                      title={f.filename}
+                    >
+                      {f.family}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void deleteCustom(f.family)
+                      }}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Remove font"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </Row>
 
         <Row label="Size">

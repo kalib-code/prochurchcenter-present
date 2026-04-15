@@ -1,4 +1,4 @@
-# Present — Sunday Task
+# Present — ProChurchCenter
 
 A PH-first church presenter. Deliberately minimal. Offline-first. Built for the Sunday-morning volunteer.
 
@@ -13,7 +13,7 @@ A PH-first church presenter. Deliberately minimal. Offline-first. Built for the 
   - `ROADMAP.md` — v1.0 → v2.0 feature phasing
   - `FEATURE-MENU.md` — feature selection history
 - **Code:** `~/Code/saas/sundaytask-presenter/` (this folder)
-- **Distribution:** `sundaytask.com` via polar.sh
+- **Distribution:** `prochurchcenter.com` via polar.sh
 
 ## Develop
 

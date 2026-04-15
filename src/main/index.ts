@@ -9,6 +9,10 @@ import { getSettings } from './storage/settings'
 import { registerAllIpcHandlers } from './ipc'
 import { attachOutputReplay } from './ipc/output'
 import { setOperatorWindow, setOutputWindow } from './windows'
+import {
+  createStageMonitorWindow,
+  createLowerThirdsWindow
+} from './projectorWindows'
 import { initAutoUpdater } from './updater'
 
 /**
@@ -75,7 +79,7 @@ function createWindows(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    title: 'Present',
+    title: 'ProChurchCenter Present',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -83,17 +87,51 @@ function createWindows(): void {
     }
   })
 
-  // Output window — fullscreen, alwaysOnTop (kiosk mode, so volunteers can't
-  // accidentally minimize the projector during service)
+  // Output window — borderless (no title bar or traffic lights),
+  // manually sized to cover the target display, kept above everything
+  // via alwaysOnTop. We deliberately DO NOT use Electron's fullscreen
+  // or simpleFullscreen APIs on macOS because both escalate the
+  // window to a high NSWindowLevel that filters it out of
+  // CGWindowListCopyWindowInfo — which means desktopCapturer can't
+  // see it, which breaks Option C (confidence-monitor pixel mirror).
+  //
+  // The borderless + cover-the-screen + alwaysOnTop combination gives
+  // the congregation the same visual result (an entire screen full
+  // of slide content with nothing else visible) while keeping the
+  // window a plain enumerable NSFloatingWindowLevel entry that
+  // desktopCapturer and other capture APIs can find normally.
+  // Deliberate absences in this config (each one breaks Option C
+  // pixel mirroring in a specific way on macOS):
+  //
+  //   * `skipTaskbar: true`   — maps to NSWindowCollectionBehaviorTransient,
+  //                             excludes from CGWindowListCopyWindowInfo.
+  //   * `alwaysOnTop: true`   — sets NSFloatingWindowLevel, which
+  //                             Chromium's desktop_capturer_mac filters
+  //                             out (it only enumerates windows at
+  //                             kCGWindowLayer == 0).
+  //   * `resizable: false`    — locks NSWindow size constraints to
+  //                             constructor dimensions, causing
+  //                             subsequent setBounds() to no-op.
+  //   * `fullscreen: true`    — moves the window into its own Mission
+  //                             Control space on macOS, hiding it from
+  //                             desktopCapturer's window list.
+  //
+  // In production the operator and output will be on separate
+  // monitors, so losing "always on top" costs nothing. In dev on a
+  // single monitor, clicking the operator brings it forward of the
+  // output — that's acceptable for development.
+  //
+  // `frame: false` + bounds-covering-the-display + alwaysOnTop-
+  // equivalent achieved via manual re-raising (see moveTop handler
+  // below) gives us the kiosk look while staying capturable.
   const outputWindow = new BrowserWindow({
     width: 1280,
     height: 720,
     show: false,
-    fullscreen: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
+    frame: false,
+    fullscreenable: false,
     autoHideMenuBar: true,
-    title: 'Present — Output',
+    title: 'ProChurchCenter Present — Output',
     backgroundColor: '#000000',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -101,6 +139,46 @@ function createWindows(): void {
       contextIsolation: true
     }
   })
+
+  // Pin the output window's OS-level title so the renderer's <title> tag
+  // can't overwrite it. Necessary because desktopCapturer identifies
+  // windows by title, and if both windows end up with the same title
+  // after their HTML loads, the confidence monitor's screen-mirror ends
+  // up capturing the operator window (i.e. itself) — recursion city.
+  //
+  // Belt + suspenders: preventDefault on page-title-updated AND a forced
+  // setTitle on did-finish-load. The preventDefault was flaky across
+  // Electron versions on macOS historically, so we don't trust it alone.
+  // The did-finish-load handler also covers dev HMR reloads that can
+  // re-trigger document-title mutation independently of the event.
+  const OUTPUT_TITLE = 'ProChurchCenter Present — Output'
+  outputWindow.on('page-title-updated', (event) => {
+    event.preventDefault()
+  })
+  outputWindow.webContents.on('did-finish-load', () => {
+    if (!outputWindow.isDestroyed()) outputWindow.setTitle(OUTPUT_TITLE)
+  })
+
+  // Forward the output renderer's console messages into the main-
+  // process terminal (the one running `pnpm dev`). The output
+  // window is borderless and on a single-monitor dev setup its
+  // detached devtools are easy to lose track of, so piping logs
+  // back to the always-visible terminal makes debugging far less
+  // painful. Only enabled in dev — production builds keep the
+  // renderer console isolated.
+  if (is.dev) {
+    outputWindow.webContents.on(
+      'console-message',
+      (_event, level, message, line, sourceId) => {
+        // Chromium console levels: 0=verbose, 1=info, 2=warning, 3=error.
+        // Map to corresponding console method on main side.
+        const prefix = '[output-renderer]'
+        if (level >= 3) console.error(prefix, message, `(${sourceId}:${line})`)
+        else if (level === 2) console.warn(prefix, message)
+        else console.log(prefix, message)
+      }
+    )
+  }
 
   // Load windows — same bundle, different hash routes
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -117,6 +195,21 @@ function createWindows(): void {
   })
 
   outputWindow.on('ready-to-show', () => {
+    // Pick the best default display for the output window:
+    //   1. If there's a non-primary display attached (i.e. a projector
+    //      or external monitor is plugged in), use that — Ate Rose
+    //      plugs in the projector and expects the slides to land
+    //      there immediately, not on her laptop screen.
+    //   2. Otherwise (laptop only / dev), fall back to primary so
+    //      the window is at least visible and developers can iterate.
+    //
+    // The async settings load below will further override this if
+    // the user has explicitly picked a display in Settings.
+    const displays = screen.getAllDisplays()
+    const primary = screen.getPrimaryDisplay()
+    const defaultTarget =
+      displays.find((d) => d.id !== primary.id) ?? primary
+    outputWindow.setBounds(defaultTarget.workArea)
     outputWindow.show()
     // Open devtools on the output window in dev mode too — otherwise
     // errors in the renderer that runs the projector view (image loads,
@@ -142,23 +235,34 @@ function createWindows(): void {
   // a different display from Settings.
   void getSettings().then((settings) => {
     const savedId = settings.outputDisplayId
-    if (savedId == null) return
-    const target = screen.getAllDisplays().find((d) => d.id === savedId)
-    if (!target) return // saved display disconnected; stay on primary
-    // Same dance as ipc/output.ts setDisplay — exit fullscreen, move, re-enter.
-    const wasFullscreen = outputWindow.isFullScreen()
-    if (wasFullscreen) outputWindow.setFullScreen(false)
-    outputWindow.setBounds(target.workArea)
-    if (wasFullscreen) {
-      setTimeout(() => {
-        if (!outputWindow.isDestroyed()) outputWindow.setFullScreen(true)
-      }, 50)
+    if (savedId != null) {
+      const target = screen.getAllDisplays().find((d) => d.id === savedId)
+      if (target) {
+        // Borderless windowed approach: moving is a straight setBounds
+        // call. No fullscreen API to toggle.
+        outputWindow.setBounds(target.workArea)
+      }
+    }
+
+    // Restore stage monitor + lower thirds windows if the user had
+    // them enabled in their last session. Created lazily (i.e. on
+    // demand) so the app doesn't pay the cost of spawning two
+    // additional renderers for users who don't use these features.
+    if (settings.stageMonitorEnabled) {
+      createStageMonitorWindow(settings.stageMonitorDisplayId)
+    }
+    if (settings.lowerThirdsEnabled) {
+      createLowerThirdsWindow(
+        settings.lowerThirdsDisplayId,
+        settings.lowerThirdsChromaKey,
+        settings.lowerThirdsAlignment
+      )
     }
   })
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.sundaytask.present')
+  electronApp.setAppUserModelId('com.prochurchcenter.present')
 
   // Prepare persistent storage before anything else touches disk.
   ensureDirectories()
@@ -167,17 +271,27 @@ app.whenReady().then(async () => {
   // Register the present-media:// protocol handler. The renderer uses
   // URLs like `present-media://local/Users/kael/Downloads/logo.jpeg`.
   // We parse out the absolute path and stream the file back.
+  //
+  // CRITICAL: forward the request's headers (especially Range) to
+  // net.fetch so byte-range requests propagate to the underlying
+  // file fetch. Without this, Chromium's <video> element can't seek
+  // back to position 0 to loop, and `currentTime` writes silently
+  // fail because the response doesn't include Content-Range /
+  // Accept-Ranges headers. This was the root cause of "videos
+  // stop instead of looping" — videos played fine until the loop
+  // point, where the browser tried to seek and gave up.
   protocol.handle('present-media', (request) => {
     try {
       const url = new URL(request.url)
       // url.host is 'local', url.pathname is '/Users/kael/Downloads/logo.jpeg'
       // decodeURIComponent reverses the encodeURI the renderer applied.
       const absPath = decodeURIComponent(url.pathname)
-      // net.fetch on a file:// URL returns the file contents as a Response,
-      // which Electron then hands to the requesting <img>/<video>. Using
-      // pathToFileURL handles platform-specific encoding (Windows drive
-      // letters, etc) correctly.
-      return net.fetch(pathToFileURL(absPath).toString())
+      // Forward request headers so Range requests reach the file
+      // layer. pathToFileURL handles platform-specific encoding
+      // (Windows drive letters, etc) correctly.
+      return net.fetch(pathToFileURL(absPath).toString(), {
+        headers: request.headers
+      })
     } catch (err) {
       console.error('[present-media] failed to load', request.url, err)
       return new Response('Not Found', { status: 404 })

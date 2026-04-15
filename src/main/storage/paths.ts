@@ -43,6 +43,26 @@ export function getMediaDir(): string {
 }
 
 /**
+ * Custom font storage. Uploaded fonts are copied here by the
+ * dialog/upload flow so they have stable, persistent absolute paths
+ * (the user's original file might be on a removable drive or in
+ * Downloads they later clean up). Each file keeps its original name;
+ * the family name is derived once and stored in the index file.
+ */
+export function getFontsDir(): string {
+  return join(root(), 'fonts')
+}
+
+/**
+ * Index file mapping installed custom-font families to their on-disk
+ * filenames. Lives alongside the font files so the main process can
+ * enumerate without re-reading every TTF header on every list call.
+ */
+export function getFontsIndexPath(): string {
+  return join(getFontsDir(), 'index.json')
+}
+
+/**
  * Bible cache root — one subdirectory per translation, files keyed by
  * `{book}-{chapter}.json`. Translation/book metadata caches live next
  * to the per-chapter files in their respective translation dirs (or in
@@ -75,7 +95,8 @@ export function ensureDirectories(): void {
     getSetlistsDir(),
     getThemesDir(),
     getMediaDir(),
-    getBibleCacheDir()
+    getBibleCacheDir(),
+    getFontsDir()
   ]
   for (const dir of dirs) {
     if (!existsSync(dir)) {

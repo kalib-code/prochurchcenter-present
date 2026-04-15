@@ -34,12 +34,12 @@ import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { shortcutFromLabel, slideifySetlist } from '../lib/slideify'
 import { mergeThemeOverride } from '../lib/themeOverride'
-import { SlideRenderer } from '../components/SlideRenderer'
+import { OutputMirror } from '../components/OutputMirror'
 import { SlideCard } from '../components/SlideCard'
 import { KeyCheatSheet } from '../components/KeyCheatSheet'
 import { useKeyboard } from '../hooks/useKeyboard'
 import type { Song } from '@shared/types'
-import type { VideoControl } from '@shared/ipc-contract'
+import type { VideoControl, LowerThirdsContent } from '@shared/ipc-contract'
 
 export function ServiceMode(): JSX.Element {
   const { setlistId } = useParams<{ setlistId: string }>()
@@ -91,7 +91,8 @@ export function ServiceMode(): JSX.Element {
     const songsById = new Map<string, Song>()
     for (const s of songs) songsById.set(s.id, s)
     const items = slideifySetlist(setlist, songsById, {
-      maxLinesPerSlide: settings.maxLinesPerSlide
+      maxLinesPerSlide: settings.maxLinesPerSlide,
+      songTransitionSlide: settings.songTransitionSlide
     })
     start({
       setlistId: setlist.id,
@@ -290,21 +291,175 @@ function RunningView({
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [isVideoSlide, togglePause, toggleMute])
+
+  // ── Auto-advance on video end ──────────────────────────────────────
+  // The output window fires setVideoEnded the moment a non-looping
+  // video reaches its natural end. We listen here and advance the
+  // setlist — but only if the active slide is STILL that same video,
+  // since the operator may have manually navigated away in the
+  // milliseconds between the ended event and the IPC arriving.
+  //
+  // currentSlideRef bridges the long-lived subscription with the
+  // ever-changing currentSlide value: subscribe-on-mount means the
+  // listener closure would otherwise capture a stale slide reference.
+  const nextSlide = useServiceStore((s) => s.nextSlide)
+  const currentSlideRef = useRef(currentSlide)
+  useEffect(() => {
+    currentSlideRef.current = currentSlide
+  }, [currentSlide])
+  useEffect(() => {
+    const off = window.api.output.onVideoEnded((payload) => {
+      const active = currentSlideRef.current
+      if (active?.kind === 'video' && active.videoPath === payload.videoPath) {
+        nextSlide()
+      }
+    })
+    return off
+  }, [nextSlide])
+
+  // ── Lower thirds (auto-follow mode) ───────────────────────────────
+  // The lower thirds window AUTO-FOLLOWS the active setlist item:
+  //   - Song item → auto-shows with title + author from the song
+  //   - Non-song item → auto-hides
+  //
+  // The operator can still edit title/subtitle on the fly (typing
+  // updates the broadcast immediately) and can manually hide via
+  // the bottom-strip button. Per-item edits are intentionally
+  // ephemeral — the moment the operator advances to a new item the
+  // auto-follow re-asserts that item's defaults. This matches the
+  // ProPresenter / EasyWorship model: lower thirds are a function
+  // of the current item, not a separate piece of operator state.
+  const lowerThirdsEnabled = useSettingsStore(
+    (s) => s.settings?.lowerThirdsEnabled ?? false
+  )
+  // Theme fields read from settings. Bundled into every push so
+  // changes propagate to the chroma-key window without recreating
+  // the BrowserWindow. Tracked as separate selectors (one per field)
+  // rather than the whole settings object because Zustand's
+  // shallow-eq selector minimizes re-renders that way.
+  const ltFontSize = useSettingsStore((s) => s.settings?.lowerThirdsFontSize ?? 36)
+  const ltTextColor = useSettingsStore(
+    (s) => s.settings?.lowerThirdsTextColor ?? '#FFFFFF'
+  )
+  const ltBoxColor = useSettingsStore(
+    (s) => s.settings?.lowerThirdsBoxColor ?? '#0F121C'
+  )
+  const ltBoxOpacity = useSettingsStore(
+    (s) => s.settings?.lowerThirdsBoxOpacity ?? 92
+  )
+  const ltTextEffect = useSettingsStore(
+    (s) => s.settings?.lowerThirdsTextEffect ?? 'shadow'
+  )
+  const [lowerThirdsContent, setLowerThirdsContentState] =
+    useState<LowerThirdsContent>({
+      visible: false,
+      title: '',
+      subtitle: ''
+    })
+  // pushLowerThirds takes whatever the caller provides and stamps
+  // the current theme onto it. Callers don't need to know about
+  // theme — the helper handles it. This means typing in the bottom
+  // strip, auto-follow, and manual show/hide all carry the live
+  // theme automatically.
+  const pushLowerThirds = useCallback(
+    (next: LowerThirdsContent) => {
+      const withTheme: LowerThirdsContent = {
+        ...next,
+        theme: {
+          fontSize: ltFontSize,
+          textColor: ltTextColor,
+          boxColor: ltBoxColor,
+          boxOpacity: ltBoxOpacity,
+          textEffect: ltTextEffect
+        }
+      }
+      setLowerThirdsContentState(withTheme)
+      void window.api.output.setLowerThirdsContent(withTheme)
+    },
+    [ltFontSize, ltTextColor, ltBoxColor, ltBoxOpacity, ltTextEffect]
+  )
+  // Auto-follow effect — runs on every slide change. For song
+  // slides, the lower thirds shows the CURRENT LYRIC LINES being
+  // sung, with the song title + author as a small subtitle for
+  // broadcast attribution. This matches the standard church
+  // live-stream pattern: the camera frames the worship team, and
+  // the lower-third overlay shows what's being sung right now so
+  // remote viewers can sing along.
+  //
+  // For non-song items (Scripture, image, video, PDF, countdown),
+  // the lower thirds auto-hides — the operator can still type
+  // manual content and click Show if they want to overlay
+  // something on a non-song item.
+  //
+  // Deps include currentSlide (not just currentItem) so the
+  // broadcast updates on every arrow press, not just when the
+  // operator advances between items.
+  useEffect(() => {
+    if (!lowerThirdsEnabled) return
+    if (currentItem?.kind === 'song' && currentSlide?.kind === 'text') {
+      const lyrics = currentSlide.lines.join('\n').trim()
+      if (lyrics) {
+        // Lyrics-only mode: just the verse text, no song-title or
+        // author subtitle. The operator can still type a subtitle
+        // manually if they want one for a particular song.
+        pushLowerThirds({
+          visible: true,
+          title: lyrics,
+          subtitle: ''
+        })
+        return
+      }
+    }
+    // Everything else: hide. Includes non-song items, blank/empty
+    // song slides, and any slide kind we don't have a good
+    // auto-population strategy for.
+    pushLowerThirds({ visible: false, title: '', subtitle: '' })
+  }, [currentItem, currentSlide, lowerThirdsEnabled, pushLowerThirds])
+
+  // ── Live notes (operator-editable, broadcast to stage monitor) ────
+  // The notes shown on the stage monitor and in the operator's own
+  // confidence sidebar both come from this single piece of local
+  // state. It's seeded from currentItem.notes whenever the item
+  // changes, but the operator can then edit it freely during the
+  // service — per-service edits are ephemeral and don't write back
+  // to the song record. Useful for in-service announcements,
+  // last-minute reminders, sermon timing markers, etc.
+  const [liveNotes, setLiveNotes] = useState('')
+  useEffect(() => {
+    setLiveNotes(currentItem?.notes ?? '')
+  }, [currentItem])
+
+  // ── Stage monitor context broadcast ────────────────────────────────
+  // Send a fresh StageContext on every slide change OR live-notes
+  // change. The stage monitor (if enabled) renders its
+  // ProPresenter-style layout from this — current slide + next
+  // slide preview + slide progress + live notes. Broadcasting
+  // unconditionally is fine: the IPC handler in main no-ops if the
+  // stage monitor window doesn't exist, and the cost of one IPC
+  // message per keystroke is negligible.
+  useEffect(() => {
+    const slides = currentItem?.slides ?? []
+    const nextSlide =
+      state.slideIndex + 1 < slides.length
+        ? slides[state.slideIndex + 1]
+        : null
+    void window.api.output.setStageContext({
+      currentSlide: currentSlide ?? null,
+      nextSlide,
+      itemLabel: currentItem?.label ?? '',
+      slideIndex: state.slideIndex,
+      totalSlides: slides.length,
+      notes: liveNotes
+    })
+  }, [currentItem, currentSlide, state.slideIndex, liveNotes])
   // Pulled directly from the store rather than prop-drilled — the parent
-  // already ensures the theme is loaded, so by the time RunningView renders
-  // it's either in the store or briefly null (SlideRenderer handles null).
+  // baseTheme is still pulled because the slide grid cards below
+  // need it to render per-card preview themes. The confidence
+  // monitor itself no longer needs a merged theme — it's a pixel
+  // mirror of the output (see <OutputMirror /> below) so the
+  // projector's actual rendered pixels are what the operator sees,
+  // not an independent re-render.
   const baseTheme = useThemeStore((s) => s.theme)
-  // Merge the current item's override (if any) on top of the global
-  // theme so the confidence monitor is byte-for-byte identical to
-  // whatever the projector is showing right now. mergeThemeOverride
-  // filters null/undefined fields in the override so they inherit
-  // instead of clobbering — without this fix, a song with an override
-  // that has cleared its background image would force the global
-  // background to disappear during that song's slides.
-  const theme = useMemo(() => {
-    if (!baseTheme) return null
-    return mergeThemeOverride(baseTheme, currentItem?.themeOverride ?? null)
-  }, [baseTheme, currentItem])
 
   // Flatten every slide of every item into one grid feed. Section label
   // and shortcut are derived here because the SlidePayload type (shared
@@ -559,14 +714,16 @@ function RunningView({
               <span className="text-white/30">· {currentItem.label}</span>
             )}
           </div>
+          {/* The confidence monitor is a literal pixel mirror of
+              the projector via desktopCapturer (Option C). This
+              eliminates rendering drift between operator and
+              output for ALL slide types — text, scripture, image,
+              video, PDF — by capturing the actual output pixels
+              rather than rendering an independent copy. Same
+              approach we already used for video slides, just
+              hoisted up so it applies to every slide kind. */}
           <div className="aspect-video overflow-hidden rounded-md border border-white/10 bg-black">
-            <SlideRenderer
-              payload={currentSlide}
-              mode={state.displayMode}
-              theme={theme}
-              animate={false}
-              videoControl={videoControl}
-            />
+            <OutputMirror />
           </div>
           {currentSlide?.kind === 'text' && currentSlide.sectionLabel && (
             <div className="mt-1 text-xs text-white/50">
@@ -613,19 +770,102 @@ function RunningView({
             </div>
           )}
 
-          {/* Operator notes — only shown if the current item has any */}
-          {currentItem?.notes && (
-            <div className="mt-3 overflow-y-auto rounded-md border border-white/10 bg-white/5 p-3">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-white/40">
-                Notes
+          {/* Live notes — editable during service, broadcast to the
+              stage monitor. Always mounted so the operator can add
+              notes to items that didn't have any in the song record
+              (announcements, sermon timing, prayer cues). Edits are
+              ephemeral: switching items resets to the song's saved
+              notes. The stage monitor mirrors this in real time. */}
+          <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-white/10 bg-white/5">
+            <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
+                Notes (live to stage)
               </div>
-              <div className="whitespace-pre-wrap text-xs text-white/80">
-                {currentItem.notes}
-              </div>
+              {liveNotes !== (currentItem?.notes ?? '') && (
+                <button
+                  type="button"
+                  onClick={() => setLiveNotes(currentItem?.notes ?? '')}
+                  className="text-[10px] text-white/40 hover:text-white/70"
+                  title="Reset to the saved notes for this item"
+                >
+                  Reset
+                </button>
+              )}
             </div>
-          )}
+            <textarea
+              value={liveNotes}
+              onChange={(e) => setLiveNotes(e.target.value)}
+              placeholder="Type announcements, prayer cues, sermon notes…"
+              className="min-h-[6rem] flex-1 resize-none whitespace-pre-wrap bg-transparent p-3 text-xs leading-relaxed text-white/85 outline-none placeholder:text-white/30"
+            />
+          </div>
         </aside>
       </section>
+
+      {/* ── Lower thirds bottom strip ────────────────────────────────
+          Only mounted when the lower thirds chroma-key window is
+          enabled in Settings → Output. Auto-follow mode: songs
+          auto-populate and auto-show; non-songs auto-hide. The
+          operator can edit on the fly (typing pushes immediately)
+          and can manually hide via the toggle button. Per-item
+          edits are intentionally ephemeral — advancing to a new
+          item re-runs the auto-follow effect. */}
+      {lowerThirdsEnabled && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-neutral-900 px-4 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
+            Lower Thirds
+          </span>
+          <input
+            type="text"
+            value={lowerThirdsContent.title}
+            onChange={(e) =>
+              pushLowerThirds({ ...lowerThirdsContent, title: e.target.value })
+            }
+            placeholder="Title (auto-fills from songs)"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-black/40 px-2 py-1 text-xs outline-none placeholder:text-white/30 focus:border-brand"
+          />
+          <input
+            type="text"
+            value={lowerThirdsContent.subtitle}
+            onChange={(e) =>
+              pushLowerThirds({
+                ...lowerThirdsContent,
+                subtitle: e.target.value
+              })
+            }
+            placeholder="Subtitle (author, role, reference)"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-black/40 px-2 py-1 text-xs outline-none placeholder:text-white/30 focus:border-brand"
+          />
+          <button
+            type="button"
+            onClick={() =>
+              pushLowerThirds({
+                ...lowerThirdsContent,
+                visible: !lowerThirdsContent.visible
+              })
+            }
+            disabled={
+              !lowerThirdsContent.visible &&
+              lowerThirdsContent.title.trim().length === 0
+            }
+            className={`rounded px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+              lowerThirdsContent.visible
+                ? 'bg-destructive/20 text-destructive border border-destructive/40'
+                : 'bg-brand text-brand-foreground hover:bg-brand/90 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30'
+            }`}
+            title={
+              !lowerThirdsContent.visible &&
+              lowerThirdsContent.title.trim().length === 0
+                ? 'Type a title first or navigate to a song'
+                : lowerThirdsContent.visible
+                  ? 'Hide lower thirds'
+                  : 'Show lower thirds on the OBS feed'
+            }
+          >
+            {lowerThirdsContent.visible ? 'Hide' : 'Show'}
+          </button>
+        </div>
+      )}
 
       {state.showCheatSheet && <KeyCheatSheet onClose={toggleCheatSheet} />}
     </div>

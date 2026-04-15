@@ -230,6 +230,9 @@ function ItemBody({
         title: item.title || defaultDeckTitle(picked)
       })
     }
+    // `loop` defaults to true — undefined means "I haven't been
+    // configured" which we treat as the default (continuous loop).
+    const loop = item.loop ?? true
 
     return (
       <div className="flex flex-col gap-1.5">
@@ -256,10 +259,20 @@ function ItemBody({
           placeholder="Video title (e.g. Sermon Intro — Philippians)"
           className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
         />
-        <p className="text-[11px] text-muted-foreground/80">
-          Plays once with audio on the projector. The confidence monitor
-          shows it muted.
-        </p>
+        <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={loop}
+            onChange={(e) => onChange({ ...item, loop: e.target.checked })}
+            className="h-3.5 w-3.5 rounded border-border/60 bg-background"
+          />
+          <span>
+            Loop continuously
+            <span className="ml-1 text-muted-foreground/60">
+              (uncheck to auto-advance when the video finishes)
+            </span>
+          </span>
+        </label>
       </div>
     )
   }

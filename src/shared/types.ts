@@ -92,6 +92,17 @@ export type SetlistItem =
       videoPath: string
       /** Optional display name for the operator upcoming list */
       title?: string
+      /**
+       * Whether the video should restart automatically when it reaches
+       * the end. Defaults to `true` (loop). When `false`, the operator
+       * service-mode runner advances to the next setlist item the
+       * moment the video's `ended` event fires on the projector.
+       *
+       * Stored explicitly (rather than derived) so a user who has
+       * deliberately switched a particular video to "play once" keeps
+       * that choice across saves/loads.
+       */
+      loop?: boolean
     }
   /**
    * Deck — a PDF file whose pages become slides. The user exports their
@@ -204,6 +215,67 @@ export interface Settings {
    * 6 (dense, for small-text hymns). Reasonable clamp: 2..8.
    */
   maxLinesPerSlide: number
+  /**
+   * If true, every song item gets an empty "intro" slide prepended
+   * to its slide list. The intro slide shows the song's background
+   * (theme + override) with no lyric text — a visual transition
+   * beat between the previous item and the first verse. Defaults
+   * to true; can be disabled in Settings → Display.
+   */
+  songTransitionSlide: boolean
+
+  /**
+   * Stage monitor — a second projector window facing the speaker on
+   * stage. Mirrors the main output's slide content but without audio.
+   * Created on demand when this flag flips to true; destroyed when
+   * flipped back to false.
+   */
+  stageMonitorEnabled: boolean
+  /** null = first non-primary display, or primary if only one display. */
+  stageMonitorDisplayId: number | null
+
+  /**
+   * Lower thirds — a chroma-key window for OBS / live stream feeds.
+   * Operator types title + subtitle in the service-mode bottom strip
+   * and shows/hides them. The chroma key color (default bright green)
+   * is what OBS keys out to leave only the lower-third graphic
+   * visible in the broadcast.
+   */
+  lowerThirdsEnabled: boolean
+  lowerThirdsDisplayId: number | null
+  lowerThirdsChromaKey: string
+  /**
+   * Horizontal alignment of the lower thirds text content. Affects
+   * both the text alignment WITHIN the graphic and the position
+   * of the graphic within the strip:
+   *   - left:   graphic anchored to the left of the strip, text left-aligned
+   *   - center: graphic centered, text centered
+   *   - right:  graphic anchored to the right, text right-aligned
+   */
+  lowerThirdsAlignment: 'left' | 'center' | 'right'
+  /**
+   * Lower thirds visual theme. These fields are bundled into every
+   * LowerThirdsContent broadcast (rather than being URL params on
+   * the window) so changing them in Settings updates the live OBS
+   * feed instantly without re-creating the window.
+   */
+  lowerThirdsFontSize: number // px, e.g. 36
+  lowerThirdsTextColor: string // hex, e.g. '#FFFFFF'
+  lowerThirdsBoxColor: string // hex, e.g. '#0F121C' (graphic box background)
+  /**
+   * Box opacity 0–100. 0 = the box behind the text is fully
+   * transparent (text floats directly on chroma — useful when the
+   * user wants a "credits roll" style with no background plate).
+   * 100 = solid color. Default 92 matches the original look.
+   */
+  lowerThirdsBoxOpacity: number
+  /**
+   * Optional text effect to make lyrics readable against any background:
+   *   - none:    plain text, no decoration
+   *   - shadow:  drop shadow behind the text (most legible)
+   *   - outline: dark stroke around each character (highest contrast)
+   */
+  lowerThirdsTextEffect: 'none' | 'shadow' | 'outline'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

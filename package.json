@@ -1,10 +1,10 @@
 {
-  "name": "sundaytask-presenter",
+  "name": "prochurchcenter-present",
   "version": "0.0.1",
-  "description": "Present — a PH-first church presenter from Sunday Task",
+  "description": "ProChurchCenter Present — a PH-first church presenter from Sunday Task",
   "main": "./out/main/index.js",
-  "author": "Sunday Task",
-  "homepage": "https://sundaytask.com",
+  "author": "ProChurchCenter",
+  "homepage": "https://present.prochurchcenter.com",
   "license": "MIT",
   "scripts": {
     "format": "prettier --write .",

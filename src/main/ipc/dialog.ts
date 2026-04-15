@@ -34,7 +34,8 @@ const FILTERS: Record<PickFileKind, Electron.FileFilter[]> = {
       ]
     }
   ],
-  pdf: [{ name: 'PDF decks', extensions: ['pdf'] }]
+  pdf: [{ name: 'PDF decks', extensions: ['pdf'] }],
+  font: [{ name: 'Font files', extensions: ['ttf', 'otf', 'woff', 'woff2'] }]
 }
 
 function dialogTitle(kind: PickFileKind): string {
@@ -45,6 +46,8 @@ function dialogTitle(kind: PickFileKind): string {
       return 'Choose a PDF deck'
     case 'image':
       return 'Choose an image'
+    case 'font':
+      return 'Choose a font file'
     case 'media':
     default:
       return 'Choose a file'

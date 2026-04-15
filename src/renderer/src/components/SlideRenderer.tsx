@@ -177,7 +177,17 @@ export function SlideRenderer({
           the browser caches the old stream and ignores src updates.
           Suppressed for full-bleed media slides (PDF, foreground video)
           so they render on a clean black background instead of layered
-          on top of an ambient background video. */}
+          on top of an ambient background video.
+
+          The manual `onEnded` handler is a defensive fallback for when
+          the HTML `loop` attribute fails to restart playback. Per the
+          HTML spec, `loop` should suppress the `ended` event entirely;
+          when `ended` DOES fire, it means native loop didn't kick in
+          (typically because the underlying source — our present-media://
+          protocol via net.fetch — didn't expose byte-range seeking
+          cleanly enough for Chromium to seek back to position 0).
+          Manually setting currentTime + play() is a reliable rewind
+          that costs nothing when native loop is working. */}
       {!isBlackout && !isFullBleedMedia && t.backgroundVideoPath && (
         <video
           key={t.backgroundVideoPath}
@@ -186,6 +196,41 @@ export function SlideRenderer({
           loop
           muted
           playsInline
+          onLoadedMetadata={(e) => {
+            console.log(
+              '[bg-video] loadedmetadata',
+              t.backgroundVideoPath,
+              'duration=',
+              e.currentTarget.duration
+            )
+          }}
+          onPlay={() => console.log('[bg-video] play', t.backgroundVideoPath)}
+          onError={(e) => {
+            const v = e.currentTarget
+            console.error(
+              '[bg-video] error',
+              v.error?.code,
+              v.error?.message,
+              t.backgroundVideoPath
+            )
+          }}
+          onTimeUpdate={(e) => {
+            // Pre-emptive rewind: when we're within 500ms of the
+            // end, seek back to 0 unconditionally. This sidesteps
+            // both the unreliable native `loop` attribute and the
+            // unreliable `ended` event by simply never reaching
+            // the actual end frame. The rewind costs us 500ms of
+            // ambient video per loop, which is imperceptible for
+            // background motion.
+            const v = e.currentTarget
+            if (
+              Number.isFinite(v.duration) &&
+              v.currentTime >= v.duration - 0.5
+            ) {
+              v.currentTime = 0
+              if (v.paused) void v.play().catch(() => {})
+            }
+          }}
           className="pointer-events-none absolute inset-0 h-full w-full object-cover"
         />
       )}
@@ -233,6 +278,7 @@ export function SlideRenderer({
             videoPath={payload.videoPath}
             audio={audio}
             control={videoControl}
+            loop={payload.loop ?? true}
           />
         </div>
       )}
@@ -582,7 +628,7 @@ function isLightColor(hex: string): boolean {
 /**
  * LogoView — the standby screen shown when the 'L' key is pressed.
  * Shows the theme's logoPath image if configured, otherwise falls back
- * to the 'PRESENT / Sunday Task' text placeholder.
+ * to the 'PRESENT / ProChurchCenter' text placeholder.
  *
  * Sizing: `h-full w-full` on the outer img + `object-contain` gives the
  * largest-possible render while preserving aspect ratio and centering
@@ -822,43 +868,194 @@ function PdfPageView({
  *     regardless of control.muted.
  *   - audio=true (output window): element is muted iff control.muted
  *     is true. Default (no control passed) is unmuted.
+ *
+ * Cross-window position sync:
+ *   Two independent <video> elements playing the same source drift
+ *   over time even when started simultaneously — separate decoders,
+ *   separate clocks. We use FreeShow's pattern: the OUTPUT side
+ *   broadcasts its currentTime via IPC every ~250ms (the browser's
+ *   native timeupdate rate), and the OPERATOR side snaps its local
+ *   video when drift exceeds 0.5 seconds. At thumbnail size 500ms is
+ *   invisible to the eye, but constant per-frame snapping would
+ *   cause visible micro-stutters — the dead-band is what makes it
+ *   feel smooth.
+ *
+ *   Dispatch is by the existing `audio` prop:
+ *     - audio=true  → output → broadcast timeupdate events
+ *     - audio=false → operator → subscribe and snap
  */
-function VideoSlide({
-  videoPath,
-  audio,
-  control
-}: {
+function VideoSlide(props: {
   videoPath: string
   audio: boolean
   control?: VideoControl
+  loop: boolean
+}): JSX.Element {
+  // Two completely different rendering strategies depending on which
+  // window we're in, so we split into sub-components instead of
+  // branching inside a single useEffect tangle:
+  //
+  //   output   → decodes the video file with audio, honors the
+  //              operator's pause/mute controls (this is what the
+  //              congregation sees on the projector)
+  //   operator → mirrors the output window's actual pixels via
+  //              desktopCapturer + getUserMedia (Option C). Zero clock
+  //              drift because there's only one decoder anywhere in
+  //              the app, and the confidence preview is literally the
+  //              projector's pixel output on a tiny delay
+  return props.audio ? (
+    <VideoSlideOutput
+      videoPath={props.videoPath}
+      control={props.control}
+      loop={props.loop}
+    />
+  ) : (
+    <VideoSlideOperator />
+  )
+}
+
+/**
+ * Output-window video: plays the file with audio, honors VideoControl,
+ * and reports natural end-of-stream so the operator can auto-advance
+ * non-looping videos.
+ */
+function VideoSlideOutput({
+  videoPath,
+  control,
+  loop
+}: {
+  videoPath: string
+  control?: VideoControl
+  loop: boolean
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const paused = control?.paused ?? false
-  // Only the output window (audio=true) honors the user's mute toggle.
-  // Confidence monitor stays muted always so the operator doesn't hear
-  // two overlapping audio streams.
-  const muted = !audio || !!control?.muted
+  const muted = !!control?.muted
+  // Decoder error state — set when the <video> fires error event
+  // with MEDIA_ERR_DECODE or MEDIA_ERR_SRC_NOT_SUPPORTED. Surfaces
+  // an inline overlay so the volunteer sees a real error message
+  // instead of a frozen first frame, with concrete next steps
+  // (re-encode the video to browser-compatible H.264 8-bit).
+  const [decodeError, setDecodeError] = useState<string | null>(null)
+  // Reset error state whenever the videoPath changes — a new video
+  // gets a fresh chance to play before we pessimistically assume
+  // it's broken too.
+  useEffect(() => {
+    setDecodeError(null)
+  }, [videoPath])
 
-  // Apply pause state. Play()'s promise can reject if the element was
-  // interrupted during load — we swallow that because it's not a real
-  // error, just a race.
   useEffect(() => {
     const v = ref.current
     if (!v) return
-    if (paused) {
-      v.pause()
-    } else {
-      v.play().catch(() => {})
-    }
+    if (paused) v.pause()
+    else v.play().catch(() => {})
   }, [paused])
 
-  // Apply mute state. Setting .muted is side-effect-only — no promise
-  // to handle.
   useEffect(() => {
     const v = ref.current
     if (!v) return
     v.muted = muted
   }, [muted])
+
+  // Loop / advance via `timeupdate` instead of `ended`. The HTML
+  // `ended` event is unreliable on streamed sources (our
+  // present-media:// protocol via net.fetch sometimes doesn't
+  // expose byte-range seeks cleanly enough for Chromium to fire
+  // ended OR to natively loop). Watching `timeupdate` and acting
+  // PRE-EMPTIVELY 0.5s before the actual end sidesteps the entire
+  // broken "ended" path: we never reach the final frame, so we
+  // never get stuck on it.
+  //
+  //   loop = true  → seek back to 0 when within 500ms of the end
+  //   loop = false → notify operator (auto-advance) at the same point
+  //
+  // The `nearEndFired` flag prevents firing multiple times within
+  // a single cycle (timeupdate fires ~4Hz so without it we'd
+  // re-trigger 1–2x per cycle).
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    console.log(
+      '[fg-video] mounted',
+      videoPath,
+      'loop=',
+      loop,
+      'duration=',
+      v.duration
+    )
+    let nearEndFired = false
+    const handleTimeUpdate = (): void => {
+      if (!v.duration || !Number.isFinite(v.duration)) return
+      const nearEnd = v.currentTime >= v.duration - 0.5
+      if (nearEnd && !nearEndFired) {
+        nearEndFired = true
+        if (loop) {
+          console.log('[fg-video] near end, rewinding (loop=true)')
+          v.currentTime = 0
+          // Some Electron versions need an explicit play() after
+          // a seek when the element was mid-playback near end.
+          if (v.paused) void v.play().catch(() => {})
+        } else {
+          console.log('[fg-video] near end, notifying operator (loop=false)')
+          void window.api.output.setVideoEnded({ videoPath })
+        }
+      } else if (!nearEnd && nearEndFired) {
+        // Reset the flag once playback has clearly moved away
+        // from the end (i.e., we successfully looped back to ~0).
+        nearEndFired = false
+      }
+    }
+    const handleError = (): void => {
+      const err = v.error
+      console.error('[fg-video] error', err?.code, err?.message, videoPath)
+      // Map the error code to a human-readable message. The
+      // important distinction for volunteers is "the file is
+      // broken" (decode/source) vs "something else went wrong":
+      //   1 MEDIA_ERR_ABORTED         — user abort, transient
+      //   2 MEDIA_ERR_NETWORK         — network/protocol failure
+      //   3 MEDIA_ERR_DECODE          — codec/pixel format unsupported
+      //   4 MEDIA_ERR_SRC_NOT_SUPPORTED — container/codec not recognized
+      const code = err?.code ?? 0
+      if (code === 3 || code === 4) {
+        setDecodeError(
+          'Video format not supported by the player. Re-export the file as H.264 8-bit (yuv420p) — most motion-graphic packs use formats this player can\'t decode. HandBrake with the "Fast 1080p30" preset produces compatible files.'
+        )
+      } else if (code === 2) {
+        setDecodeError(
+          'Could not load the video file. Check that it still exists at the original location and that the file isn\'t corrupted.'
+        )
+      } else if (code !== 0) {
+        setDecodeError(
+          `Video playback failed (error code ${code}). Try re-encoding the file to H.264 8-bit.`
+        )
+      }
+    }
+    v.addEventListener('timeupdate', handleTimeUpdate)
+    v.addEventListener('error', handleError)
+    return () => {
+      v.removeEventListener('timeupdate', handleTimeUpdate)
+      v.removeEventListener('error', handleError)
+    }
+  }, [loop, videoPath])
+
+  // Decode failure overlay — shown INSTEAD of the <video> element
+  // when the decoder rejected the file. We keep the overlay
+  // bordered + dark so it reads as a clear "this is broken"
+  // signal rather than blending into a slide background. The
+  // operator typically sees this on the confidence monitor first
+  // (because the projector is full-screen black) and can swap the
+  // file or re-encode it without disrupting the service.
+  if (decodeError) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-black">
+        <div className="max-w-2xl rounded-md border border-red-500/40 bg-red-950/40 p-6 text-center text-sm text-red-100">
+          <div className="mb-2 text-base font-semibold">
+            Video can&apos;t be played
+          </div>
+          <p className="leading-relaxed">{decodeError}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <video
@@ -867,7 +1064,165 @@ function VideoSlide({
       src={fileUrl(videoPath)}
       autoPlay
       playsInline
+      loop={loop}
       muted={muted}
+      controls={false}
+      className="h-full w-full object-contain"
+    />
+  )
+}
+
+/**
+ * Operator-window confidence preview: mirrors the output window's
+ * pixels via `desktopCapturer` + `navigator.mediaDevices.getUserMedia`
+ * with a `chromeMediaSource: 'desktop'` constraint. Because only one
+ * decoder exists (on the output side), there is literally nothing to
+ * drift — the operator sees exactly what the projector is showing,
+ * frame for frame, at the projector's real framerate.
+ *
+ * Failure handling: if the capture source can't be resolved (output
+ * window not yet registered with the OS compositor) or if getUserMedia
+ * throws (macOS screen-recording permission denied), we surface a short
+ * inline message telling the operator what to do. We don't fall back
+ * to independent file playback because the whole point of Option C is
+ * to eliminate that failure mode — a silent fallback would hide the
+ * permission issue and put us right back in the drift problem.
+ *
+ * Note: intentionally takes NO props. This is a pure mirror of whatever
+ * the output window is rendering, so it doesn't care about the specific
+ * videoPath, pause state, or mute state — all of those are already
+ * baked into the captured pixels.
+ */
+function VideoSlideOperator(): JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let stream: MediaStream | null = null
+
+    const start = async (): Promise<void> => {
+      try {
+        const sourceId = await window.api.output.getCaptureSourceId()
+        console.log('[VideoSlideOperator] sourceId', sourceId)
+        if (cancelled) return
+        if (!sourceId) {
+          setError('Output window not available for mirroring.')
+          return
+        }
+
+        // Electron extends MediaTrackConstraints with a non-standard
+        // `mandatory` object for desktop capture. TypeScript's lib.dom
+        // doesn't know about these, hence the cast through `unknown`.
+        // Including explicit min AND max dimensions because some
+        // Electron versions produce black frames if only max is set
+        // (the capture source gets the default 0-pixel min and the
+        // pipeline decides "nothing matches, return empty").
+        const constraints = {
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              minWidth: 640,
+              maxWidth: 1920,
+              minHeight: 360,
+              maxHeight: 1080
+            }
+          }
+        } as unknown as MediaStreamConstraints
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints)
+        console.log(
+          '[VideoSlideOperator] stream acquired',
+          'tracks=',
+          stream.getTracks().map((t) => ({
+            kind: t.kind,
+            label: t.label,
+            readyState: t.readyState,
+            enabled: t.enabled,
+            muted: t.muted,
+            settings: t.getSettings()
+          }))
+        )
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+
+        const v = ref.current
+        if (!v) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+
+        v.srcObject = stream
+        v.muted = true
+        v.play().catch((e) => console.warn('[VideoSlideOperator] play() rejected', e))
+
+        // Give the pipeline ~600ms to produce a frame, then check if
+        // the video element is actually receiving non-zero dimensions.
+        // If videoWidth is still 0, the capture is likely permission-
+        // denied in silent-failure mode — surface it as an explicit
+        // error instead of leaving the operator staring at black.
+        setTimeout(() => {
+          if (cancelled) return
+          const local = ref.current
+          if (!local) return
+          console.log(
+            '[VideoSlideOperator] post-play check',
+            'videoWidth=',
+            local.videoWidth,
+            'videoHeight=',
+            local.videoHeight,
+            'readyState=',
+            local.readyState
+          )
+          if (local.videoWidth === 0 && local.videoHeight === 0) {
+            setError(
+              'The output window capture returned no frames — most likely Screen Recording permission is missing. Grant it in System Settings → Privacy & Security → Screen Recording, then fully quit and relaunch ProChurchCenter Present.'
+            )
+          }
+        }, 600)
+
+        setError(null)
+      } catch (err) {
+        if (cancelled) return
+        console.error('[VideoSlideOperator] capture failed', err)
+        const msg = err instanceof Error ? err.message : String(err)
+        setError(
+          /permission|denied|notallowed/i.test(msg)
+            ? 'Screen recording permission is required for the video preview. Grant it in System Settings → Privacy & Security → Screen Recording, then restart ProChurchCenter Present.'
+            : 'Unable to mirror the output window for the video preview.'
+        )
+      }
+    }
+
+    void start()
+
+    return () => {
+      cancelled = true
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop())
+      }
+      const v = ref.current
+      if (v) v.srcObject = null
+    }
+  }, [])
+
+  if (error) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-black p-6 text-center text-sm text-white/70">
+        {error}
+      </div>
+    )
+  }
+
+  return (
+    <video
+      ref={ref}
+      playsInline
+      muted
       controls={false}
       className="h-full w-full object-contain"
     />

@@ -47,6 +47,15 @@ export interface RenderableItem {
    * for songs that don't have an override set.
    */
   themeOverride?: ThemeOverride | null
+  /**
+   * Pre-computed lower-thirds default text for this item. Populated
+   * from the source record at slideify time so the operator's
+   * "Auto from current item" button doesn't have to re-walk the
+   * library store. Currently only set for songs (title + author);
+   * other item kinds leave this undefined and the operator types
+   * lower-thirds text manually.
+   */
+  lowerThirdsDefault?: { title: string; subtitle: string }
 }
 
 export interface SlideifyOptions {
@@ -61,6 +70,17 @@ export interface SlideifyOptions {
    * can't accidentally pass 0 or a negative.
    */
   maxLinesPerSlide?: number
+  /**
+   * Whether to insert an empty "intro" slide as the first slide of
+   * every song item. The intro slide shows the song's background
+   * (theme + per-song override) with no lyric text — giving the
+   * congregation a moment to register the visual change before the
+   * first verse appears, instead of jumping straight from the
+   * previous item's content into a wall of lyrics.
+   *
+   * Default true. Disable globally via Settings → Display.
+   */
+  songTransitionSlide?: boolean
 }
 
 /**
@@ -74,11 +94,12 @@ export function slideifySetlist(
   options: SlideifyOptions = {}
 ): RenderableItem[] {
   const maxLines = clampMaxLines(options.maxLinesPerSlide)
+  const transitionSlide = options.songTransitionSlide ?? true
 
   const out: RenderableItem[] = []
 
   for (const item of setlist.items) {
-    const rendered = slideifyItem(item, songsById, maxLines)
+    const rendered = slideifyItem(item, songsById, maxLines, transitionSlide)
     if (rendered && rendered.slides.length > 0) {
       out.push(rendered)
     }
@@ -123,12 +144,27 @@ function clampMaxLines(value: number | undefined): number {
 function slideifyItem(
   item: SetlistItem,
   songsById: Map<string, Song>,
-  maxLines: number
+  maxLines: number,
+  transitionSlide: boolean
 ): RenderableItem | null {
   if (item.kind === 'song') {
     const song = songsById.get(item.songId)
     if (!song) return null
     const slides: SlidePayload[] = []
+    // Optional intro / transition slide: empty lyrics on the song's
+    // background. Lets the operator move from the previous item
+    // (image, video, scripture) into the song's visual context for
+    // a beat before the first verse appears. The empty `lines` array
+    // means SlideRenderer paints just the background — the lower
+    // thirds auto-follow also stays hidden because empty lyrics
+    // string fails its truthiness check.
+    if (transitionSlide) {
+      slides.push({
+        kind: 'text',
+        lines: [],
+        sectionLabel: 'Intro'
+      })
+    }
     for (const section of song.sections) {
       for (const slide of section.slides) {
         slides.push({
@@ -144,7 +180,11 @@ function slideifyItem(
       label: song.title,
       slides: enforceMaxLines(slides, maxLines),
       notes: song.notes || undefined,
-      themeOverride: song.themeOverride ?? null
+      themeOverride: song.themeOverride ?? null,
+      lowerThirdsDefault: {
+        title: song.title,
+        subtitle: song.author?.trim() ?? ''
+      }
     }
   }
 
@@ -206,6 +246,11 @@ function slideifyItem(
 
   if (item.kind === 'video') {
     if (!item.videoPath) return null
+    // `loop` defaults to true (continuous playback). Volunteers usually
+    // want loops for worship visuals and ambient backgrounds; the
+    // explicit-false case is for sermon bumpers and fixed-length
+    // transition videos that should auto-advance the setlist.
+    const loop = item.loop ?? true
     return {
       id: item.id,
       kind: 'video',
@@ -214,7 +259,8 @@ function slideifyItem(
         {
           kind: 'video',
           videoPath: item.videoPath,
-          title: item.title
+          title: item.title,
+          loop
         }
       ]
     }

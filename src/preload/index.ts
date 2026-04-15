@@ -12,7 +12,10 @@ import {
   type SlidePayload,
   type OutputMode,
   type PickFileKind,
-  type VideoControl
+  type VideoControl,
+  type VideoTimeUpdate,
+  type LowerThirdsContent,
+  type StageContext
 } from '@shared/ipc-contract'
 import type { Theme, ThemeOverride } from '@shared/types'
 
@@ -62,6 +65,12 @@ const api: PresentApi = {
     pickFile: (kind: PickFileKind) =>
       ipcRenderer.invoke(CHANNELS.dialog.pickFile, kind)
   },
+  fonts: {
+    list: () => ipcRenderer.invoke(CHANNELS.fonts.list),
+    upload: () => ipcRenderer.invoke(CHANNELS.fonts.upload),
+    delete: (family: string) =>
+      ipcRenderer.invoke(CHANNELS.fonts.delete, family)
+  },
   bible: {
     listTranslations: () => ipcRenderer.invoke(CHANNELS.bible.listTranslations),
     listBooks: (translationId: string) =>
@@ -81,9 +90,26 @@ const api: PresentApi = {
       ipcRenderer.invoke(CHANNELS.output.setItemThemeOverride, override),
     setVideoControl: (control: VideoControl) =>
       ipcRenderer.invoke(CHANNELS.output.setVideoControl, control),
+    setVideoTimeUpdate: (update: VideoTimeUpdate) =>
+      ipcRenderer.invoke(CHANNELS.output.setVideoTimeUpdate, update),
+    setVideoEnded: (payload: { videoPath: string }) =>
+      ipcRenderer.invoke(CHANNELS.output.setVideoEnded, payload),
+    getCaptureSourceId: () => ipcRenderer.invoke(CHANNELS.output.getCaptureSourceId),
     listDisplays: () => ipcRenderer.invoke(CHANNELS.output.listDisplays),
     setDisplay: (displayId: number | null) =>
       ipcRenderer.invoke(CHANNELS.output.setDisplay, displayId),
+    setStageMonitorEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke(CHANNELS.output.setStageMonitorEnabled, enabled),
+    setStageMonitorDisplay: (displayId: number | null) =>
+      ipcRenderer.invoke(CHANNELS.output.setStageMonitorDisplay, displayId),
+    setLowerThirdsEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke(CHANNELS.output.setLowerThirdsEnabled, enabled),
+    setLowerThirdsDisplay: (displayId: number | null) =>
+      ipcRenderer.invoke(CHANNELS.output.setLowerThirdsDisplay, displayId),
+    setLowerThirdsContent: (content: LowerThirdsContent) =>
+      ipcRenderer.invoke(CHANNELS.output.setLowerThirdsContent, content),
+    setStageContext: (context: StageContext) =>
+      ipcRenderer.invoke(CHANNELS.output.setStageContext, context),
 
     // Subscription helpers — used by the OUTPUT renderer only. Return
     // an unsubscribe function so React effects can clean up naturally.
@@ -118,6 +144,49 @@ const api: PresentApi = {
       ipcRenderer.on(CHANNELS.output.eventVideoControl, listener)
       return () =>
         ipcRenderer.removeListener(CHANNELS.output.eventVideoControl, listener)
+    },
+    onVideoTimeUpdate: (
+      callback: (update: VideoTimeUpdate) => void
+    ): (() => void) => {
+      const listener = (_: IpcRendererEvent, update: VideoTimeUpdate): void =>
+        callback(update)
+      ipcRenderer.on(CHANNELS.output.eventVideoTimeUpdate, listener)
+      return () =>
+        ipcRenderer.removeListener(CHANNELS.output.eventVideoTimeUpdate, listener)
+    },
+    onVideoEnded: (
+      callback: (payload: { videoPath: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _: IpcRendererEvent,
+        payload: { videoPath: string }
+      ): void => callback(payload)
+      ipcRenderer.on(CHANNELS.output.eventVideoEnded, listener)
+      return () =>
+        ipcRenderer.removeListener(CHANNELS.output.eventVideoEnded, listener)
+    },
+    onLowerThirdsContent: (
+      callback: (content: LowerThirdsContent) => void
+    ): (() => void) => {
+      const listener = (
+        _: IpcRendererEvent,
+        content: LowerThirdsContent
+      ): void => callback(content)
+      ipcRenderer.on(CHANNELS.output.eventLowerThirdsContent, listener)
+      return () =>
+        ipcRenderer.removeListener(
+          CHANNELS.output.eventLowerThirdsContent,
+          listener
+        )
+    },
+    onStageContext: (
+      callback: (context: StageContext) => void
+    ): (() => void) => {
+      const listener = (_: IpcRendererEvent, context: StageContext): void =>
+        callback(context)
+      ipcRenderer.on(CHANNELS.output.eventStageContext, listener)
+      return () =>
+        ipcRenderer.removeListener(CHANNELS.output.eventStageContext, listener)
     }
   }
 }

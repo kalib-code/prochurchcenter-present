@@ -1,6 +1,6 @@
-appId: com.sundaytask.present
-productName: Present
-copyright: © 2026 Sunday Task
+appId: com.prochurchcenter.present
+productName: ProChurchCenter Present
+copyright: © 2026 ProChurchCenter
 directories:
   buildResources: build
 files:
@@ -22,7 +22,7 @@ asarUnpack:
 # adds friction. Cert purchase + CI secret setup is documented in
 # RELEASING.md.
 win:
-  executableName: Present
+  executableName: ProChurchCenter Present
   icon: build/icon.png
   target:
     - target: nsis
@@ -67,7 +67,7 @@ dmg:
 # ── Linux ───────────────────────────────────────────────────────────
 linux:
   icon: build/icon.png
-  maintainer: sundaytask.com
+  maintainer: prochurchcenter.com
   category: Office
   target:
     - AppImage

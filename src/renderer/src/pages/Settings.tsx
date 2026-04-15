@@ -169,6 +169,27 @@ export function Settings(): JSX.Element {
                     />
                   </Row>
                 </Card>
+
+                <Card className="p-4">
+                  <Row
+                    label="Song intro slide"
+                    hint="Adds an empty intro slide before each song's first verse so the background can transition in before lyrics appear."
+                  >
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={settings.songTransitionSlide}
+                        onChange={(e) => {
+                          void updateSettings({
+                            songTransitionSlide: e.target.checked
+                          })
+                        }}
+                        className="h-4 w-4 rounded border-border/60 bg-background"
+                      />
+                      <span>Insert intro slide for each song</span>
+                    </label>
+                  </Row>
+                </Card>
               </div>
             )}
 
@@ -266,6 +287,230 @@ function OutputDisplaySection(): JSX.Element | null {
         </Row>
       </Card>
 
+      {/* Stage monitor — second projector facing the speaker */}
+      <Card className="p-4 space-y-3">
+        <Row
+          label="Stage monitor"
+          hint="A second projector facing the speaker on stage. Mirrors the main output, no audio."
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.stageMonitorEnabled}
+              onChange={async (e) => {
+                const enabled = e.target.checked
+                await update({ stageMonitorEnabled: enabled })
+                await window.api.output.setStageMonitorEnabled(enabled)
+              }}
+              className="h-4 w-4 rounded border-border/60 bg-background"
+            />
+            <span>Enable stage monitor window</span>
+          </label>
+        </Row>
+        {settings.stageMonitorEnabled && (
+          <Row label="Stage display" hint="Which monitor the stage view appears on.">
+            <select
+              value={settings.stageMonitorDisplayId ?? ''}
+              onChange={async (e) => {
+                const raw = e.target.value
+                const id = raw === '' ? null : Number(raw)
+                await update({ stageMonitorDisplayId: id })
+                await window.api.output.setStageMonitorDisplay(id)
+              }}
+              className="h-9 w-56 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+            >
+              <option value="">Auto (next display)</option>
+              {displays.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+        )}
+      </Card>
+
+      {/* Lower thirds — chroma key window for OBS feeds */}
+      <Card className="p-4 space-y-3">
+        <Row
+          label="Lower thirds"
+          hint="A chroma-key window for OBS / live stream feeds. Operator types content in the service-mode bottom strip."
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.lowerThirdsEnabled}
+              onChange={async (e) => {
+                const enabled = e.target.checked
+                await update({ lowerThirdsEnabled: enabled })
+                await window.api.output.setLowerThirdsEnabled(enabled)
+              }}
+              className="h-4 w-4 rounded border-border/60 bg-background"
+            />
+            <span>Enable lower thirds window</span>
+          </label>
+        </Row>
+        {settings.lowerThirdsEnabled && (
+          <>
+            <Row label="Display" hint="Which monitor the chroma window appears on.">
+              <select
+                value={settings.lowerThirdsDisplayId ?? ''}
+                onChange={async (e) => {
+                  const raw = e.target.value
+                  const id = raw === '' ? null : Number(raw)
+                  await update({ lowerThirdsDisplayId: id })
+                  await window.api.output.setLowerThirdsDisplay(id)
+                }}
+                className="h-9 w-56 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+              >
+                <option value="">Auto (next display)</option>
+                {displays.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </Row>
+            <Row
+              label="Chroma key color"
+              hint="OBS keys this color out of the broadcast. Bright #00FF00 is the standard."
+            >
+              <input
+                type="color"
+                value={settings.lowerThirdsChromaKey}
+                onChange={async (e) => {
+                  await update({ lowerThirdsChromaKey: e.target.value })
+                  // Note: changing the key requires re-creating the
+                  // window because the BrowserWindow backgroundColor
+                  // is set at construction. Toggle off + on:
+                  if (settings.lowerThirdsEnabled) {
+                    await window.api.output.setLowerThirdsEnabled(false)
+                    await window.api.output.setLowerThirdsEnabled(true)
+                  }
+                }}
+                className="h-9 w-16 cursor-pointer rounded border border-border/60 bg-background"
+              />
+            </Row>
+            <Row
+              label="Text alignment"
+              hint="Where the lyric graphic sits on the strip and how its text wraps."
+            >
+              <select
+                value={settings.lowerThirdsAlignment}
+                onChange={async (e) => {
+                  const align = e.target.value as 'left' | 'center' | 'right'
+                  await update({ lowerThirdsAlignment: align })
+                  // Same as chroma — the URL param is set at
+                  // window construction so we re-create the window.
+                  if (settings.lowerThirdsEnabled) {
+                    await window.api.output.setLowerThirdsEnabled(false)
+                    await window.api.output.setLowerThirdsEnabled(true)
+                  }
+                }}
+                className="h-9 w-32 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </Row>
+            {/* Theme fields below are bundled into the broadcast
+                payload (not URL params), so changes propagate
+                instantly — no window re-creation needed. */}
+            <Row
+              label="Font size"
+              hint="Pixel size of the lyric text in the lower third graphic."
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={20}
+                  max={72}
+                  step={2}
+                  value={settings.lowerThirdsFontSize}
+                  onChange={(e) => {
+                    void update({
+                      lowerThirdsFontSize: Number(e.target.value)
+                    })
+                  }}
+                  className="flex-1"
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+                  {settings.lowerThirdsFontSize}px
+                </span>
+              </div>
+            </Row>
+            <Row label="Text color">
+              <input
+                type="color"
+                value={settings.lowerThirdsTextColor}
+                onChange={(e) => {
+                  void update({ lowerThirdsTextColor: e.target.value })
+                }}
+                className="h-9 w-16 cursor-pointer rounded border border-border/60 bg-background"
+              />
+            </Row>
+            <Row
+              label="Box color"
+              hint="Background color of the graphic box behind the text."
+            >
+              <input
+                type="color"
+                value={settings.lowerThirdsBoxColor}
+                onChange={(e) => {
+                  void update({ lowerThirdsBoxColor: e.target.value })
+                }}
+                className="h-9 w-16 cursor-pointer rounded border border-border/60 bg-background"
+              />
+            </Row>
+            <Row
+              label="Box opacity"
+              hint="0 = no box, text floats on chroma. 100 = solid box."
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={settings.lowerThirdsBoxOpacity}
+                  onChange={(e) => {
+                    void update({
+                      lowerThirdsBoxOpacity: Number(e.target.value)
+                    })
+                  }}
+                  className="flex-1"
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+                  {settings.lowerThirdsBoxOpacity}%
+                </span>
+              </div>
+            </Row>
+            <Row
+              label="Text effect"
+              hint="Drop shadow or outline keeps text legible against any background."
+            >
+              <select
+                value={settings.lowerThirdsTextEffect}
+                onChange={(e) => {
+                  void update({
+                    lowerThirdsTextEffect: e.target.value as
+                      | 'none'
+                      | 'shadow'
+                      | 'outline'
+                  })
+                }}
+                className="h-9 w-32 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+              >
+                <option value="none">None</option>
+                <option value="shadow">Shadow</option>
+                <option value="outline">Outline</option>
+              </select>
+            </Row>
+          </>
+        )}
+      </Card>
+
       <div className="flex justify-end">
         <Button variant="ghost" size="sm" onClick={refresh}>
           ↻ Refresh display list
@@ -296,7 +541,7 @@ function AboutSection(): JSX.Element {
 
       <Card className="p-5">
         <div className="font-editorial text-xl font-semibold text-foreground">
-          Present
+          ProChurchCenter — Present
         </div>
         <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-brand/80">
           Sunday Task

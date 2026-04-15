@@ -48,6 +48,82 @@ export interface VideoControl {
 }
 
 /**
+ * Visual theme for the lower thirds graphic. Bundled into every
+ * LowerThirdsContent broadcast so settings changes propagate
+ * instantly to the chroma-key window without needing to re-create
+ * the BrowserWindow.
+ */
+export interface LowerThirdsTheme {
+  fontSize: number // px
+  textColor: string // hex
+  boxColor: string // hex (graphic box background)
+  boxOpacity: number // 0–100; 0 = no box, only text on chroma
+  textEffect: 'none' | 'shadow' | 'outline'
+}
+
+/**
+ * Lower thirds content shown to OBS via the chroma-key window.
+ * `visible: false` clears the lower third regardless of the other
+ * fields, so the operator can hide quickly without having to clear
+ * inputs first. `subtitle` is empty string (not undefined) so the
+ * payload shape stays stable across the IPC boundary.
+ *
+ * `theme` is optional only because the in-memory cache in main
+ * starts with a default-shaped LowerThirdsContent before any
+ * operator broadcast has happened — when present (which is on every
+ * actual operator push), it carries the live appearance settings.
+ */
+export interface LowerThirdsContent {
+  visible: boolean
+  title: string
+  subtitle: string
+  theme?: LowerThirdsTheme
+}
+
+/**
+ * Rich context broadcast from the operator to the stage monitor on
+ * every slide change. Carries everything the speaker-facing view
+ * needs to render its ProPresenter-style layout — current + next
+ * slide, item notes, slide-progress label — without the stage
+ * monitor needing access to the operator's setlist or library
+ * stores.
+ *
+ * `nextSlide` is null when the active slide is the last in its item;
+ * the stage monitor then either shows nothing in the "next" slot or
+ * renders an "End of section" placeholder. `notes` is empty string
+ * (not undefined) so the payload shape stays stable.
+ */
+export interface StageContext {
+  currentSlide: SlidePayload | null
+  nextSlide: SlidePayload | null
+  itemLabel: string
+  slideIndex: number // 0-based, matches operator state
+  totalSlides: number
+  notes: string
+}
+
+/**
+ * Authoritative video position update sent from the OUTPUT window to
+ * the operator confidence monitor so two independent <video> elements
+ * playing the same source stay in sync.
+ *
+ * The pattern (matching FreeShow's BackgroundMedia.svelte 220ms / 0.5s
+ * snap parameters): output's <video> emits `timeupdate` events ~4x/sec,
+ * each one becomes a VideoTimeUpdate broadcast. The operator subscribes
+ * and only nudges its local video when |local - remote| > 0.5s — below
+ * that the drift is invisible at thumbnail size and snapping every
+ * frame would cause visible micro-stutters.
+ *
+ * `paused` is included so the operator can also re-align after a
+ * pause/play state change (timeupdate doesn't fire while paused).
+ */
+export interface VideoTimeUpdate {
+  videoPath: string
+  currentTime: number
+  paused: boolean
+}
+
+/**
  * A single renderable slide. The output window never sees a Song or a
  * SetlistItem — just these flat payloads. Keeps the output view dumb and
  * future-proof (same contract for Bible, images, countdown).
@@ -85,12 +161,21 @@ export type SlidePayload =
     }
   | {
       /**
-       * Foreground video slide. Plays once with audio on the output
-       * window; confidence monitor renders the same source muted.
+       * Foreground video slide. Plays with audio on the output window;
+       * the confidence monitor mirrors the output via desktopCapturer
+       * (Option C — see VideoSlideOperator in SlideRenderer.tsx).
+       *
+       * loop=true (default): plays continuously until the operator
+       *   manually advances. Used for things like worship visuals or
+       *   ambient pre-service loops.
+       * loop=false: plays once, then auto-advances to the next setlist
+       *   item via the eventVideoEnded broadcast. Used for sermon
+       *   bumpers and other fixed-length transition videos.
        */
       kind: 'video'
       videoPath: string
       title?: string
+      loop?: boolean
     }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,7 +228,20 @@ export type UpdateSettingsPatch = Partial<Settings>
  * the Deck setlist item, which accepts PDFs exported from PowerPoint,
  * Keynote, Google Slides, or LibreOffice Impress.
  */
-export type PickFileKind = 'image' | 'video' | 'media' | 'pdf'
+export type PickFileKind = 'image' | 'video' | 'media' | 'pdf' | 'font'
+
+/**
+ * A user-uploaded custom font. `family` is what gets persisted into
+ * a theme's fontFamily property; `filename` is the on-disk filename
+ * inside the userData/fonts/ directory (renderer constructs the full
+ * URL via the present-media:// protocol).
+ */
+export interface CustomFontEntry {
+  family: string
+  filename: string
+  /** Absolute path to the file — convenient for the renderer's @font-face src. */
+  absolutePath: string
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PresentApi — the surface exposed on `window.api`
@@ -193,6 +291,24 @@ export interface PresentApi {
     pickFile(kind: PickFileKind): Promise<string | null>
   }
 
+  /**
+   * Custom font management. Volunteers pick a TTF/OTF/WOFF/WOFF2 file
+   * from disk; we copy it into userData/fonts/ for stable storage and
+   * surface it in the theme font picker alongside system + bundled
+   * fonts. Persisted fonts survive app reinstalls / settings resets
+   * because they live next to (not inside) settings.json.
+   */
+  fonts: {
+    list(): Promise<CustomFontEntry[]>
+    /**
+     * Open the native font file picker, copy the selection into
+     * userData/fonts/, and return the resulting entry. Returns null
+     * if the user cancelled the picker.
+     */
+    upload(): Promise<CustomFontEntry | null>
+    delete(family: string): Promise<void>
+  }
+
   bible: {
     /**
      * List all translations available from helloao. Cached on disk
@@ -240,6 +356,45 @@ export interface PresentApi {
      * video always starts from a clean (playing, unmuted) baseline.
      */
     setVideoControl(control: VideoControl): Promise<void>
+    /**
+     * Push rich stage-monitor context (current + next slide, item
+     * notes, slide progress) to the stage monitor window. Called
+     * from the operator on every slide change. Cached in main so
+     * the stage monitor recovers the right state on hot reload.
+     */
+    setStageContext(context: StageContext): Promise<void>
+    /**
+     * Push the OUTPUT window's authoritative video playback position
+     * to the operator confidence monitor. Called from the output
+     * renderer's <video> element on `timeupdate` / `seeked` /
+     * `play` / `pause` events. Operator subscribes via
+     * onVideoTimeUpdate and snaps its local video when drift > 500ms.
+     */
+    setVideoTimeUpdate(update: VideoTimeUpdate): Promise<void>
+    /**
+     * Notify the operator that a non-looping video has finished
+     * playing. Called once from the output renderer's `ended` event
+     * handler. The operator subscribes via onVideoEnded and advances
+     * the setlist to the next item.
+     *
+     * Carries `videoPath` so the operator can validate the event
+     * matches the slide that's currently active — guards against
+     * race conditions where the operator manually advanced past the
+     * video before its `ended` event arrived.
+     */
+    setVideoEnded(payload: { videoPath: string }): Promise<void>
+    /**
+     * Return the desktopCapturer source id for the output window so the
+     * operator renderer can mirror its pixels via getUserMedia with a
+     * `chromeMediaSource: 'desktop'` constraint. Used by the confidence
+     * monitor's VideoSlide to avoid independent-clock drift between two
+     * `<video>` elements decoding the same file.
+     *
+     * Returns null if the output window doesn't exist yet, or if the
+     * capturer can't find a source matching its title (which would
+     * happen if the OS hasn't registered the window — rare, transient).
+     */
+    getCaptureSourceId(): Promise<string | null>
     /** List available displays for the output-display picker. */
     listDisplays(): Promise<{ id: number; label: string; primary: boolean }[]>
     /**
@@ -247,6 +402,37 @@ export interface PresentApi {
      * Phase 4 registers the handler as a no-op so calls don't crash.
      */
     setDisplay(displayId: number | null): Promise<void>
+
+    // ── Stage monitor (on-demand projector for the speaker) ──────────
+    /**
+     * Enable or disable the stage monitor window. When enabled the
+     * window is created on demand and starts mirroring the main
+     * output's slide content. Disabling closes the window.
+     */
+    setStageMonitorEnabled(enabled: boolean): Promise<void>
+    /**
+     * Move the stage monitor window to a given display. Null = the
+     * "smart default" (first non-primary display, or primary if only
+     * one display exists). No-op if the stage monitor window doesn't
+     * currently exist.
+     */
+    setStageMonitorDisplay(displayId: number | null): Promise<void>
+
+    // ── Lower thirds (chroma-key window for OBS) ─────────────────────
+    /**
+     * Enable or disable the lower thirds window. When enabled the
+     * window is created on demand with a chroma-key background ready
+     * to be captured by OBS. Disabling closes the window.
+     */
+    setLowerThirdsEnabled(enabled: boolean): Promise<void>
+    /** Move the lower thirds window to a given display. */
+    setLowerThirdsDisplay(displayId: number | null): Promise<void>
+    /**
+     * Push new lower-thirds content (title / subtitle / visibility)
+     * to the lower thirds window. Cached in main so a hot-reloaded
+     * lower thirds renderer immediately resyncs.
+     */
+    setLowerThirdsContent(content: LowerThirdsContent): Promise<void>
 
     // ── Output-window-only subscriptions ──────────────────────────────────
     // These live on window.api inside the OUTPUT renderer so it can react
@@ -269,6 +455,37 @@ export interface PresentApi {
      * only. Fires on every toggle AND on slide changes.
      */
     onVideoControl(callback: (control: VideoControl) => void): () => void
+    /**
+     * Subscribe to authoritative video time updates from the OUTPUT
+     * window. Operator confidence monitor only. The operator's
+     * VideoSlide nudges its local <video> currentTime when drift
+     * exceeds the snap threshold (~500ms).
+     */
+    onVideoTimeUpdate(
+      callback: (update: VideoTimeUpdate) => void
+    ): () => void
+    /**
+     * Subscribe to "non-looping video reached natural end" events
+     * from the OUTPUT window. Operator only — used by ServiceMode
+     * to auto-advance the setlist.
+     */
+    onVideoEnded(
+      callback: (payload: { videoPath: string }) => void
+    ): () => void
+    /**
+     * Subscribe to lower thirds content updates. Used by the lower
+     * thirds renderer to redraw its DOM when the operator changes
+     * the title/subtitle/visibility.
+     */
+    onLowerThirdsContent(
+      callback: (content: LowerThirdsContent) => void
+    ): () => void
+    /**
+     * Subscribe to stage-monitor context updates. Used by StageView
+     * to render the ProPresenter-style layout (current + next slide,
+     * notes, progress).
+     */
+    onStageContext(callback: (context: StageContext) => void): () => void
   }
 }
 
@@ -307,6 +524,11 @@ export const CHANNELS = {
   dialog: {
     pickFile: 'dialog:pickFile'
   },
+  fonts: {
+    list: 'fonts:list',
+    upload: 'fonts:upload',
+    delete: 'fonts:delete'
+  },
   bible: {
     listTranslations: 'bible:listTranslations',
     listBooks: 'bible:listBooks',
@@ -320,12 +542,32 @@ export const CHANNELS = {
     setLive: 'output:setLive',
     setItemThemeOverride: 'output:setItemThemeOverride',
     setVideoControl: 'output:setVideoControl',
+    setVideoTimeUpdate: 'output:setVideoTimeUpdate',
+    setVideoEnded: 'output:setVideoEnded',
+    getCaptureSourceId: 'output:getCaptureSourceId',
     listDisplays: 'output:listDisplays',
     setDisplay: 'output:setDisplay',
-    // Events broadcast from main -> output window
+    setStageMonitorEnabled: 'output:setStageMonitorEnabled',
+    setStageMonitorDisplay: 'output:setStageMonitorDisplay',
+    setLowerThirdsEnabled: 'output:setLowerThirdsEnabled',
+    setLowerThirdsDisplay: 'output:setLowerThirdsDisplay',
+    setLowerThirdsContent: 'output:setLowerThirdsContent',
+    setStageContext: 'output:setStageContext',
+    // Events broadcast from main -> output window (output renderer subscribes)
     eventSlide: 'output:event:slide',
     eventMode: 'output:event:mode',
     eventItemThemeOverride: 'output:event:itemThemeOverride',
-    eventVideoControl: 'output:event:videoControl'
+    eventVideoControl: 'output:event:videoControl',
+    // Events broadcast from main -> operator window (operator subscribes
+    // for video sync; the output window IS the source so it does not
+    // also subscribe — that would be a feedback loop)
+    eventVideoTimeUpdate: 'output:event:videoTimeUpdate',
+    // Fired by the OUTPUT window when a non-looping video reaches its
+    // natural end, so the operator can auto-advance the setlist.
+    eventVideoEnded: 'output:event:videoEnded',
+    // Lower thirds content broadcast from main -> lower thirds window
+    eventLowerThirdsContent: 'output:event:lowerThirdsContent',
+    // Stage monitor context broadcast from main -> stage window
+    eventStageContext: 'output:event:stageContext'
   }
 } as const

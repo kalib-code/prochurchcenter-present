@@ -16,15 +16,33 @@
  * mid-service without losing state.
  */
 
-import { ipcMain, screen, type BrowserWindow } from 'electron'
+import { ipcMain, screen, desktopCapturer, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
   type SlidePayload,
   type OutputMode,
-  type VideoControl
+  type VideoControl,
+  type VideoTimeUpdate,
+  type LowerThirdsContent,
+  type StageContext
 } from '@shared/ipc-contract'
 import type { ThemeOverride } from '@shared/types'
-import { getOutputWindow } from '../windows'
+import {
+  getOutputWindow,
+  getOperatorWindow,
+  getAllProjectorWindows,
+  getStageMonitorWindow,
+  getLowerThirdsWindow
+} from '../windows'
+import {
+  createStageMonitorWindow,
+  destroyStageMonitorWindow,
+  moveStageMonitorWindow,
+  createLowerThirdsWindow,
+  destroyLowerThirdsWindow,
+  moveLowerThirdsWindow
+} from '../projectorWindows'
+import { getSettings, updateSettings } from '../storage/settings'
 
 // Cached state — main holds the current truth so late-joining renderers
 // can resync. All reset at process start.
@@ -38,9 +56,47 @@ let lastItemOverride: ThemeOverride | null = null
 // so a hot-reloaded output window recovers the right playback state
 // mid-video instead of restarting from the default.
 let lastVideoControl: VideoControl = { paused: false, muted: false }
+// Latest lower thirds payload. Cached so the lower thirds window
+// re-renders to the correct state on hot reload, and so newly-created
+// stage / lower thirds windows can pick up the current content.
+let lastLowerThirds: LowerThirdsContent = {
+  visible: false,
+  title: '',
+  subtitle: ''
+}
+// Latest stage monitor context. Cached for the same reasons as
+// lastSlide / lastLowerThirds — newly opened stage monitor windows
+// (on-demand creation, dev hot reload) need to pick up where they
+// left off rather than starting blank.
+let lastStageContext: StageContext = {
+  currentSlide: null,
+  nextSlide: null,
+  itemLabel: '',
+  slideIndex: 0,
+  totalSlides: 0,
+  notes: ''
+}
 
-function sendToOutput(channel: string, payload: unknown): void {
-  const win = getOutputWindow()
+/**
+ * Broadcast to every "projector-class" window that mirrors slide
+ * content — currently the main output and (when enabled) the stage
+ * monitor. Used by every slide/mode/theme/videoControl handler so
+ * the stage monitor stays in lockstep with the output without
+ * requiring any per-handler awareness of its existence.
+ */
+function sendToProjectors(channel: string, payload: unknown): void {
+  for (const win of getAllProjectorWindows()) {
+    win.webContents.send(channel, payload)
+  }
+}
+
+/**
+ * Forward to the OPERATOR window (not the output). Used by the video
+ * time-update broadcast — the output renderer is the SOURCE of those
+ * events and must not also receive them, otherwise it would loop.
+ */
+function sendToOperator(channel: string, payload: unknown): void {
+  const win = getOperatorWindow()
   if (!win || win.isDestroyed()) return
   win.webContents.send(channel, payload)
 }
@@ -48,32 +104,32 @@ function sendToOutput(channel: string, payload: unknown): void {
 export function registerOutputHandlers(): void {
   ipcMain.handle(CHANNELS.output.setSlide, async (_, payload: SlidePayload) => {
     lastSlide = payload
-    sendToOutput(CHANNELS.output.eventSlide, payload)
+    sendToProjectors(CHANNELS.output.eventSlide, payload)
   })
 
   ipcMain.handle(CHANNELS.output.setBlack, async () => {
     currentMode = 'black'
-    sendToOutput(CHANNELS.output.eventMode, currentMode)
+    sendToProjectors(CHANNELS.output.eventMode, currentMode)
   })
 
   ipcMain.handle(CHANNELS.output.setLogo, async () => {
     currentMode = 'logo'
-    sendToOutput(CHANNELS.output.eventMode, currentMode)
+    sendToProjectors(CHANNELS.output.eventMode, currentMode)
   })
 
   ipcMain.handle(CHANNELS.output.setLive, async () => {
     currentMode = 'live'
-    sendToOutput(CHANNELS.output.eventMode, currentMode)
-    // Also resend the last slide in case the output window was showing
-    // black/logo and needs to redraw the live content immediately.
-    if (lastSlide) sendToOutput(CHANNELS.output.eventSlide, lastSlide)
+    sendToProjectors(CHANNELS.output.eventMode, currentMode)
+    // Also resend the last slide in case the projector(s) were showing
+    // black/logo and need to redraw the live content immediately.
+    if (lastSlide) sendToProjectors(CHANNELS.output.eventSlide, lastSlide)
   })
 
   ipcMain.handle(
     CHANNELS.output.setItemThemeOverride,
     async (_, override: ThemeOverride | null) => {
       lastItemOverride = override
-      sendToOutput(CHANNELS.output.eventItemThemeOverride, override)
+      sendToProjectors(CHANNELS.output.eventItemThemeOverride, override)
     }
   )
 
@@ -81,9 +137,68 @@ export function registerOutputHandlers(): void {
     CHANNELS.output.setVideoControl,
     async (_, control: VideoControl) => {
       lastVideoControl = control
-      sendToOutput(CHANNELS.output.eventVideoControl, control)
+      sendToProjectors(CHANNELS.output.eventVideoControl, control)
     }
   )
+
+  // High-frequency video position broadcast: output -> operator only.
+  // No caching (it's continuous live state, no point replaying on
+  // hot-reload). Doesn't echo back to the sender.
+  ipcMain.handle(
+    CHANNELS.output.setVideoTimeUpdate,
+    async (_, update: VideoTimeUpdate) => {
+      sendToOperator(CHANNELS.output.eventVideoTimeUpdate, update)
+    }
+  )
+
+  // One-shot "video reached natural end" notification: output ->
+  // operator only. Forwarded so ServiceMode can auto-advance the
+  // setlist for non-looping videos. Not cached because this is an
+  // edge-triggered event — replaying it after a hot-reload would
+  // re-trigger a setlist advance that already happened.
+  ipcMain.handle(
+    CHANNELS.output.setVideoEnded,
+    async (_, payload: { videoPath: string }) => {
+      sendToOperator(CHANNELS.output.eventVideoEnded, payload)
+    }
+  )
+
+  // Option C: mirror the output window's pixels into the operator
+  // confidence monitor for video playback. Because the output window
+  // uses simpleFullscreen (not native macOS fullscreen), it stays in
+  // the OS-level window list and can be captured directly by
+  // desktopCapturer's window source. We match by title — the em-dash
+  // "— Output" is a safe unique marker that can't collide with
+  // anything on a typical user's desktop, and the title is pinned
+  // via page-title-updated + did-finish-load handlers in main/index.ts.
+  ipcMain.handle(CHANNELS.output.getCaptureSourceId, async () => {
+    const outputWin = getOutputWindow()
+    if (!outputWin || outputWin.isDestroyed()) return null
+
+    // Force the title back once more immediately before querying — if
+    // a renderer just HMR-reloaded and pushed a new document title,
+    // the did-finish-load correction may not have fired yet by the
+    // time we're asked to look up the source.
+    outputWin.setTitle('ProChurchCenter Present — Output')
+
+    const sources = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 0, height: 0 },
+      fetchWindowIcons: false
+    })
+
+    const MARKER = '— Output'
+    const match = sources.find((s) => s.name.includes(MARKER))
+    if (!match) {
+      console.warn(
+        `[output:getCaptureSourceId] no window source matched marker="${MARKER}". ` +
+          `candidates: ${sources
+            .map((s) => JSON.stringify(s.name))
+            .join(', ')}`
+      )
+    }
+    return match?.id ?? null
+  })
 
   ipcMain.handle(CHANNELS.output.listDisplays, async () => {
     const primary = screen.getPrimaryDisplay()
@@ -108,42 +223,157 @@ export function registerOutputHandlers(): void {
         ? screen.getPrimaryDisplay()
         : allDisplays.find((d) => d.id === displayId) ?? screen.getPrimaryDisplay()
 
-    // Fullscreen + setBounds fight each other on macOS and Windows —
-    // you must exit fullscreen, move, then re-enter. We also unset
-    // alwaysOnTop briefly because some window managers ignore setBounds
-    // on a top-most window mid-transition.
-    const wasFullscreen = win.isFullScreen()
-    if (wasFullscreen) win.setFullScreen(false)
-
+    // Borderless windowed (see main/index.ts output window options)
+    // — moving between displays is just a setBounds call with the
+    // target display's workArea.
     win.setBounds(target.workArea)
+  })
 
-    // Re-enter fullscreen after a microtask so the OS picks up the new
-    // position as the anchor for fullscreen. Without the delay macOS can
-    // occasionally re-fullscreen on the OLD display.
-    setTimeout(() => {
-      if (win.isDestroyed()) return
-      if (wasFullscreen) win.setFullScreen(true)
-    }, 50)
+  // ── Stage monitor lifecycle ───────────────────────────────────────
+  ipcMain.handle(
+    CHANNELS.output.setStageMonitorEnabled,
+    async (_, enabled: boolean) => {
+      await updateSettings({ stageMonitorEnabled: enabled })
+      if (enabled) {
+        const settings = await getSettings()
+        createStageMonitorWindow(settings.stageMonitorDisplayId)
+      } else {
+        destroyStageMonitorWindow()
+      }
+    }
+  )
+
+  ipcMain.handle(
+    CHANNELS.output.setStageMonitorDisplay,
+    async (_, displayId: number | null) => {
+      await updateSettings({ stageMonitorDisplayId: displayId })
+      moveStageMonitorWindow(displayId)
+    }
+  )
+
+  // ── Lower thirds lifecycle ────────────────────────────────────────
+  ipcMain.handle(
+    CHANNELS.output.setLowerThirdsEnabled,
+    async (_, enabled: boolean) => {
+      await updateSettings({ lowerThirdsEnabled: enabled })
+      if (enabled) {
+        const settings = await getSettings()
+        createLowerThirdsWindow(
+          settings.lowerThirdsDisplayId,
+          settings.lowerThirdsChromaKey,
+          settings.lowerThirdsAlignment
+        )
+      } else {
+        destroyLowerThirdsWindow()
+      }
+    }
+  )
+
+  ipcMain.handle(
+    CHANNELS.output.setLowerThirdsDisplay,
+    async (_, displayId: number | null) => {
+      await updateSettings({ lowerThirdsDisplayId: displayId })
+      moveLowerThirdsWindow(displayId)
+    }
+  )
+
+  ipcMain.handle(
+    CHANNELS.output.setLowerThirdsContent,
+    async (_, content: LowerThirdsContent) => {
+      console.log('[ipc:setLowerThirdsContent]', content)
+      lastLowerThirds = content
+      const win = getLowerThirdsWindow()
+      if (!win || win.isDestroyed()) {
+        console.warn(
+          '[ipc:setLowerThirdsContent] no lower thirds window — payload cached only'
+        )
+        return
+      }
+      win.webContents.send(CHANNELS.output.eventLowerThirdsContent, content)
+    }
+  )
+
+  // Stage monitor context broadcast. Operator-driven, sent on every
+  // slide change so the speaker-facing window always knows what the
+  // current and next slide are without having to peek into the
+  // operator's setlist store.
+  ipcMain.handle(
+    CHANNELS.output.setStageContext,
+    async (_, context: StageContext) => {
+      lastStageContext = context
+      const win = getStageMonitorWindow()
+      if (!win || win.isDestroyed()) return
+      win.webContents.send(CHANNELS.output.eventStageContext, context)
+    }
+  )
+}
+
+/**
+ * Attach a did-finish-load listener that replays the last-known
+ * slide / mode / theme / video-control state to a projector-class
+ * window when it loads or reloads (common in dev hot reload, also
+ * fires when the stage monitor is created on demand mid-service).
+ *
+ * Called from main/index.ts (for the main output window) and from
+ * the stage monitor enable handler (for the stage monitor window
+ * once it exists).
+ */
+export function attachProjectorReplay(projectorWindow: BrowserWindow): void {
+  const send = (channel: string, payload: unknown): void => {
+    if (projectorWindow.isDestroyed()) return
+    projectorWindow.webContents.send(channel, payload)
+  }
+  projectorWindow.webContents.on('did-finish-load', () => {
+    if (lastSlide) send(CHANNELS.output.eventSlide, lastSlide)
+    send(CHANNELS.output.eventMode, currentMode)
+    // Replay the current item override (may be null) so the window
+    // comes up with the correct per-song theme on reload / on-demand
+    // creation.
+    send(CHANNELS.output.eventItemThemeOverride, lastItemOverride)
+    // Replay video control (pause/mute) so a hot-reloaded projector
+    // window re-enters the right playback state.
+    send(CHANNELS.output.eventVideoControl, lastVideoControl)
   })
 }
 
 /**
- * Attach a did-finish-load listener that replays the last-known state
- * when the output window loads or reloads (common in dev hot reload;
- * safe no-op at first load since lastSlide is null).
- *
- * Called from main/index.ts AFTER the output window is created, since
- * registerOutputHandlers runs at app.whenReady before any window exists.
+ * Backwards-compat alias for the old name. Existing callers in
+ * main/index.ts don't need to change.
  */
-export function attachOutputReplay(outputWindow: BrowserWindow): void {
-  outputWindow.webContents.on('did-finish-load', () => {
-    if (lastSlide) sendToOutput(CHANNELS.output.eventSlide, lastSlide)
-    sendToOutput(CHANNELS.output.eventMode, currentMode)
-    // Replay the current item override (may be null) so the output
-    // window comes up with the correct per-song theme on dev reload.
-    sendToOutput(CHANNELS.output.eventItemThemeOverride, lastItemOverride)
-    // Replay video control (pause/mute) so a hot-reloaded output
-    // window re-enters the right playback state.
-    sendToOutput(CHANNELS.output.eventVideoControl, lastVideoControl)
+export const attachOutputReplay = attachProjectorReplay
+
+/**
+ * Attach the lower-thirds-content replay to the lower thirds window.
+ * Smaller surface than the projector replay because lower thirds
+ * only has one piece of state (the current title/subtitle/visibility).
+ */
+export function attachLowerThirdsReplay(lowerThirdsWindow: BrowserWindow): void {
+  lowerThirdsWindow.webContents.on('did-finish-load', () => {
+    if (lowerThirdsWindow.isDestroyed()) return
+    console.log(
+      '[attachLowerThirdsReplay] replaying cached content',
+      lastLowerThirds
+    )
+    lowerThirdsWindow.webContents.send(
+      CHANNELS.output.eventLowerThirdsContent,
+      lastLowerThirds
+    )
+  })
+}
+
+/**
+ * Attach the stage-context replay to the stage monitor window.
+ * Sends the full StageContext snapshot the moment the renderer
+ * finishes loading so an on-demand or hot-reloaded stage monitor
+ * comes up displaying the same current/next/notes the operator was
+ * already broadcasting.
+ */
+export function attachStageReplay(stageWindow: BrowserWindow): void {
+  stageWindow.webContents.on('did-finish-load', () => {
+    if (stageWindow.isDestroyed()) return
+    stageWindow.webContents.send(
+      CHANNELS.output.eventStageContext,
+      lastStageContext
+    )
   })
 }
