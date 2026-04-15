@@ -15,7 +15,8 @@ import {
   type VideoControl,
   type VideoTimeUpdate,
   type LowerThirdsContent,
-  type StageContext
+  type StageContext,
+  type BackupImportMode
 } from '@shared/ipc-contract'
 import type { Theme, ThemeOverride } from '@shared/types'
 
@@ -70,6 +71,21 @@ const api: PresentApi = {
     upload: () => ipcRenderer.invoke(CHANNELS.fonts.upload),
     delete: (family: string) =>
       ipcRenderer.invoke(CHANNELS.fonts.delete, family)
+  },
+  backup: {
+    exportNow: () => ipcRenderer.invoke(CHANNELS.backup.exportNow),
+    list: () => ipcRenderer.invoke(CHANNELS.backup.list),
+    restore: (absolutePath: string, mode: BackupImportMode) =>
+      ipcRenderer.invoke(CHANNELS.backup.restore, absolutePath, mode),
+    delete: (absolutePath: string) =>
+      ipcRenderer.invoke(CHANNELS.backup.delete, absolutePath),
+    openFolder: () => ipcRenderer.invoke(CHANNELS.backup.openFolder),
+    importFromFile: (mode: BackupImportMode) =>
+      ipcRenderer.invoke(CHANNELS.backup.importFromFile, mode)
+  },
+  updater: {
+    getVersion: () => ipcRenderer.invoke(CHANNELS.updater.getVersion),
+    checkNow: () => ipcRenderer.invoke(CHANNELS.updater.checkNow)
   },
   bible: {
     listTranslations: () => ipcRenderer.invoke(CHANNELS.bible.listTranslations),

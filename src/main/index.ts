@@ -14,6 +14,7 @@ import {
   createLowerThirdsWindow
 } from './projectorWindows'
 import { initAutoUpdater } from './updater'
+import { runAutoBackupOnLaunch } from './storage/autoBackup'
 
 /**
  * Chromium's autoplay policy blocks HTMLMediaElement.play() with audio
@@ -311,6 +312,13 @@ app.whenReady().then(async () => {
   // no-op in dev mode (app.isPackaged === false) so this is safe at
   // every startup. See src/main/updater.ts for the full lifecycle.
   initAutoUpdater()
+
+  // Kick off the daily auto-backup check. Fire-and-forget — the
+  // scheduler waits 5s internally before doing any I/O so the first
+  // paint of the operator window isn't competing with a zip write.
+  // Errors are caught inside the scheduler; they never propagate
+  // here. See src/main/storage/autoBackup.ts.
+  void runAutoBackupOnLaunch()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindows()

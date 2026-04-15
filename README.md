@@ -1,8 +1,16 @@
-# Present — ProChurchCenter
+# ProChurchCenter Present
 
 A PH-first church presenter. Deliberately minimal. Offline-first. Built for the Sunday-morning volunteer.
 
-**Status:** Phase 0 scaffold · zero features · two empty windows launch
+## For church volunteers — installing the app
+
+👉 **[Read the installation guide (INSTALL.md)](./INSTALL.md)** — step-by-step instructions for Windows, macOS, and Linux, including how to get past the "unrecognized app" security warnings you'll see on first launch. (We're not code-signed yet; the guide explains exactly what to click.)
+
+Grab the latest installer from the [releases page](https://github.com/kalib-code/prochurchcenter-present/releases/latest).
+
+---
+
+## For developers
 
 ## Where things live
 

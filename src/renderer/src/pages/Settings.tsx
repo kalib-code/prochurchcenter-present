@@ -14,7 +14,12 @@
  */
 
 import { useEffect, useState } from 'react'
-import type { SlidePayload } from '@shared/ipc-contract'
+import type {
+  SlidePayload,
+  BackupListEntry,
+  BackupImportMode,
+  ManualUpdateCheckResult
+} from '@shared/ipc-contract'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { useServiceStore } from '../stores/useServiceStore'
@@ -25,7 +30,7 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { cn } from '../lib/utils'
 
-type Section = 'display' | 'theme' | 'output' | 'about'
+type Section = 'display' | 'theme' | 'output' | 'data' | 'about'
 
 const SECTIONS: { id: Section; label: string; description: string }[] = [
   {
@@ -42,6 +47,12 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
     id: 'output',
     label: 'Output',
     description: 'Which monitor the fullscreen projector lives on.'
+  },
+  {
+    id: 'data',
+    label: 'Data',
+    description:
+      'Backups, restore, and library transfer between machines. Auto-backup runs daily on app launch.'
   },
   {
     id: 'about',
@@ -198,6 +209,8 @@ export function Settings(): JSX.Element {
             )}
 
             {section === 'output' && <OutputDisplaySection />}
+
+            {section === 'data' && <DataSection />}
 
             {section === 'about' && <AboutSection />}
           </div>
@@ -520,12 +533,338 @@ function OutputDisplaySection(): JSX.Element | null {
   )
 }
 
+// ─── Data / Backup ───────────────────────────────────────────────────
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+function formatBackupTime(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  })
+}
+
+function DataSection(): JSX.Element {
+  const [backups, setBackups] = useState<BackupListEntry[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [lastMessage, setLastMessage] = useState<string | null>(null)
+
+  const refresh = async (): Promise<void> => {
+    const list = await window.api.backup.list()
+    setBackups(list)
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const exportNow = async (): Promise<void> => {
+    setBusy('export')
+    try {
+      const entry = await window.api.backup.exportNow()
+      setLastMessage(
+        `Backup created — ${entry.manifest?.counts.songs ?? 0} songs, ${
+          entry.manifest?.counts.setlists ?? 0
+        } setlists, ${formatBytes(entry.sizeBytes)}.`
+      )
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const restore = async (
+    entry: BackupListEntry,
+    mode: BackupImportMode
+  ): Promise<void> => {
+    const verb = mode === 'replace' ? 'REPLACE your entire library' : 'merge into your library'
+    const ok = window.confirm(
+      `Restore from ${entry.filename}?\n\nThis will ${verb}. A safety snapshot of your current library is always saved first so you can roll back.`
+    )
+    if (!ok) return
+    setBusy(entry.absolutePath)
+    try {
+      const result = await window.api.backup.restore(entry.absolutePath, mode)
+      setLastMessage(
+        `Restored — ${result.imported.songs} songs, ${result.imported.setlists} setlists, ${result.imported.themes} themes. Safety snapshot: ${result.safetyBackupPath
+          .split('/')
+          .pop()}`
+      )
+      await refresh()
+      // Signal the rest of the app to re-read data.
+      window.location.reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const remove = async (entry: BackupListEntry): Promise<void> => {
+    const ok = window.confirm(`Delete ${entry.filename}? This cannot be undone.`)
+    if (!ok) return
+    setBusy(entry.absolutePath)
+    try {
+      await window.api.backup.delete(entry.absolutePath)
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const openFolder = async (): Promise<void> => {
+    await window.api.backup.openFolder()
+  }
+
+  const importFromFile = async (mode: BackupImportMode): Promise<void> => {
+    const verb = mode === 'replace' ? 'REPLACE your entire library' : 'merge into your library'
+    const ok = window.confirm(
+      `Choose a backup file to restore.\n\nThis will ${verb}. A safety snapshot is saved first.`
+    )
+    if (!ok) return
+    setBusy('import-file')
+    try {
+      const result = await window.api.backup.importFromFile(mode)
+      if (result) {
+        setLastMessage(
+          `Imported — ${result.imported.songs} songs, ${result.imported.setlists} setlists, ${result.imported.themes} themes.`
+        )
+        await refresh()
+        window.location.reload()
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Create backup + open folder */}
+      <Card className="p-4 space-y-3">
+        <Row
+          label="Create a backup now"
+          hint="Writes a timestamped zip of your songs, setlists, themes, fonts, and settings. Runs instantly — no waiting."
+        >
+          <Button
+            size="sm"
+            onClick={exportNow}
+            disabled={busy !== null}
+          >
+            {busy === 'export' ? 'Creating…' : 'Backup now'}
+          </Button>
+        </Row>
+        <Row
+          label="Open backup folder"
+          hint="Power-user escape hatch — reveals the hidden backups folder in Finder / Explorer so you can copy a zip to a USB drive."
+        >
+          <Button size="sm" variant="ghost" onClick={openFolder}>
+            Open folder
+          </Button>
+        </Row>
+        <Row
+          label="Restore from a zip file"
+          hint="Use this when someone sent you a backup zip to restore. Otherwise pick a backup from the list below."
+        >
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void importFromFile('merge')}
+              disabled={busy !== null}
+            >
+              Merge from file…
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void importFromFile('replace')}
+              disabled={busy !== null}
+            >
+              Replace from file…
+            </Button>
+          </div>
+        </Row>
+      </Card>
+
+      {/* Status line */}
+      {lastMessage && (
+        <div className="rounded-md border border-brand/30 bg-brand/5 px-3 py-2 text-xs text-foreground">
+          {lastMessage}
+        </div>
+      )}
+
+      {/* Backup list */}
+      <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-foreground">
+              Available backups ({backups.length})
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              Auto-backup keeps the 7 most recent. Pre-import safety snapshots are kept separately.
+            </div>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => void refresh()}>
+            ↻ Refresh
+          </Button>
+        </div>
+
+        {backups.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border/60 bg-background/40 p-6 text-center text-xs text-muted-foreground">
+            No backups yet. Click <span className="font-medium">Backup now</span> to create the first one.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {backups.map((entry) => {
+              const isSafety = entry.filename.startsWith('pre-import-')
+              const isBusy = busy === entry.absolutePath
+              return (
+                <li
+                  key={entry.absolutePath}
+                  className={cn(
+                    'rounded-md border border-border/50 bg-background/60 px-3 py-2.5 transition-colors',
+                    entry.manifest === null && 'opacity-60'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {formatBackupTime(entry.createdAt)}
+                        </span>
+                        {isSafety && (
+                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-amber-400">
+                            Safety snapshot
+                          </span>
+                        )}
+                        {entry.manifest === null && (
+                          <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-red-400">
+                            Corrupt
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        {entry.manifest
+                          ? `${entry.manifest.counts.songs} songs · ${entry.manifest.counts.setlists} setlists · ${entry.manifest.counts.themes} themes · ${formatBytes(entry.sizeBytes)}`
+                          : formatBytes(entry.sizeBytes)}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={entry.manifest === null || isBusy || busy !== null}
+                        onClick={() => void restore(entry, 'merge')}
+                      >
+                        Merge
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={entry.manifest === null || isBusy || busy !== null}
+                        onClick={() => void restore(entry, 'replace')}
+                      >
+                        Replace
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={isBusy || busy !== null}
+                        onClick={() => void remove(entry)}
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 // ─── About ───────────────────────────────────────────────────────────
+
+/**
+ * Render the human-readable status line for the most recent manual
+ * update check. Null return means "show nothing" (i.e., the user
+ * hasn't clicked the button yet).
+ */
+function describeCheckResult(result: ManualUpdateCheckResult | null): string | null {
+  if (!result) return null
+  switch (result.status) {
+    case 'up-to-date':
+      return `You're on the latest version (v${result.currentVersion}).`
+    case 'update-available':
+      return `Update v${result.newVersion} is downloading in the background. You'll see a "Restart now?" prompt when it's ready.`
+    case 'dev':
+      return `Running a dev build (v${result.currentVersion}). Auto-update is disabled in dev.`
+    case 'error':
+      return `Check failed: ${result.message}. Your internet may be down — try again later.`
+  }
+}
 
 function AboutSection(): JSX.Element {
   const { settings } = useSettingsStore()
+  const [version, setVersion] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkResult, setCheckResult] = useState<ManualUpdateCheckResult | null>(null)
+
+  useEffect(() => {
+    void window.api.updater.getVersion().then(setVersion)
+  }, [])
+
+  const checkNow = async (): Promise<void> => {
+    setChecking(true)
+    try {
+      const result = await window.api.updater.checkNow()
+      setCheckResult(result)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const statusLine = describeCheckResult(checkResult)
+
   return (
     <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <Row
+          label="Current version"
+          hint="Auto-update checks GitHub Releases on every launch. Mac users: see the INSTALL guide — signed updates are coming in a later release."
+        >
+          <span className="font-mono text-sm text-foreground">
+            {version ? `v${version}` : '…'}
+          </span>
+        </Row>
+        <Row
+          label="Check for updates"
+          hint="Manually check GitHub for a newer release. Downloads happen in the background; you'll be prompted to restart when ready."
+        >
+          <Button size="sm" onClick={checkNow} disabled={checking}>
+            {checking ? 'Checking…' : 'Check now'}
+          </Button>
+        </Row>
+        {statusLine && (
+          <div
+            className={cn(
+              'rounded-md border px-3 py-2 text-xs',
+              checkResult?.status === 'error'
+                ? 'border-red-500/30 bg-red-500/5 text-red-300'
+                : 'border-brand/30 bg-brand/5 text-foreground'
+            )}
+          >
+            {statusLine}
+          </div>
+        )}
+      </Card>
+
       <Card className="p-4">
         <Row label="Interface language" hint="Tagalog support lands in Phase 7.">
           <select

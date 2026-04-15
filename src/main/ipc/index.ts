@@ -14,6 +14,8 @@ import { registerOutputHandlers } from './output'
 import { registerDialogHandlers } from './dialog'
 import { registerBibleHandlers } from './bible'
 import { registerFontsHandlers } from './fonts'
+import { registerBackupHandlers } from './backup'
+import { registerUpdaterHandlers } from './updater'
 
 export function registerAllIpcHandlers(): void {
   registerSongHandlers()
@@ -24,4 +26,6 @@ export function registerAllIpcHandlers(): void {
   registerDialogHandlers()
   registerBibleHandlers()
   registerFontsHandlers()
+  registerBackupHandlers()
+  registerUpdaterHandlers()
 }

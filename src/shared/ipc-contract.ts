@@ -9,7 +9,7 @@
  * Phase 1 covers: songs, setlists, settings, theme.
  * Phase 4 adds: output (slide broadcasting to the output window).
  * Later phases add: bible (Phase 6), license (Phase 8),
- * backup (Phase 9), updater (Phase 10).
+ * backup (Phase 9 — implemented post-v0.1.1), updater (Phase 10).
  */
 
 import type {
@@ -230,6 +230,63 @@ export type UpdateSettingsPatch = Partial<Settings>
  */
 export type PickFileKind = 'image' | 'video' | 'media' | 'pdf' | 'font'
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Backup (library export / import / restore)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A single backup zip discovered in the (hidden) backups directory.
+ * The renderer uses this to render the Restore list. `manifest` is
+ * null when a zip is corrupt — the UI should grey those rows out
+ * rather than let the user try to restore from them.
+ */
+export interface BackupListEntry {
+  filename: string
+  absolutePath: string
+  sizeBytes: number
+  createdAt: string
+  manifest: {
+    version: 1
+    createdAt: string
+    appVersion: string
+    counts: { songs: number; setlists: number; themes: number }
+  } | null
+}
+
+/**
+ * Result returned when an import succeeds. `safetyBackupPath` is the
+ * auto-snapshot taken immediately before the import was applied — the
+ * UI surfaces this so the user has an obvious "undo this import" path.
+ */
+export interface BackupImportResult {
+  imported: { songs: number; setlists: number; themes: number }
+  safetyBackupPath: string
+}
+
+/**
+ * Merge: files in the zip are written over any same-id file locally,
+ * everything else is preserved. Replace: wipe library/themes/fonts/
+ * media first, then extract.
+ */
+export type BackupImportMode = 'merge' | 'replace'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-update (manual "Check for updates" surface)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Result of a manual update check triggered from Settings. The `dev`
+ * branch exists so the UI can surface "auto-update is off in dev"
+ * cleanly instead of pretending the check ran. The `error` branch
+ * carries the message so the UI can show a real diagnostic (network
+ * down, release feed unreachable, etc.) rather than a generic fail.
+ */
+export type ManualUpdateCheckResult =
+  | { status: 'up-to-date'; currentVersion: string }
+  | { status: 'update-available'; currentVersion: string; newVersion: string }
+  | { status: 'error'; message: string }
+  | { status: 'dev'; currentVersion: string }
+
 /**
  * A user-uploaded custom font. `family` is what gets persisted into
  * a theme's fontFamily property; `filename` is the on-disk filename
@@ -307,6 +364,61 @@ export interface PresentApi {
      */
     upload(): Promise<CustomFontEntry | null>
     delete(family: string): Promise<void>
+  }
+
+  /**
+   * Auto-update surface. The background check + "Restart now?" dialog
+   * are wired from main/updater.ts and don't need renderer
+   * involvement. These calls exist solely for the manual "Check for
+   * updates" UX in Settings → About.
+   */
+  updater: {
+    /** Current packaged app version (e.g., "0.1.1"). */
+    getVersion(): Promise<string>
+    /**
+     * Trigger an on-demand update check. Returns a discriminated
+     * union describing what happened — the UI uses this to show
+     * "up to date", "downloading v0.1.2", or an error message.
+     */
+    checkNow(): Promise<ManualUpdateCheckResult>
+  }
+
+  /**
+   * Backup surface — library export, import, restore, and the auto-
+   * backup status readout. Every call operates on the hidden backups
+   * directory under userData/backups/ (not user-visible in Finder).
+   * The renderer never handles file paths directly for export — the
+   * main process picks the timestamped filename and returns the result.
+   */
+  backup: {
+    /**
+     * Write a new backup zip immediately. Returns the list entry for
+     * the just-created backup so the UI can show "Backup created at
+     * 9:32 AM" without re-listing.
+     */
+    exportNow(): Promise<BackupListEntry>
+    /** List every backup zip, newest first. */
+    list(): Promise<BackupListEntry[]>
+    /**
+     * Restore from a backup zip. `absolutePath` must be one returned
+     * by `list()` — we don't accept arbitrary paths from the renderer
+     * to keep the blast radius small. Always writes a pre-import
+     * safety snapshot first.
+     */
+    restore(
+      absolutePath: string,
+      mode: BackupImportMode
+    ): Promise<BackupImportResult>
+    /** Delete a backup zip. Used by the "trash" action in the list. */
+    delete(absolutePath: string): Promise<void>
+    /** Open the hidden backups folder in Finder/Explorer. */
+    openFolder(): Promise<void>
+    /**
+     * Import from a user-picked zip (file picker). Used for "restore
+     * from a zip someone sent me" — versus `restore()` which restores
+     * from one of our own managed backups.
+     */
+    importFromFile(mode: BackupImportMode): Promise<BackupImportResult | null>
   }
 
   bible: {
@@ -528,6 +640,18 @@ export const CHANNELS = {
     list: 'fonts:list',
     upload: 'fonts:upload',
     delete: 'fonts:delete'
+  },
+  backup: {
+    exportNow: 'backup:exportNow',
+    list: 'backup:list',
+    restore: 'backup:restore',
+    delete: 'backup:delete',
+    openFolder: 'backup:openFolder',
+    importFromFile: 'backup:importFromFile'
+  },
+  updater: {
+    getVersion: 'updater:getVersion',
+    checkNow: 'updater:checkNow'
   },
   bible: {
     listTranslations: 'bible:listTranslations',
