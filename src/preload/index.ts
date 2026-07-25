@@ -62,6 +62,16 @@ const api: PresentApi = {
     update: (patch: UpdateSettingsPatch) =>
       ipcRenderer.invoke(CHANNELS.settings.update, patch)
   },
+  // Handlers for system/files arrive with the pre-flight main-process task;
+  // the bridge is declared here so PresentApi stays fully implemented.
+  system: {
+    getPreflight: (setlistId: string | null) =>
+      ipcRenderer.invoke(CHANNELS.system.getPreflight, setlistId),
+    openExternal: (url: string) => ipcRenderer.invoke(CHANNELS.system.openExternal, url)
+  },
+  files: {
+    checkExists: (paths: string[]) => ipcRenderer.invoke(CHANNELS.files.checkExists, paths)
+  },
   dialog: {
     pickFile: (kind: PickFileKind) =>
       ipcRenderer.invoke(CHANNELS.dialog.pickFile, kind)
