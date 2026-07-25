@@ -120,6 +120,22 @@ export interface StageContext {
 export interface VideoTimeUpdate {
   videoPath: string
   currentTime: number
+  /**
+   * Total length in seconds, read straight from the output <video>
+   * element's `duration` property. Required (not optional) so an emit
+   * site can never silently omit it — an optional field would let the
+   * consumer's "confidence monitor" runway readout ("advances in
+   * 0:32") mistake "not sent" for "not loaded yet".
+   *
+   * `HTMLMediaElement.duration` is `NaN` until the browser has loaded
+   * the video's metadata, and can be `Infinity` for a stream — both
+   * are passed through as-is, never coerced to 0 (0 would lie: it
+   * reads as "already finished" rather than "not loaded yet").
+   * Consumers MUST guard with `Number.isFinite(duration)` before doing
+   * arithmetic on it; `duration - currentTime` on a `NaN` duration
+   * renders "advances in NaN:NaN" on a live display.
+   */
+  duration: number
   paused: boolean
 }
 
