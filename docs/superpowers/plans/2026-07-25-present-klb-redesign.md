@@ -2400,9 +2400,18 @@ DETAILS (2-col field grid), LYRICS (with the
 textarea), OPERATOR NOTES · NEVER PROJECTED, then `<ThemeOverrideEditor>`.
 
 Right column: `LIVE PREVIEW · N SLIDES` MonoLabel with a `MAX N LINES` Badge,
-then a 2-col `HairlineGrid` of slide cards — each a mono header bar plus a 16:9
-black body with centred text and a corner shortcut glyph. Driven by the existing
-`previewSongSlides`.
+then a 2-col `HairlineGrid` of slide cards — each a mono header bar, a corner
+shortcut glyph, and a 16:9 body rendered with the song's **effective theme**
+(`mergeThemeOverride(globalTheme, draft.themeOverride)`), reacting to the unsaved
+draft. Driven by the existing `previewSongSlides`.
+
+> The design mockup hardcodes `background:#000000` on these card bodies (L346),
+> and an earlier revision of this plan copied that as "16:9 black body". That was
+> a static-mockup artifact, not intent — the pre-conversion editor rendered these
+> cards themed. The operator uses this grid to catch lyrics going unreadable over
+> a busy background, and needs it for *every* slide; the override panel's single
+> live preview only covers the first. Corrected by the user's ruling during
+> execution.
 
 Replace the old `ThemeOverrideSection`. **Do not modify `ThemeFields.tsx`** —
 Settings still uses it and it is restyled in Task 21.
