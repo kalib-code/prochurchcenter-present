@@ -215,7 +215,9 @@ export interface CreateSetlistInput {
   date: string
 }
 
-export type UpdateSetlistPatch = Partial<Pick<Setlist, 'name' | 'date' | 'items'>>
+export type UpdateSetlistPatch = Partial<
+  Pick<Setlist, 'name' | 'date' | 'items' | 'startTime'>
+>
 
 export type UpdateThemePatch = Partial<Omit<Theme, 'id'>>
 
