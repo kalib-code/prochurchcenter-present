@@ -34,7 +34,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../lib/utils'
 import { loadPdfDocument } from '../lib/pdfLoader'
-import PptxSlideView from './PptxSlideView'
+import PptxSlideView, { type PptxSlideErrorKind } from './PptxSlideView'
 
 function fileUrl(path: string): string {
   return `present-media://local${encodeURI(path)}`
@@ -64,11 +64,18 @@ type Source =
  * ...") has no way to dedupe those N failures into one line — they're all
  * distinct strings. Handing back the raw pieces lets the caller (e.g.
  * ServiceMode) group by `pptxPath` and decide how to summarize.
+ *
+ * `kind` is PptxSlideView's stable classification (see its doc comment) —
+ * use THIS for dedup/grouping keys, not `reason`. `reason` embeds
+ * slide-specific detail (e.g. the failing ordinal) for a few of the
+ * possible failures, so two different slides of the same broken deck can
+ * have distinct `reason` strings while sharing the same `kind`.
  */
 export interface PptxThumbError {
   pptxPath: string
   slideOrdinal: number
   reason: string
+  kind: PptxSlideErrorKind
 }
 
 interface MediaPreviewProps {
@@ -270,8 +277,8 @@ function PdfThumb({
  *   2. Bubbling the failure to the caller as structured fields (not a
  *      pre-composed string) so a caller with many of these mounted at
  *      once — Service Mode's "All Slides" grid, one PptxThumb per slide
- *      — can dedupe/group by `pptxPath` instead of getting one distinct
- *      message per slide. See `PptxThumbError`'s doc comment.
+ *      — can dedupe/group by `(pptxPath, kind)` instead of getting one
+ *      distinct message per slide. See `PptxThumbError`'s doc comment.
  *   3. Deferred mounting (below) so a long deck doesn't pay for every
  *      slide's render up front.
  *
@@ -335,9 +342,9 @@ function PptxThumb({
   }, [inView])
 
   const handleError = useCallback(
-    (reason: string) => {
+    (reason: string, kind: PptxSlideErrorKind) => {
       setErrored(true)
-      onError?.({ pptxPath, slideOrdinal, reason })
+      onError?.({ pptxPath, slideOrdinal, reason, kind })
     },
     [pptxPath, slideOrdinal, onError]
   )

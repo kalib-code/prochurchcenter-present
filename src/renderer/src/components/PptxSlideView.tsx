@@ -58,7 +58,35 @@
 import { useEffect, useRef } from 'react'
 import type { PresentationData, SlideHandle } from '@aiden0z/pptx-renderer'
 import { ordinalToSourceIndex } from '@shared/pptxSlides'
-import { loadPptxDeck } from '../lib/pptxLoader'
+import { loadPptxDeck, type PptxDeck } from '../lib/pptxLoader'
+
+/**
+ * Stable failure bucket, independent of the human-readable message text.
+ *
+ * Why this exists as a separate field rather than callers classifying the
+ * message string themselves: a caller that mounts many PptxSlideView
+ * instances at once (e.g. Service Mode's slide grid — one instance per
+ * slide of a deck) needs to dedupe/group failures per deck rather than
+ * per slide. Grouping by the rendered message text seems to work for a
+ * totally-unreadable file (loadPptxDeck's error doesn't vary per slide),
+ * but breaks for an out-of-range ordinal: that message embeds the ordinal
+ * itself ("Slide 7 is missing..."), so every failing slide produces a
+ * distinct string and none of them collapse. Classifying at the throw
+ * site — where we already know exactly *why* it failed — avoids ever
+ * having to reverse-engineer a bucket out of rendered text (a regex over
+ * the message would silently break the next time the wording changes).
+ */
+export type PptxSlideErrorKind = 'file-unreadable' | 'slide-out-of-range' | 'render-failed'
+
+/** Internal — carries a stable `kind` alongside the human-readable message. */
+class PptxSlideError extends Error {
+  constructor(
+    message: string,
+    readonly kind: PptxSlideErrorKind
+  ) {
+    super(message)
+  }
+}
 
 interface Props {
   pptxPath: string
@@ -67,8 +95,12 @@ interface Props {
   animate: boolean
   transitionDurationMs: number
   useFade: boolean
-  /** Called with a human-readable reason when this slide cannot render. */
-  onError?: (message: string) => void
+  /**
+   * Called when this slide cannot render, with a human-readable reason
+   * plus a stable classification (see PptxSlideErrorKind) a caller can
+   * key on instead of the message text.
+   */
+  onError?: (message: string, kind: PptxSlideErrorKind) => void
 }
 
 export default function PptxSlideView({
@@ -133,13 +165,25 @@ export default function PptxSlideView({
 
     void (async () => {
       try {
-        const deck = await loadPptxDeck(pptxPath)
+        let deck: PptxDeck
+        try {
+          deck = await loadPptxDeck(pptxPath)
+        } catch (err) {
+          // Reclassify as 'file-unreadable' right here, before anything
+          // ordinal-related runs — this is the only place that failure
+          // can originate, so there's no ambiguity to resolve later.
+          throw new PptxSlideError(
+            err instanceof Error ? err.message : 'Could not read this PowerPoint file.',
+            'file-unreadable'
+          )
+        }
         if (cancelled) return
 
         const sourceIndex = ordinalToSourceIndex(deck.slides, slideOrdinal)
         if (sourceIndex === null) {
-          throw new Error(
-            `Slide ${slideOrdinal} is missing — the file may have been replaced with a shorter one.`
+          throw new PptxSlideError(
+            `Slide ${slideOrdinal} is missing — the file may have been replaced with a shorter one.`,
+            'slide-out-of-range'
           )
         }
 
@@ -153,8 +197,9 @@ export default function PptxSlideView({
         const presentation = deck.presentation as PresentationData
         const slideData = presentation.slides[sourceIndex - 1]
         if (!slideData) {
-          throw new Error(
-            `Slide ${slideOrdinal} could not be located in the parsed presentation.`
+          throw new PptxSlideError(
+            `Slide ${slideOrdinal} could not be located in the parsed presentation.`,
+            'slide-out-of-range'
           )
         }
 
@@ -219,9 +264,14 @@ export default function PptxSlideView({
         inFlightHandle = null
         if (cancelled) return
         const message = err instanceof Error ? err.message : 'Could not render this slide.'
+        // Anything that isn't one of our own classified throws (deck load,
+        // out-of-range ordinal) is an unclassified render-time failure —
+        // e.g. renderSlide() itself throwing on malformed slide XML.
+        const kind: PptxSlideErrorKind =
+          err instanceof PptxSlideError ? err.kind : 'render-failed'
         console.error('[PptxSlideView]', pptxPath, slideOrdinal, err)
         // Deliberately leave the DOM alone — the previous slide stays up.
-        onError?.(message)
+        onError?.(message, kind)
       }
     })()
 

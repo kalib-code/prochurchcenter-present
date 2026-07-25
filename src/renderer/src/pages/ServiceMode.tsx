@@ -40,6 +40,7 @@ import { SlideCard } from '../components/SlideCard'
 import { KeyCheatSheet } from '../components/KeyCheatSheet'
 import { WarningBanner, type WarningItem } from '../components/ui/WarningBanner'
 import type { PptxThumbError } from '../components/MediaPreview'
+import type { PptxSlideErrorKind } from '../components/PptxSlideView'
 import { useKeyboard } from '../hooks/useKeyboard'
 import type { Song } from '@shared/types'
 import type { VideoControl, LowerThirdsContent, SlidePayload } from '@shared/ipc-contract'
@@ -472,20 +473,28 @@ function RunningView({
   // so nothing pushed into this list can end up on a screen the
   // congregation can see.
   //
-  // Keyed by `${pptxPath}::${reason}` rather than an array of composed
-  // strings. Two mechanisms feed this: the warm-on-entry preload below
-  // (one shot, whole-file) and reportPptxError (one call per failing
-  // slide's PptxThumb — see MediaPreview.tsx). The grid is unvirtualized,
-  // so a single broken deck can fail on all N of its slides at once;
-  // without this keying, that produces N near-identical banner lines
-  // (plus a 41st from preload) instead of the one line the operator
-  // actually needs. Keying on (path, reason) — not just path — means a
-  // deck that fails for the SAME underlying reason from both mechanisms
-  // (the common case: a missing/renamed file throws the identical
-  // "Could not read ... " message from loadPptxDeck whether it's caught
+  // Keyed by `${pptxPath}::${bucket}` — NOT by the human-readable reason
+  // text — rather than an array of composed strings. Two mechanisms feed
+  // this: the warm-on-entry preload below (one shot, whole-file) and
+  // reportPptxError (one call per failing slide's PptxThumb — see
+  // MediaPreview.tsx). The grid is unvirtualized, so a single broken deck
+  // can fail on all N of its slides at once; without this keying, that
+  // produces N near-identical banner lines (plus a 41st from preload)
+  // instead of the one line the operator actually needs.
+  //
+  // `bucket` is PptxSlideErrorKind — a stable classification assigned at
+  // the throw site in PptxSlideView, not derived from the message text.
+  // That distinction matters: a totally-unreadable file's message happens
+  // not to vary per slide, so keying on raw reason text "works" for that
+  // one case — but an out-of-range ordinal's message embeds the ordinal
+  // itself ("Slide 7 is missing..."), so every failing slide would
+  // produce a distinct reason string and none would collapse. Keying on
+  // the bucket instead of the text means a deck failing for the SAME
+  // underlying cause from both mechanisms (the common case: a
+  // missing/renamed file classifies as 'file-unreadable' whether caught
   // here or inside PptxSlideView) collapses to one entry regardless of
-  // which mechanism reports it first; a deck failing for two genuinely
-  // different reasons still gets two distinct, honest lines.
+  // which mechanism reports it first, while genuinely different failure
+  // kinds for the same deck still get distinct, honest lines.
   interface DeckWarning {
     kind: 'preload' | 'render'
     message: string
@@ -519,15 +528,18 @@ function RunningView({
     for (const path of paths) {
       void loadPptxDeck(path).catch((err) => {
         console.error('[ServiceMode] deck failed to preload', path, err)
-        const reason = err instanceof Error ? err.message : String(err)
         const fileName = path.split(/[/\\]/).pop() ?? path
+        // A preload failure can only mean the file itself couldn't be
+        // read/parsed — there's no ordinal involved, so it always
+        // classifies as 'file-unreadable'.
+        const bucket: PptxSlideErrorKind = 'file-unreadable'
         // Unconditional overwrite (not a merge) — a whole-file preload
         // failure is always the clearest framing for this key, whether
         // it arrives before or after any per-slide render failures that
-        // share the same (path, reason).
+        // share the same (path, bucket).
         setDeckWarnings((prev) => ({
           ...prev,
-          [`${path}::${reason}`]: {
+          [`${path}::${bucket}`]: {
             kind: 'preload',
             message: `${fileName} could not be opened. Its slides will not project.`,
             ordinals: new Set()
@@ -543,12 +555,12 @@ function RunningView({
   // per render would cancel and restart the in-flight slide render on
   // every unrelated ServiceMode re-render (video ticks, timer updates,
   // keystrokes), repeatedly, mid-service.
-  const reportPptxError = useCallback(({ pptxPath, slideOrdinal, reason }: PptxThumbError) => {
+  const reportPptxError = useCallback(({ pptxPath, slideOrdinal, kind }: PptxThumbError) => {
     setDeckWarnings((prev) => {
-      const key = `${pptxPath}::${reason}`
+      const key = `${pptxPath}::${kind}`
       const existing = prev[key]
       // A whole-deck preload failure already covers every slide in this
-      // file for this same reason — a per-slide render failure on top
+      // file for this same bucket — a per-slide render failure on top
       // of it is the same root cause, not new information.
       if (existing?.kind === 'preload') return prev
       const ordinals = new Set(existing?.ordinals)
