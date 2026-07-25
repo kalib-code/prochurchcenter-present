@@ -42,7 +42,15 @@ export function CanvaPicker({ onImported }: Props): JSX.Element {
     setProgress
   } = useCanvaStore()
 
-  const [input, setInput] = useState('')
+  // Seeded from the store's current query, not '' — useCanvaStore is a
+  // module-level singleton, so `designs`/`query` survive this component
+  // unmounting (e.g. the operator clicks "← Back" then reopens Canva).
+  // Starting `input` at '' unconditionally would show an empty search box
+  // over a grid that still reflects the previous search, which reads as
+  // "the search box is broken" to an operator who has moved on to
+  // something else. Seeding preserves their previous search rather than
+  // silently discarding it, and costs no network call.
+  const [input, setInput] = useState(() => useCanvaStore.getState().query)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -54,6 +62,12 @@ export function CanvaPicker({ onImported }: Props): JSX.Element {
   // Guarded by a ref rather than `designs.length === 0` alone: an
   // account that genuinely has zero designs would otherwise retrigger
   // this on every render forever (0 results keeps the condition true).
+  //
+  // Restricted to `input === ''`: this auto-load exists to fetch the
+  // default listing on a fresh connection, not to silently re-run a
+  // reopened picker's previous (possibly non-empty) query. `input` is
+  // already seeded from the store above, so a reopen with a cached
+  // zero-result search is left as-is instead of re-querying it.
   const didAutoLoad = useRef(false)
   useEffect(() => {
     if (state.status !== 'connected') {
@@ -62,8 +76,8 @@ export function CanvaPicker({ onImported }: Props): JSX.Element {
     }
     if (didAutoLoad.current || loading) return
     didAutoLoad.current = true
-    if (designs.length === 0) void search('')
-  }, [state.status, designs.length, loading, search])
+    if (input === '' && designs.length === 0) void search(input)
+  }, [state.status, designs.length, loading, search, input])
 
   // Debounce so typing does not fire a request per keystroke against a
   // rate-limited API. The very first effect run for a connected session
