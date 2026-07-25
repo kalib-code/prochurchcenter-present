@@ -4,7 +4,7 @@
 
 **Goal:** Convert the Present operator UI to the KLB hairline-grid visual system and land the four workflow features the redesign targets — pre-flight, service timing, item-grouped slide grid, and a real NEXT.
 
-**Architecture:** Token remap in `main.css` + `tailwind.config.js` squares and re-colours the whole app in one edit (`--radius: 0` cascades through every `rounded-*` utility because the config derives all five radii from it). Six squared primitives replace the shadcn-lineage ones in place, so import sites never move. Each screen is then converted once, gaining its feature in the same pass. Pure logic (`serviceClock`, `serviceNext`, pre-flight reduction) is extracted to testable modules; JSX conversion is verified by running the app.
+**Architecture:** Token remap in `main.css` + `tailwind.config.js` squares and re-colours the whole app at once — `--radius: 0` cascades through every `rounded-*` utility, once the config's `borderRadius` scale is flattened so `xl`/`2xl` stop adding their `+4px`/`+8px` offsets. Six squared primitives replace the shadcn-lineage ones in place, so import sites never move. Each screen is then converted once, gaining its feature in the same pass. Pure logic (`serviceClock`, `serviceNext`, pre-flight reduction) is extracted to testable modules; JSX conversion is verified by running the app.
 
 **Tech Stack:** Electron 34, React 18, TypeScript 5.7, Tailwind 3.4, Zustand 5, Vite 6, Vitest 2, `@dnd-kit`, `pdfjs-dist`.
 
@@ -314,8 +314,10 @@ Replace lines 20–66 (the `@layer base { :root { … } }` block, keeping the
     --ember: 16 41% 7%;             /* #1A0F0B active row background */
     --panel-hi: 60 5% 8%;           /* #161614 hover, inactive card header */
 
-    /* Squares every rounded-* utility in the codebase in one line,
-       because tailwind.config.js derives all five radii from this. */
+    /* Squares every rounded-* utility, PROVIDED the borderRadius scale in
+       tailwind.config.js is flattened to derive all five sizes from this
+       with no offsets (Step 4). The stock scale adds +4px/+8px for xl/2xl,
+       which would leave those two rounded even at --radius: 0. */
     --radius: 0;
   }
 }
@@ -429,9 +431,38 @@ In `theme.extend`, add the font families and the keyframe animation:
       },
 ```
 
-**Delete** the entire `boxShadow` block (the `shadow-glow-brand` utility). Any
-file still referencing it will fail typecheck-free but render without a shadow,
-which is the desired end state; the two `Home.tsx` call sites are removed in Task 6.
+**Flatten the `borderRadius` block.** The stock scale is:
+
+```js
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+        xl: 'calc(var(--radius) + 4px)',
+        '2xl': 'calc(var(--radius) + 8px)'
+```
+
+At `--radius: 0` the `md`/`sm` calcs go negative and clamp to 0, but `xl` and
+`2xl` resolve to a real **4px and 8px** — leaving eight existing call sites
+rounded and quietly defeating the zero-radius constraint. Replace it with:
+
+```js
+      borderRadius: {
+        // Every size derives from --radius with no offset. The KLB system
+        // has exactly one radius: none. The stock +4px/+8px offsets on
+        // xl/2xl would survive --radius: 0.
+        lg: 'var(--radius)',
+        md: 'var(--radius)',
+        sm: 'var(--radius)',
+        xl: 'var(--radius)',
+        '2xl': 'var(--radius)'
+      },
+```
+
+**Delete** the entire `boxShadow` block (the `shadow-glow-brand` utility). Files
+still referencing it keep compiling and simply render without a shadow, which is
+the desired end state; the remaining call sites are removed when their screen is
+converted (`Card`/`EmptyState` in Tasks 4–5, `Home.tsx` in Task 9,
+`SetlistEditor.tsx` in Task 16, `Settings.tsx` in Task 21).
 
 - [ ] **Step 5: Verify the app builds and is squared**
 
