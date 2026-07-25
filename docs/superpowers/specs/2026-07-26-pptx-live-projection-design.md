@@ -145,15 +145,21 @@ evictPresentation(absPath: string): void
   Measured on `test-deck-hidden.pptx`:
 
   ```
-  lazySlides:true  hidden = [null,null,null,null,null,null,null]   → 7 visible
+  lazySlides:true  hidden = [undefined ×7]                          → 7 visible
   eager            hidden = [false,false,false,false,false,true,false] → 6 visible
   ```
 
-  With `lazySlides`, `hidden` is `null` until a slide is materialized. `null` is
-  falsy, so `!s.hidden` is true for every slide and the hidden draft slide gets
-  projected — the exact failure this design exists to prevent, surfacing in
-  front of a congregation. Media laziness is unaffected and still worth having,
-  so keep `parseZipLazyMedia` and drop only `lazySlides`.
+  With `lazySlides`, `hidden` is `undefined` until a slide is materialized —
+  the library's type is `hidden?: boolean`, and it is populated only during
+  full node-tree parsing. `undefined` is falsy, so `!s.hidden` is true for
+  every slide and the hidden draft slide gets projected: the exact failure this
+  design exists to prevent, surfacing in front of a congregation.
+
+  (Printing those flags via `JSON.stringify` shows `null`, because that is how
+  it renders `undefined` inside an array. The value is `undefined`.)
+
+  Media laziness is decoupled from this — `parseZipLazyMedia` resolves media
+  separately through `mediaResolver` — so keep it and drop only `lazySlides`.
 - `import()` the renderer dynamically inside this module, from the package's
   default entry (`'@aiden0z/pptx-renderer'`) so Vite resolves and bundles
   ECharts and JSZip itself. Do **not** import the `/browser` standalone build;
