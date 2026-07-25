@@ -14,25 +14,47 @@
  *   the preview to update at keystroke speed without waiting for the IPC
  *   round-trip. The canonical sections (on disk) still come from main.
  *
- *   The right-column slide grid is a plain black-background layout preview
- *   (structure, section labels, shortcuts) rather than a themed one — the
- *   THEME preview job belongs to ThemeOverrideEditor's dedicated live
- *   preview block below the lyrics, so it isn't duplicated in two places.
- *   Reference: design L188-356 (Task 12 brief, Step 2).
+ *   The right-column slide grid renders each card with the song's
+ *   EFFECTIVE theme (global merged with this song's draft override) —
+ *   background colour/image, real font, real text colour — so the
+ *   operator can catch lyrics going unreadable over a busy background on
+ *   EVERY slide, not just the single slide shown in the override editor's
+ *   own live-preview panel. That panel stays as the "what does the very
+ *   first slide look like right now" spot-check; this grid is additive,
+ *   covering the whole song. Matches the pre-conversion SongEditor.tsx
+ *   (see git history — it passed the same merged theme to each card).
+ *
+ *   Deliberately reuses SlideCard.tsx's theming CALCULATION (background
+ *   color/image + text color/font — see SlidePreviewCard's `bodyStyle`/
+ *   `textStyle` below) rather than either (a) importing the whole `SlideCard`
+ *   component, which brings its own rounded-md/border chrome that would
+ *   fight this grid's own KLB header+seam styling, or (b) mounting a
+ *   full `SlideRenderer` per card. `SlideRenderer` is deliberately NOT
+ *   used here: it drives an ambient `<video>` element when the theme has
+ *   `backgroundVideoPath` set, plus auto-fit measurement effects and a
+ *   ResizeObserver per instance — fine for the ONE live-preview slide in
+ *   ThemeOverrideEditor, but this grid can render ~20-30 cards
+ *   simultaneously for a long song, and that's exactly the "N videos
+ *   playing at once crashes weak hardware" case SlideCard.tsx's own doc
+ *   comment already warns about. Matching the pre-conversion behavior
+ *   (which used SlideCard, not SlideRenderer, for this exact reason)
+ *   keeps the known-acceptable baseline: real color/image theming without
+ *   the per-card video/auto-fit cost.
  *
  * The rawText textarea is the ONLY place song content can be edited. No
  * per-section drag-and-drop, no rich text. Matches FreeShow's TextEditor.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import type { Song, SongLanguage, ThemeOverride } from '@shared/types'
+import type { Song, SongLanguage, Theme, ThemeOverride } from '@shared/types'
 import type { SlidePayload, UpdateSongPatch } from '@shared/ipc-contract'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { useAutosave, type AutosaveStatus as AutosaveStatusKind } from '../hooks/useAutosave'
 import { previewSongSlides, type SongPreviewSlide } from '../lib/slideify'
+import { mergeThemeOverride } from '../lib/themeOverride'
 import { ThemeOverrideEditor } from '../components/ThemeOverrideEditor'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
@@ -41,6 +63,14 @@ import { MonoLabel } from '../components/ui/MonoLabel'
 import { StatusDot } from '../components/ui/StatusDot'
 import { HairlineGrid } from '../components/ui/HairlineGrid'
 import { cn } from '../lib/utils'
+
+/** Same present-media:// URL scheme SlideRenderer/SlideCard use for a
+ * local file path outside the app bundle. Duplicated here (rather than
+ * imported) because it's a one-line string builder, not worth coupling
+ * this file to SlideCard.tsx's internals for. */
+function fileUrl(path: string): string {
+  return `present-media://local${encodeURI(path)}`
+}
 
 /**
  * Local editor state — a draft of the song fields. Kept separate from
@@ -165,6 +195,16 @@ export function SongEditor(): JSX.Element {
   // keystroke; throwaway render data that never gets persisted.
   const maxLines = settings?.maxLinesPerSlide ?? 4
   const previewSlides = previewSongSlides(draft.rawText, maxLines)
+
+  // Effective theme for the right-column slide grid — global merged with
+  // THIS SONG'S DRAFT override (not the saved record), so edits made in
+  // the override editor below show up here immediately, matching how
+  // every other part of this page previews unsaved state. `globalTheme`
+  // can still be null while the theme store is loading; guard exactly
+  // like the pre-conversion code did rather than rendering a broken card.
+  const effectiveTheme: Theme | null = globalTheme
+    ? mergeThemeOverride(globalTheme, draft.themeOverride)
+    : null
 
   // Sample SlidePayload for the theme-override preview inside the left
   // column. Prefer the song's own first slide (so the operator sees
@@ -346,7 +386,7 @@ export function SongEditor(): JSX.Element {
           ) : (
             <HairlineGrid cols={2}>
               {previewSlides.map((slide) => (
-                <SlidePreviewCard key={slide.key} slide={slide} />
+                <SlidePreviewCard key={slide.key} slide={slide} theme={effectiveTheme} />
               ))}
             </HairlineGrid>
           )}
@@ -460,11 +500,40 @@ function Field({
 
 /**
  * SlidePreviewCard — one cell of the right-column layout grid: a mono
- * header bar (section label) plus a 16:9 black body with centered white
- * text and a corner shortcut glyph. Intentionally NOT theme-driven (see
- * the module doc) — the live theme preview lives in ThemeOverrideEditor.
+ * header bar (section label), a 16:9 body themed with the song's
+ * EFFECTIVE theme (background colour/image + real font/text colour —
+ * see the module doc for why video and auto-fit are deliberately not
+ * reproduced here), and a corner shortcut glyph.
  */
-function SlidePreviewCard({ slide }: { slide: SongPreviewSlide }): JSX.Element {
+function SlidePreviewCard({
+  slide,
+  theme
+}: {
+  slide: SongPreviewSlide
+  theme: Theme | null
+}): JSX.Element {
+  // Mirrors SlideCard.tsx's bodyStyle/textStyle calculation: background
+  // color always (black if no theme yet), background image layered on
+  // top when the theme has one, and text color/font from the theme. No
+  // video layer and no auto-fit sizing — see the module doc for why.
+  const bodyStyle: CSSProperties = {
+    backgroundColor: theme?.backgroundColor ?? '#000000'
+  }
+  if (theme?.backgroundImagePath) {
+    bodyStyle.backgroundImage = `url(${fileUrl(theme.backgroundImagePath)})`
+    bodyStyle.backgroundSize = 'cover'
+    bodyStyle.backgroundPosition = 'center'
+  }
+  const textStyle: CSSProperties = theme
+    ? {
+        color: theme.textColor,
+        fontFamily: theme.fontFamily,
+        // Small fixed shadow keeps preview text legible over a busy
+        // image — operator preview only, doesn't affect projector output.
+        textShadow: theme.backgroundImagePath ? '0 1px 2px rgba(0,0,0,0.85)' : undefined
+      }
+    : {}
+
   return (
     <div className="bg-card">
       <div className="border-b border-border px-2.5 py-[7px]">
@@ -472,16 +541,22 @@ function SlidePreviewCard({ slide }: { slide: SongPreviewSlide }): JSX.Element {
           {slide.sectionLabel || '—'}
         </MonoLabel>
       </div>
-      <div className="relative flex aspect-video items-center justify-center bg-black p-3.5">
+      <div
+        className="relative flex aspect-video items-center justify-center overflow-hidden p-3.5"
+        style={bodyStyle}
+      >
         {slide.lines.length === 0 ? (
           <span className="text-[10px] italic text-dim">(empty)</span>
         ) : (
-          <div className="whitespace-pre-line text-center text-[12px] font-bold leading-[1.5] text-foreground">
+          <div
+            className="whitespace-pre-line text-center text-[12px] font-bold leading-[1.5]"
+            style={textStyle}
+          >
             {slide.lines.join('\n')}
           </div>
         )}
         {slide.shortcut && (
-          <div className="absolute bottom-1.5 right-2 font-mono text-[10px] text-dim">
+          <div className="pointer-events-none absolute bottom-1.5 right-2 font-mono text-[10px] text-dim">
             {slide.shortcut}
           </div>
         )}
