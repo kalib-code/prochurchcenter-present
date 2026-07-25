@@ -66,7 +66,7 @@ describe('resolveNext agrees with the store traversal', () => {
     return 'end'
   }
 
-  it('matches at every position', () => {
+  it('matches both landing position and item-boundary classification at every position', () => {
     for (let i = 0; i < items.length; i++) {
       for (let s = 0; s < items[i].slides.length; s++) {
         const store = storeNext(items, i, s)
@@ -74,9 +74,18 @@ describe('resolveNext agrees with the store traversal', () => {
         if (store === 'end') {
           expect(panel.kind).toBe('end')
         } else {
-          expect(panel.kind).not.toBe('end')
+          // Derive the expected kind from the STORE's own traversal, not
+          // from resolveNext — otherwise a bug that got the indices right
+          // but the kind wrong (e.g. always 'same-item') would sail
+          // through undetected.
+          const expectedKind = store.i === i ? 'same-item' : 'new-item'
+          expect(panel.kind).toBe(expectedKind)
           if (panel.kind !== 'end') {
             expect({ i: panel.itemIndex, s: panel.slideIndex }).toEqual(store)
+          }
+          if (panel.kind === 'new-item') {
+            expect(panel.fromItemLabel).toBe(items[i].label)
+            expect(panel.itemLabel).toBe(items[store.i].label)
           }
         }
       }
