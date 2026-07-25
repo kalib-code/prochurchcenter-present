@@ -24,12 +24,15 @@
  *   covering the whole song. Matches the pre-conversion SongEditor.tsx
  *   (see git history — it passed the same merged theme to each card).
  *
- *   Deliberately reuses SlideCard.tsx's theming CALCULATION (background
- *   color/image + text color/font — see SlidePreviewCard's `bodyStyle`/
- *   `textStyle` below) rather than either (a) importing the whole `SlideCard`
- *   component, which brings its own rounded-md/border chrome that would
- *   fight this grid's own KLB header+seam styling, or (b) mounting a
- *   full `SlideRenderer` per card. `SlideRenderer` is deliberately NOT
+ *   The body/text style calculation itself lives in
+ *   `../lib/slideTheming.ts`, shared with `SlideCard.tsx` (Service
+ *   Mode's slide grid) so the two grids can never silently drift on how
+ *   a theme's colors/fonts translate to CSS — see that module's doc
+ *   comment. This file mounts the calculated style directly rather than
+ *   either (a) importing the whole `SlideCard` component, whose own
+ *   border/hover-ring/dark-header-bar/chip-shortcut chrome would fight
+ *   this grid's `HairlineGrid` seams and KLB mono header, or (b) mounting
+ *   a full `SlideRenderer` per card. `SlideRenderer` is deliberately NOT
  *   used here: it drives an ambient `<video>` element when the theme has
  *   `backgroundVideoPath` set, plus auto-fit measurement effects and a
  *   ResizeObserver per instance — fine for the ONE live-preview slide in
@@ -45,7 +48,7 @@
  * per-section drag-and-drop, no rich text. Matches FreeShow's TextEditor.
  */
 
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { Song, SongLanguage, Theme, ThemeOverride } from '@shared/types'
 import type { SlidePayload, UpdateSongPatch } from '@shared/ipc-contract'
@@ -55,6 +58,7 @@ import { useThemeStore } from '../stores/useThemeStore'
 import { useAutosave, type AutosaveStatus as AutosaveStatusKind } from '../hooks/useAutosave'
 import { previewSongSlides, type SongPreviewSlide } from '../lib/slideify'
 import { mergeThemeOverride } from '../lib/themeOverride'
+import { themedBodyStyle, themedTextStyle } from '../lib/slideTheming'
 import { ThemeOverrideEditor } from '../components/ThemeOverrideEditor'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
@@ -63,14 +67,6 @@ import { MonoLabel } from '../components/ui/MonoLabel'
 import { StatusDot } from '../components/ui/StatusDot'
 import { HairlineGrid } from '../components/ui/HairlineGrid'
 import { cn } from '../lib/utils'
-
-/** Same present-media:// URL scheme SlideRenderer/SlideCard use for a
- * local file path outside the app bundle. Duplicated here (rather than
- * imported) because it's a one-line string builder, not worth coupling
- * this file to SlideCard.tsx's internals for. */
-function fileUrl(path: string): string {
-  return `present-media://local${encodeURI(path)}`
-}
 
 /**
  * Local editor state — a draft of the song fields. Kept separate from
@@ -512,27 +508,9 @@ function SlidePreviewCard({
   slide: SongPreviewSlide
   theme: Theme | null
 }): JSX.Element {
-  // Mirrors SlideCard.tsx's bodyStyle/textStyle calculation: background
-  // color always (black if no theme yet), background image layered on
-  // top when the theme has one, and text color/font from the theme. No
-  // video layer and no auto-fit sizing — see the module doc for why.
-  const bodyStyle: CSSProperties = {
-    backgroundColor: theme?.backgroundColor ?? '#000000'
-  }
-  if (theme?.backgroundImagePath) {
-    bodyStyle.backgroundImage = `url(${fileUrl(theme.backgroundImagePath)})`
-    bodyStyle.backgroundSize = 'cover'
-    bodyStyle.backgroundPosition = 'center'
-  }
-  const textStyle: CSSProperties = theme
-    ? {
-        color: theme.textColor,
-        fontFamily: theme.fontFamily,
-        // Small fixed shadow keeps preview text legible over a busy
-        // image — operator preview only, doesn't affect projector output.
-        textShadow: theme.backgroundImagePath ? '0 1px 2px rgba(0,0,0,0.85)' : undefined
-      }
-    : {}
+  // Shared with SlideCard.tsx — see ../lib/slideTheming.ts's doc comment.
+  const bodyStyle = themedBodyStyle(theme)
+  const textStyle = themedTextStyle(theme)
 
   return (
     <div className="bg-card">
@@ -545,6 +523,13 @@ function SlidePreviewCard({
         className="relative flex aspect-video items-center justify-center overflow-hidden p-3.5"
         style={bodyStyle}
       >
+        {/* Deliberately NO scrim here, unlike SlideCard.tsx's `bg-black/25`
+            overlay. This grid exists so the operator can catch lyrics
+            going unreadable over a busy background — a scrim would
+            artificially lift legibility and hide exactly the failure
+            this preview is meant to surface. SlideRenderer (what the
+            projector actually renders) has no scrim either, so this is
+            the honest rendering, not an incomplete one. */}
         {slide.lines.length === 0 ? (
           <span className="text-[10px] italic text-dim">(empty)</span>
         ) : (

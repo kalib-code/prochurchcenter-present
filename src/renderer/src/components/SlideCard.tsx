@@ -44,8 +44,8 @@
  * keyboard support is cleaner and visually reliable.
  */
 
-import type { CSSProperties } from 'react'
 import type { Theme } from '@shared/types'
+import { themedBodyStyle, themedTextStyle } from '../lib/slideTheming'
 import { MediaPreview } from './MediaPreview'
 
 /**
@@ -78,14 +78,6 @@ interface SlideCardProps {
   onClick?: () => void
 }
 
-/**
- * Build a present-media:// URL the same way SlideRenderer does.
- * Inlined here to keep SlideCard free of imports from SlideRenderer.
- */
-function fileUrl(path: string): string {
-  return `present-media://local${encodeURI(path)}`
-}
-
 export function SlideCard({
   sectionLabel,
   shortcut,
@@ -95,32 +87,15 @@ export function SlideCard({
   active = false,
   onClick
 }: SlideCardProps): JSX.Element {
-  // Build the body style. Three layers, applied conditionally:
-  //   1. backgroundColor (always — black if no theme)
-  //   2. backgroundImage (if theme has one AND there's no media preview)
-  //   3. text color / fontFamily (if theme is set)
-  const usingThemeBg = theme && !preview
-  const bodyStyle: CSSProperties = {
-    backgroundColor: theme?.backgroundColor ?? '#000000'
-  }
-  if (usingThemeBg && theme?.backgroundImagePath) {
-    bodyStyle.backgroundImage = `url(${fileUrl(theme.backgroundImagePath)})`
-    bodyStyle.backgroundSize = 'cover'
-    bodyStyle.backgroundPosition = 'center'
-  }
-
-  const textStyle: CSSProperties = theme
-    ? {
-        color: theme.textColor,
-        fontFamily: theme.fontFamily,
-        // Tiny shadow keeps text legible on busy backgrounds even
-        // without an explicit textEffect — operator preview only,
-        // doesn't affect projector output.
-        textShadow: usingThemeBg && theme.backgroundImagePath
-          ? '0 1px 2px rgba(0,0,0,0.85)'
-          : undefined
-      }
-    : {}
+  // Body/text style calculation lives in ../lib/slideTheming.ts, shared
+  // with SongEditor.tsx's SlidePreviewCard so both grids can never
+  // silently drift on how a theme's colors/fonts translate to CSS. Only
+  // apply the theme's background image (and its accompanying legibility
+  // shadow) when there's no media preview overriding it — a media
+  // preview thumbnail already fills the body edge-to-edge.
+  const usingThemeBg = Boolean(theme) && !preview
+  const bodyStyle = themedBodyStyle(theme, usingThemeBg)
+  const textStyle = themedTextStyle(theme, usingThemeBg)
 
   return (
     <div
