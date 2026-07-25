@@ -345,6 +345,7 @@ function HeroSetlist({
                   {i + 1}
                 </span>
                 <Badge
+                  tone={itemKindTone(item.kind)}
                   className="w-10 shrink-0 justify-center"
                   title={itemKindLabel(item.kind)}
                 >
@@ -462,6 +463,15 @@ function previewLabel(item: SetlistItem, songsById: Map<string, Song>): string {
     case 'section-divider':
       return item.label.trim() || 'Section'
   }
+}
+
+/**
+ * Service Plan badge tone. Section dividers are grouping only — they never
+ * reach the projector — so they read neutral while every real content kind
+ * reads signal. Mirrors the design's kindFg/kindBd split.
+ */
+function itemKindTone(kind: SetlistItem['kind']): 'signal' | 'neutral' {
+  return kind === 'section-divider' ? 'neutral' : 'signal'
 }
 
 /** Short mono code for an item kind's Badge — SNG, SCR, IMG, VID, PDF, CNT, DIV. */
