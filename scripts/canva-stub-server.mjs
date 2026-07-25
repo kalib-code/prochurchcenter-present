@@ -17,14 +17,18 @@
  */
 
 import { createServer } from 'node:http'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto'
 
 const PORT = 8787
 const BASE = `http://127.0.0.1:${PORT}`
 const CLIENT_ID = process.env.CANVA_CLIENT_ID
 const CLIENT_SECRET = process.env.CANVA_CLIENT_SECRET
-// Ephemeral: restarting the stub invalidates in-flight flows, which is fine.
-const SIGNING_KEY = process.env.CANVA_STUB_SIGNING_KEY ?? 'dev-only-signing-key'
+// Generated at startup: each invocation creates a new key, invalidating any
+// in-flight authorization flows from the previous run. This prevents key
+// reuse across deployments and ensures the stub cannot be used as a reference
+// implementation if copied into a production environment without explicit
+// key configuration.
+const SIGNING_KEY = randomBytes(32)
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
   console.error('Set CANVA_CLIENT_ID and CANVA_CLIENT_SECRET.')
@@ -52,7 +56,7 @@ function verifyState(token) {
   const b = Buffer.from(expected)
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null
   const payload = JSON.parse(Buffer.from(body, 'base64url').toString())
-  if (Date.now() - payload.iat > STATE_TTL_MS) return null
+  if (typeof payload.iat !== 'number' || Date.now() - payload.iat > STATE_TTL_MS) return null
   return payload
 }
 
@@ -70,6 +74,7 @@ function readJsonBody(req) {
         reject(err)
       }
     })
+    req.on('error', reject)
   })
 }
 
