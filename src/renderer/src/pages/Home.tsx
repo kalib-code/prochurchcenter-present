@@ -1,46 +1,54 @@
 /**
  * Home — the first screen Ate Rose sees when she opens Present.
  *
- * Two-pane hero layout:
- *   - Left pane  : today-or-next headline, date, item count, CTAs
- *   - Right pane : a compact preview of the first few items in that
- *                  setlist so the operator can see AT A GLANCE what
- *                  the service looks like without opening it. This
- *                  was the single biggest weakness of the previous
- *                  layout — the hero had lots of empty space and
- *                  gave zero context about contents.
+ * Hero panel (signal-bordered, `Panel emphasis`):
+ *   - Left pane  : NEXT UP eyebrow, setlist name, date/item/slide meta,
+ *                  the pre-flight warning banner (if any), CTAs, and the
+ *                  quiet Clone/Delete row.
+ *   - Right pane : SERVICE PLAN — a compact preview of the first five
+ *                  items in that setlist so the operator can see AT A
+ *                  GLANCE what the service looks like without opening it.
+ *
+ * Below the hero: the full pre-flight readiness panel (checked on
+ * launch and on demand — never polled), then the other saved setlists
+ * as a seamless hairline grid.
  *
  * Header keeps nav + a permanent "+ New Setlist" button so creating a
  * fresh service never requires scrolling or hunting for a CTA.
- *
- * Other setlists render as cards. Each card shows a date "tile", the
- * name, and a condensed item-kind row (icon chips) so recent setlists
- * don't all look identical — the visual weight of "song song scripture
- * deck" vs "countdown video scripture" is different.
  */
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import type { PreflightCheck, PreflightReport } from '@shared/ipc-contract'
 import type { Setlist, SetlistItem, Song } from '@shared/types'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import {
   formatServiceDate,
-  isToday,
   nextSundayISO,
+  pickHero,
   suggestCloneDefaults
 } from '../lib/setlist-helpers'
+import { slideifySetlist } from '../lib/slideify'
+import { summarize } from '../lib/preflight'
 import { Button } from '../components/ui/Button'
-import { Card } from '../components/ui/Card'
+import { Panel } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { EmptyState } from '../components/ui/EmptyState'
-import { ItemKindIcon, itemKindLabel } from '../components/ItemKindIcon'
+import { MonoLabel } from '../components/ui/MonoLabel'
+import { StatusDot } from '../components/ui/StatusDot'
+import { TitleDot } from '../components/ui/TitleDot'
+import { HairlineGrid } from '../components/ui/HairlineGrid'
+import { PreflightBanner, PreflightPanel } from '../components/PreflightPanel'
+import { itemKindLabel } from '../components/ItemKindIcon'
 
 export function Home(): JSX.Element {
   const navigate = useNavigate()
   const { setlists, loading, error, load, create, remove, clone } = useSetlistStore()
   const { songs, load: loadSongs } = useLibraryStore()
   const [busy, setBusy] = useState(false)
+  const [preflight, setPreflight] = useState<PreflightReport | null>(null)
+  const [preflightBusy, setPreflightBusy] = useState(false)
 
   useEffect(() => {
     load()
@@ -57,6 +65,40 @@ export function Home(): JSX.Element {
 
   const heroSetlist = pickHero(setlists)
   const otherSetlists = setlists.filter((s) => s.id !== heroSetlist?.id)
+  const heroId = heroSetlist?.id ?? null
+
+  // Pre-flight is checked once we know which setlist to check against
+  // (heroId starts null until setlists finish loading, then settles),
+  // and again on demand via RE-CHECK. Never polled.
+  useEffect(() => {
+    let cancelled = false
+    window.api.system.getPreflight(heroId).then((report) => {
+      if (!cancelled) setPreflight(report)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [heroId])
+
+  const handleRecheck = async (): Promise<void> => {
+    setPreflightBusy(true)
+    try {
+      const report = await window.api.system.getPreflight(heroId)
+      setPreflight(report)
+    } finally {
+      setPreflightBusy(false)
+    }
+  }
+
+  const handlePreflightRemedy = (check: PreflightCheck): void => {
+    const remedy = check.remedy
+    if (!remedy) return
+    if (remedy.kind === 'external') {
+      window.api.system.openExternal(remedy.target)
+    } else {
+      navigate(remedy.target)
+    }
+  }
 
   const handleNew = async (): Promise<void> => {
     if (busy) return
@@ -95,92 +137,88 @@ export function Home(): JSX.Element {
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
       {/* ── Header ─────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between border-b border-border/40 px-10 py-5">
+      <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-border bg-card px-6">
         <div className="flex items-baseline gap-3">
-          <h1 className="font-editorial text-2xl font-semibold tracking-tight text-foreground">
+          <span className="text-[22px] font-extrabold tracking-[-0.03em] text-foreground">
             Present
-          </h1>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand/70">
-            ProChurchCenter
+            <TitleDot />
           </span>
+          <MonoLabel size="xs" className="tracking-[0.18em]">
+            PROCHURCHCENTER
+          </MonoLabel>
         </div>
-        <nav className="flex items-center gap-1.5">
+        <nav className="flex items-center">
           <Button variant="ghost" size="sm" asChild>
-            <Link to="/library">Song Library</Link>
+            <Link to="/library">SONG LIBRARY</Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>
-            <Link to="/settings">Settings</Link>
+            <Link to="/settings">SETTINGS</Link>
           </Button>
-          <div className="mx-2 h-5 w-px bg-border/60" />
-          <Button variant="signal" size="sm" onClick={handleNew} disabled={busy}>
-            + New Setlist
+          <div className="mx-3.5 h-[22px] w-px bg-border" />
+          <Button variant="signal" size="md" onClick={handleNew} disabled={busy}>
+            + NEW SETLIST
           </Button>
         </nav>
       </header>
 
       {/* ── Body ───────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto px-10 py-10">
-        <div className="mx-auto max-w-6xl">
-          {loading && !heroSetlist && (
-            <p className="text-sm text-muted-foreground">Loading setlists…</p>
-          )}
-          {error && (
-            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              Failed to load: {error}
-            </p>
-          )}
+      <main className="flex-1 overflow-y-auto px-6 pb-10 pt-[26px]">
+        {loading && !heroSetlist && (
+          <p className="mb-4 text-[13px] text-muted-foreground">Loading setlists…</p>
+        )}
+        {error && (
+          <p className="mb-4 border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+            Failed to load: {error}
+          </p>
+        )}
 
-          {/* Hero: today/upcoming setlist */}
-          {heroSetlist && (
-            <HeroSetlist
-              setlist={heroSetlist}
-              songsById={songsById}
-              onDelete={() => handleDelete(heroSetlist.id, heroSetlist.name)}
-              onCloneLast={handleCloneLast}
-              canCloneLast={setlists.length > 0}
-              busy={busy}
+        {/* Hero: today/upcoming setlist */}
+        {heroSetlist && (
+          <HeroSetlist
+            setlist={heroSetlist}
+            songsById={songsById}
+            preflight={preflight}
+            onPreflightAct={handlePreflightRemedy}
+            onDelete={() => handleDelete(heroSetlist.id, heroSetlist.name)}
+            onCloneLast={handleCloneLast}
+            canCloneLast={setlists.length > 0}
+            busy={busy}
+          />
+        )}
+
+        {/* Pre-flight readiness */}
+        <PreflightPanel report={preflight} onRecheck={handleRecheck} busy={preflightBusy} />
+
+        {/* Other setlists */}
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <MonoLabel>{heroSetlist ? 'OTHER SETLISTS' : 'SETLISTS'}</MonoLabel>
+            {otherSetlists.length > 0 && (
+              <MonoLabel tone="dim">{otherSetlists.length} SAVED</MonoLabel>
+            )}
+          </div>
+
+          {otherSetlists.length === 0 && !heroSetlist && !loading && (
+            <EmptyState
+              icon="✦"
+              title="No setlists yet"
+              description="Plan your first service to see it here. You'll be able to add songs, scripture, PDFs, and videos."
+              cta={
+                <Button variant="signal" size="md" onClick={handleNew}>
+                  + Create your first setlist
+                </Button>
+              }
             />
           )}
 
-          {/* Other setlists */}
-          <section className="mt-12">
-            <div className="mb-4 flex items-baseline justify-between">
-              <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                {heroSetlist ? 'Other setlists' : 'Setlists'}
-              </h2>
-              {otherSetlists.length > 0 && (
-                <span className="text-xs text-muted-foreground/70">
-                  {otherSetlists.length} total
-                </span>
-              )}
-            </div>
-
-            {otherSetlists.length === 0 && !heroSetlist && !loading && (
-              <EmptyState
-                icon="✦"
-                title="No setlists yet"
-                description="Plan your first service to see it here. You'll be able to add songs, scripture, PDFs, and videos."
-                cta={
-                  <Button variant="signal" size="md" onClick={handleNew}>
-                    + Create your first setlist
-                  </Button>
-                }
-              />
-            )}
-
-            {otherSetlists.length > 0 && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {otherSetlists.map((s) => (
-                  <SetlistCard
-                    key={s.id}
-                    setlist={s}
-                    onDelete={() => handleDelete(s.id, s.name)}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+          {otherSetlists.length > 0 && (
+            <HairlineGrid cols={3}>
+              {otherSetlists.map((s) => (
+                <SetlistCell key={s.id} setlist={s} onDelete={() => handleDelete(s.id, s.name)} />
+              ))}
+            </HairlineGrid>
+          )}
+        </section>
       </main>
     </div>
   )
@@ -191,6 +229,8 @@ export function Home(): JSX.Element {
 function HeroSetlist({
   setlist,
   songsById,
+  preflight,
+  onPreflightAct,
   onDelete,
   onCloneLast,
   canCloneLast,
@@ -198,146 +238,135 @@ function HeroSetlist({
 }: {
   setlist: Setlist
   songsById: Map<string, Song>
+  preflight: PreflightReport | null
+  onPreflightAct: (check: PreflightCheck) => void
   onDelete: () => void
   onCloneLast: () => void
   canCloneLast: boolean
   busy: boolean
 }): JSX.Element {
-  const today = isToday(setlist)
-  const eyebrow = today ? 'Today · Live service' : 'Next up'
   const itemCount = setlist.items.length
-  // Show up to 4 items in the preview panel; the rest collapse into
-  // a "+N more" footer so the hero never grows unpredictably long.
-  const previewItems = setlist.items.slice(0, 4)
-  const hiddenCount = Math.max(0, setlist.items.length - previewItems.length)
+  // Show up to 5 items in the service-plan preview; the rest collapse
+  // into a "+N more" footer so the hero never grows unpredictably long.
+  const planRows = setlist.items.slice(0, 5)
+  const hiddenCount = Math.max(0, itemCount - planRows.length)
+
+  const rendered = useMemo(
+    () => slideifySetlist(setlist, songsById),
+    [setlist, songsById]
+  )
+  const slideCount = rendered.reduce((sum, item) => sum + item.slides.length, 0)
+
+  const preflightSummary = preflight ? summarize(preflight.checks) : null
+  const showBanner = preflightSummary && preflightSummary.warningCount > 0 && preflightSummary.firstWarning
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-br from-card/80 via-card/40 to-background shadow-[0_24px_80px_-40px_hsl(var(--brand)/0.45)]">
-      {/* Subtle brand glow corners — stayed because they give the hero
-          a distinct "this is the star of the page" silhouette. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-brand/10 blur-3xl"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -bottom-32 -left-20 h-80 w-80 rounded-full bg-brand/5 blur-3xl"
-      />
-
-      <div className="relative grid grid-cols-1 gap-8 p-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:gap-10">
-        {/* ── Left: headline + CTAs ─────────────────────────────── */}
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand">
-              {eyebrow}
-            </div>
-            {today && <Badge tone="signal">Today</Badge>}
-          </div>
-
-          <h2 className="mt-3 truncate font-editorial text-[44px] font-semibold leading-[1.05] tracking-tight text-foreground">
-            {setlist.name}
-          </h2>
-
-          <div className="mt-3 flex items-center gap-3 text-sm text-muted-foreground">
-            <span>{formatServiceDate(setlist.date)}</span>
-            <span className="text-muted-foreground/50">·</span>
-            <span>
-              {itemCount} item{itemCount === 1 ? '' : 's'}
-            </span>
-          </div>
-
-          <div className="mt-7 flex flex-wrap items-center gap-2">
-            <Button variant="signal" size="lg" asChild>
-              <Link to={today ? `/service/${setlist.id}` : `/setlists/${setlist.id}`}>
-                {today ? 'Start Service →' : 'Open setlist'}
-              </Link>
-            </Button>
-            <Button variant="secondary" size="lg" asChild>
-              <Link to={`/setlists/${setlist.id}`}>Edit</Link>
-            </Button>
-            {!today && (
-              <Button variant="secondary" size="lg" asChild>
-                <Link to={`/service/${setlist.id}`}>Rehearse</Link>
-              </Button>
-            )}
-          </div>
-
-          {/* Low-key row for secondary / destructive actions. Grouped
-              together so neither fights the preview panel on the right
-              nor the primary CTAs above. */}
-          <div className="mt-5 flex items-center gap-3 text-[11px] text-muted-foreground">
-            {canCloneLast && (
-              <>
-                <button
-                  onClick={onCloneLast}
-                  disabled={busy}
-                  className="underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50"
-                >
-                  Clone last Sunday
-                </button>
-                <span className="text-muted-foreground/40">·</span>
-              </>
-            )}
-            <button
-              onClick={onDelete}
-              className="underline-offset-4 hover:text-destructive hover:underline"
-            >
-              Delete setlist
-            </button>
-          </div>
+    <Panel emphasis className="mb-[34px] grid grid-cols-1 lg:grid-cols-[1.25fr_1fr]">
+      {/* ── Left: headline + CTAs ─────────────────────────────── */}
+      <div className="min-w-0 px-[34px] pb-[30px] pt-[34px]">
+        <div className="mb-5 flex items-center gap-2.5">
+          <StatusDot tone="signal" pulse />
+          <MonoLabel tone="signal">NEXT UP</MonoLabel>
         </div>
 
-        {/* ── Right: preview panel ──────────────────────────────── */}
-        <div className="min-w-0">
-          <div className="rounded-xl border border-border/50 bg-background/30 p-4 backdrop-blur-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/80">
-                Service plan
-              </div>
-              <div className="text-[10px] text-muted-foreground/60">
-                {itemCount} total
-              </div>
-            </div>
-            {previewItems.length === 0 ? (
-              <div className="py-6 text-center text-[11px] text-muted-foreground/70">
-                This setlist is empty. Open it to add your first items.
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {previewItems.map((item, i) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-card/60"
-                  >
-                    <span className="w-4 text-right text-[10px] font-medium tabular-nums text-muted-foreground/60">
-                      {i + 1}
-                    </span>
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/50 text-muted-foreground">
-                      <ItemKindIcon kind={item.kind} size={15} />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground/90">
-                      {previewLabel(item, songsById)}
-                    </span>
-                  </li>
-                ))}
-                {hiddenCount > 0 && (
-                  <li className="mt-1 pl-[52px] text-[11px] text-muted-foreground/70">
-                    + {hiddenCount} more
-                  </li>
-                )}
-              </ul>
-            )}
-          </div>
+        <h2 className="mb-4 truncate text-[56px] font-extrabold leading-[1.02] tracking-[-0.035em] text-foreground">
+          {setlist.name}
+          <TitleDot />
+        </h2>
+
+        <div className="mb-[30px] font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-soft">
+          {formatServiceDate(setlist.date)} &nbsp;·&nbsp; {itemCount} item
+          {itemCount === 1 ? '' : 's'} &nbsp;·&nbsp; {slideCount} slide
+          {slideCount === 1 ? '' : 's'}
+        </div>
+
+        {showBanner && preflightSummary && preflightSummary.firstWarning && (
+          <PreflightBanner
+            check={preflightSummary.firstWarning}
+            count={preflightSummary.warningCount}
+            onAct={onPreflightAct}
+          />
+        )}
+
+        <div className="mb-[22px] flex">
+          <Button variant="signal" size="lg" asChild>
+            <Link to={`/service/${setlist.id}`}>START SERVICE →</Link>
+          </Button>
+          <Button variant="outline" size="lg" className="border-l-0" asChild>
+            <Link to={`/setlists/${setlist.id}`}>EDIT</Link>
+          </Button>
+          <Button variant="outline" size="lg" className="border-l-0" asChild>
+            <Link to={`/service/${setlist.id}`}>REHEARSE</Link>
+          </Button>
+        </div>
+
+        {/* Low-key row for secondary / destructive actions. */}
+        <div className="flex items-center gap-3.5 text-[12px] text-muted-foreground">
+          {canCloneLast && (
+            <>
+              <button
+                onClick={onCloneLast}
+                disabled={busy}
+                className="text-soft hover:text-foreground disabled:opacity-50"
+              >
+                Clone last Sunday
+              </button>
+              <span className="text-border">|</span>
+            </>
+          )}
+          <button onClick={onDelete} className="text-soft hover:text-signal-deep">
+            Delete setlist
+          </button>
         </div>
       </div>
 
-    </section>
+      {/* ── Right: service plan preview ───────────────────────── */}
+      <div className="flex min-w-0 flex-col border-l border-border">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3.5">
+          <MonoLabel tone="soft">SERVICE PLAN</MonoLabel>
+          <MonoLabel>{itemCount} TOTAL</MonoLabel>
+        </div>
+
+        {planRows.length === 0 ? (
+          <div className="px-5 py-8 text-center text-[11px] text-muted-foreground">
+            This setlist is empty. Open it to add your first items.
+          </div>
+        ) : (
+          <>
+            {planRows.map((item, i) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-3.5 border-b border-rule px-5 py-3"
+              >
+                <span className="w-3.5 shrink-0 text-right font-mono text-[10px] text-dim">
+                  {i + 1}
+                </span>
+                <Badge
+                  className="w-10 shrink-0 justify-center"
+                  title={itemKindLabel(item.kind)}
+                >
+                  {itemKindCode(item.kind)}
+                </Badge>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-bone">
+                  {previewLabel(item, songsById)}
+                </span>
+              </div>
+            ))}
+            {hiddenCount > 0 && (
+              <div className="px-5 py-3 font-mono text-[9.5px] font-medium tracking-[0.1em] text-muted-foreground">
+                + {hiddenCount} MORE
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
   )
 }
 
-// ─── Small grid card for other setlists ────────────────────────────────
+// ─── Small grid cell for other setlists ────────────────────────────────
 
-function SetlistCard({
+function SetlistCell({
   setlist,
   onDelete
 }: {
@@ -347,78 +376,67 @@ function SetlistCard({
   const itemCount = setlist.items.length
   const parts = setlist.date.split('-')
   const month = parts[1]
-    ? new Date(setlist.date + 'T00:00:00').toLocaleString(undefined, {
-        month: 'short'
-      })
+    ? new Date(setlist.date + 'T00:00:00').toLocaleString(undefined, { month: 'short' })
     : '—'
   const day = parts[2] ?? '—'
-  // Icon chip strip — up to 5 glyphs so the card footprint is stable.
+  // Item-kind badge strip — up to 5 glyphs so the cell footprint is stable.
   const glyphs = setlist.items.slice(0, 5)
   const remaining = Math.max(0, setlist.items.length - glyphs.length)
 
   return (
-    <Card className="group relative overflow-hidden p-4 transition-all hover:border-border hover:bg-card/80 hover:-translate-y-0.5 hover:shadow-[0_14px_40px_-28px_hsl(var(--brand)/0.5)]">
-      <Link to={`/setlists/${setlist.id}`} className="flex flex-col gap-3">
-        <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-lg border border-border/60 bg-background/60">
-            <div className="text-[9px] font-semibold uppercase tracking-widest text-brand/80">
-              {month}
-            </div>
-            <div className="font-editorial text-xl font-semibold leading-none text-foreground">
-              {day}
-            </div>
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-semibold text-foreground">
-              {setlist.name}
-            </div>
-            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span>{formatServiceDate(setlist.date)}</span>
-              <span className="text-muted-foreground/50">·</span>
-              <span>
-                {itemCount} item{itemCount === 1 ? '' : 's'}
-              </span>
-            </div>
-          </div>
+    <div className="group relative bg-card p-5 hover:bg-panel-hi">
+      <Link to={`/setlists/${setlist.id}`} className="flex gap-4">
+        <div className="flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center border border-border">
+          <span className="font-mono text-[8.5px] font-semibold uppercase tracking-[0.12em] text-signal">
+            {month}
+          </span>
+          <span className="text-[20px] font-extrabold leading-[1.1] tracking-[-0.03em] text-foreground">
+            {day}
+          </span>
         </div>
 
-        {/* Item-kind glyph strip — gives each card a visual fingerprint */}
-        {glyphs.length > 0 && (
-          <div className="flex items-center gap-1.5 border-t border-border/30 pt-3">
-            {glyphs.map((item) => (
-              <span
-                key={item.id}
-                className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/40 text-muted-foreground/80"
-                title={itemKindLabel(item.kind)}
-              >
-                <ItemKindIcon kind={item.kind} size={13} />
-              </span>
-            ))}
-            {remaining > 0 && (
-              <span className="text-[10px] text-muted-foreground/60">
-                +{remaining}
-              </span>
-            )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[15px] font-bold tracking-[-0.01em] text-foreground">
+            {setlist.name}
           </div>
-        )}
+          <div className="mb-3 mt-[5px] font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            {formatServiceDate(setlist.date)} &nbsp;·&nbsp; {itemCount} item
+            {itemCount === 1 ? '' : 's'}
+          </div>
+          {glyphs.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              {glyphs.map((item) => (
+                <Badge key={item.id} title={itemKindLabel(item.kind)}>
+                  {itemKindCode(item.kind)}
+                </Badge>
+              ))}
+              {remaining > 0 && (
+                <span className="font-mono text-[8px] text-dim">+{remaining}</span>
+              )}
+            </div>
+          )}
+        </div>
       </Link>
 
       <button
-        onClick={onDelete}
-        className="absolute right-3 top-3 rounded p-1 text-[11px] text-muted-foreground/60 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onDelete()
+        }}
+        className="absolute right-3 top-3 p-1 text-[11px] text-dim opacity-0 transition-opacity hover:text-signal-deep group-hover:opacity-100"
         aria-label={`Delete ${setlist.name}`}
       >
         ✕
       </button>
-    </Card>
+    </div>
   )
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 /**
- * Label to show in the hero preview panel for a given item. Resolves
+ * Label to show in the service-plan preview for a given item. Resolves
  * songs against the library so the operator sees the song title
  * rather than an opaque ID.
  */
@@ -443,23 +461,22 @@ function previewLabel(item: SetlistItem, songsById: Map<string, Song>): string {
   }
 }
 
-/**
- * Choose the setlist most worth spotlighting.
- *   1. If one is today, use it.
- *   2. Else use the next upcoming future setlist (earliest date >= today).
- *   3. Else use the most recent past setlist (for recap / rehearsal).
- *   4. Else null (no setlists at all).
- */
-function pickHero(setlists: Setlist[]): Setlist | null {
-  if (setlists.length === 0) return null
-  const todayOne = setlists.find(isToday)
-  if (todayOne) return todayOne
-
-  const todayIso = new Date().toISOString().slice(0, 10)
-  const upcoming = setlists
-    .filter((s) => s.date >= todayIso)
-    .sort((a, b) => a.date.localeCompare(b.date))
-  if (upcoming[0]) return upcoming[0]
-
-  return setlists[0] ?? null
+/** Short mono code for an item kind's Badge — SNG, SCR, IMG, VID, PDF, CNT, DIV. */
+function itemKindCode(kind: SetlistItem['kind']): string {
+  switch (kind) {
+    case 'song':
+      return 'SNG'
+    case 'scripture':
+      return 'SCR'
+    case 'image':
+      return 'IMG'
+    case 'video':
+      return 'VID'
+    case 'deck':
+      return 'PDF'
+    case 'countdown':
+      return 'CNT'
+    case 'section-divider':
+      return 'DIV'
+  }
 }
