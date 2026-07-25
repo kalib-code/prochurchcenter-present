@@ -16,6 +16,8 @@ import { registerBibleHandlers } from './bible'
 import { registerFontsHandlers } from './fonts'
 import { registerBackupHandlers } from './backup'
 import { registerUpdaterHandlers } from './updater'
+import { registerSystemHandlers } from './system'
+import { registerFilesHandlers } from './files'
 
 export function registerAllIpcHandlers(): void {
   registerSongHandlers()
@@ -28,4 +30,6 @@ export function registerAllIpcHandlers(): void {
   registerFontsHandlers()
   registerBackupHandlers()
   registerUpdaterHandlers()
+  registerSystemHandlers()
+  registerFilesHandlers()
 }
