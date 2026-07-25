@@ -14,3 +14,17 @@ export async function atomicWriteJson(path: string, data: unknown): Promise<void
   await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
   await rename(tmp, path)
 }
+
+/**
+ * Atomic binary write — same tmp-then-rename guarantee as
+ * atomicWriteJson, but for buffers. `atomicWriteJson` cannot be reused
+ * here: it JSON.stringifies and writes utf8, which would corrupt a PDF.
+ *
+ * The tmp file is created in the destination directory so the rename
+ * stays on one filesystem and therefore stays atomic.
+ */
+export async function atomicWriteFile(path: string, data: Uint8Array): Promise<void> {
+  const tmp = `${path}.tmp`
+  await writeFile(tmp, data)
+  await rename(tmp, path)
+}
