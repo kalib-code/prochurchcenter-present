@@ -46,7 +46,11 @@
 | `vitest.config.ts` | **Modify.** Widen `include` to renderer tests. |
 | `package.json` | **Modify.** Add renderer dep + `jsdom` devDep. |
 
-Task order follows the dependency chain: pure math first (no dependencies), then the loader, then the data model and fan-out, then UI, then service-time behaviour.
+Task order follows the dependency chain: pure math first (no dependencies), then
+the test environment, then the data model with its fan-out, then the loader, then
+UI, then service-time behaviour. The test environment comes second because every
+test after Task 1 lives under `src/renderer/` and is not collected until the
+vitest glob widens.
 
 ---
 
@@ -219,101 +223,7 @@ inside the DOM-dependent loader."
 
 ---
 
-### Task 2: Data model and IPC contract
-
-Type-only change. The `never` exhaustiveness check in `slideify` will now fail to compile, which is intended — Task 4 fixes it. Commit this task with `slideify` temporarily handling `pptx` by returning `null`, so the tree always compiles.
-
-**Files:**
-- Modify: `src/shared/types.ts` (after the `deck` variant, ~line 124)
-- Modify: `src/shared/ipc-contract.ts:231` (`PickFileKind`) and the `SlidePayload` union
-- Modify: `src/renderer/src/lib/slideify.ts:269` (temporary stub)
-
-**Interfaces:**
-- Consumes: nothing.
-- Produces: `SetlistItem` variant `{ kind: 'pptx'; id: string; pptxPath: string; slideCount: number; title?: string }`; `SlidePayload` variant `{ kind: 'pptx-slide'; pptxPath: string; slideOrdinal: number; slideCount: number }`; `PickFileKind` gains `'pptx'`.
-
-- [ ] **Step 1: Add the SetlistItem variant**
-
-In `src/shared/types.ts`, immediately after the `deck` variant, add:
-
-```ts
-  /**
-   * PowerPoint deck rendered live — no PDF export step. The operator picks a
-   * .pptx and we render each slide in the projector via @aiden0z/pptx-renderer.
-   *
-   * slideCount counts VISIBLE slides only (PowerPoint skips slides marked
-   * hidden when presenting, so we do too). It is cached at add-time for the
-   * same reason deck.pageCount is: slideify expands items synchronously.
-   *
-   * Only .pptx is supported — the renderer parses Office Open XML, so legacy
-   * binary .ppt, .key, and .odp are not accepted by the file picker.
-   */
-  | {
-      kind: 'pptx'
-      id: string
-      pptxPath: string
-      slideCount: number
-      /** Optional display name shown in the operator upcoming list */
-      title?: string
-    }
-```
-
-- [ ] **Step 2: Add the SlidePayload variant and PickFileKind value**
-
-In `src/shared/ipc-contract.ts`, find the `SlidePayload` union (it contains `{ kind: 'pdf-page'; ... }`) and add alongside it:
-
-```ts
-  /**
-   * One slide of a live-rendered PowerPoint deck.
-   *
-   * slideOrdinal is 1-based over VISIBLE slides — see @shared/pptxSlides for
-   * why that differs from the slide's position in the file.
-   */
-  | {
-      kind: 'pptx-slide'
-      pptxPath: string
-      slideOrdinal: number
-      slideCount: number
-    }
-```
-
-Then change line 231:
-
-```ts
-export type PickFileKind = 'image' | 'video' | 'media' | 'pdf' | 'pptx' | 'font'
-```
-
-- [ ] **Step 3: Stub the slideify branch so the tree compiles**
-
-In `src/renderer/src/lib/slideify.ts`, immediately before the `const _never: never = item` line, add:
-
-```ts
-  // Filled in by the fan-out task. Returning null keeps the exhaustiveness
-  // check satisfied and the tree compiling in the meantime.
-  if (item.kind === 'pptx') return null
-```
-
-- [ ] **Step 4: Verify the tree compiles**
-
-```bash
-pnpm typecheck
-```
-
-Expected: PASS. If it reports a non-exhaustive switch anywhere, add a `pptx` case there — search for `item.kind ===` and `case 'deck'` to find every site.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/shared/types.ts src/shared/ipc-contract.ts src/renderer/src/lib/slideify.ts
-git commit -m "feat: pptx item kind and pptx-slide payload
-
-Types only. slideify stubs the branch to keep the tree compiling until the
-fan-out lands."
-```
-
----
-
-### Task 3: Test environment for renderer tests
+### Task 2: Test environment for renderer tests
 
 `vitest.config.ts` currently matches only `src/shared/**/*.test.ts` under `environment: 'node'`. The loader tests need both a wider glob and, for the one file that parses a real deck, a DOM.
 
@@ -373,6 +283,227 @@ only viable DOM for parsing .pptx in tests."
 ```
 
 ---
+
+### Task 3: Data model, IPC contract, and slideify fan-out
+
+The type change and the fan-out land together so no stub is ever committed. `slideify`'s `const _never: never = item` exhaustiveness check fails to compile the moment the new item kind exists, and the fan-out in this same task is what satisfies it.
+
+**Files:**
+- Modify: `src/shared/types.ts` (after the `deck` variant, ~line 124)
+- Modify: `src/shared/ipc-contract.ts:231` (`PickFileKind`) and the `SlidePayload` union
+- Modify: `src/renderer/src/lib/slideify.ts:269` (new branch beside `deck`)
+- Test: `src/renderer/src/lib/slideify.test.ts`
+
+**Interfaces:**
+- Consumes: the widened vitest glob from Task 2 — `slideify.test.ts` lives under `src/renderer/` and is not collected without it.
+- Produces: `SetlistItem` variant `{ kind: 'pptx'; id: string; pptxPath: string; slideCount: number; title?: string }`; `SlidePayload` variant `{ kind: 'pptx-slide'; pptxPath: string; slideOrdinal: number; slideCount: number }`; `PickFileKind` gains `'pptx'`; `slideifySetlist` emits a `RenderableItem` with `kind: 'pptx'`.
+
+- [ ] **Step 1: Add the SetlistItem variant**
+
+In `src/shared/types.ts`, immediately after the `deck` variant, add:
+
+```ts
+  /**
+   * PowerPoint deck rendered live — no PDF export step. The operator picks a
+   * .pptx and we render each slide in the projector via @aiden0z/pptx-renderer.
+   *
+   * slideCount counts VISIBLE slides only (PowerPoint skips slides marked
+   * hidden when presenting, so we do too). It is cached at add-time for the
+   * same reason deck.pageCount is: slideify expands items synchronously.
+   *
+   * Only .pptx is supported — the renderer parses Office Open XML, so legacy
+   * binary .ppt, .key, and .odp are not accepted by the file picker.
+   */
+  | {
+      kind: 'pptx'
+      id: string
+      pptxPath: string
+      slideCount: number
+      /** Optional display name shown in the operator upcoming list */
+      title?: string
+    }
+```
+
+- [ ] **Step 2: Add the SlidePayload variant and PickFileKind value**
+
+In `src/shared/ipc-contract.ts`, find the `SlidePayload` union (it contains `{ kind: 'pdf-page'; ... }`) and add alongside it:
+
+```ts
+  /**
+   * One slide of a live-rendered PowerPoint deck.
+   *
+   * slideOrdinal is 1-based over VISIBLE slides — see @shared/pptxSlides for
+   * why that differs from the slide's position in the file.
+   */
+  | {
+      kind: 'pptx-slide'
+      pptxPath: string
+      slideOrdinal: number
+      slideCount: number
+    }
+```
+
+Then change line 231:
+
+```ts
+export type PickFileKind = 'image' | 'video' | 'media' | 'pdf' | 'pptx' | 'font'
+```
+
+- [ ] **Step 3: Write the failing fan-out test**
+
+Create `src/renderer/src/lib/slideify.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { slideifySetlist } from './slideify'
+import type { Setlist } from '@shared/types'
+
+function setlistWith(items: Setlist['items']): Setlist {
+  return {
+    id: 's1',
+    name: 'Test',
+    date: '2026-07-26',
+    items,
+    createdAt: '2026-07-26T00:00:00.000Z',
+    updatedAt: '2026-07-26T00:00:00.000Z'
+  }
+}
+
+describe('slideifySetlist with pptx items', () => {
+  it('fans a pptx item into one payload per visible slide', () => {
+    const result = slideifySetlist(
+      setlistWith([
+        {
+          kind: 'pptx',
+          id: 'i1',
+          pptxPath: '/decks/announcements.pptx',
+          slideCount: 6,
+          title: 'announcements'
+        }
+      ]),
+      []
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('pptx')
+    expect(result[0].label).toBe('announcements')
+    expect(result[0].slides).toHaveLength(6)
+    expect(result[0].slides.map((s) => s.kind)).toEqual(
+      Array(6).fill('pptx-slide')
+    )
+  })
+
+  it('numbers ordinals 1..N so operator slide numbers match', () => {
+    const result = slideifySetlist(
+      setlistWith([
+        {
+          kind: 'pptx',
+          id: 'i1',
+          pptxPath: '/decks/d.pptx',
+          slideCount: 3
+        }
+      ]),
+      []
+    )
+
+    const ordinals = result[0].slides.map((s) =>
+      s.kind === 'pptx-slide' ? s.slideOrdinal : null
+    )
+    expect(ordinals).toEqual([1, 2, 3])
+  })
+
+  it('falls back to a generic label when title is absent', () => {
+    const result = slideifySetlist(
+      setlistWith([
+        { kind: 'pptx', id: 'i1', pptxPath: '/d.pptx', slideCount: 1 }
+      ]),
+      []
+    )
+    expect(result[0].label).toBe('PowerPoint')
+  })
+
+  it('drops a deck with no visible slides, matching deck behaviour', () => {
+    const result = slideifySetlist(
+      setlistWith([
+        { kind: 'pptx', id: 'i1', pptxPath: '/d.pptx', slideCount: 0 }
+      ]),
+      []
+    )
+    expect(result).toHaveLength(0)
+  })
+
+  it('drops a deck with an empty path', () => {
+    const result = slideifySetlist(
+      setlistWith([{ kind: 'pptx', id: 'i1', pptxPath: '', slideCount: 4 }]),
+      []
+    )
+    expect(result).toHaveLength(0)
+  })
+})
+```
+
+- [ ] **Step 4: Run test to verify it fails**
+
+```bash
+pnpm vitest run src/renderer/src/lib/slideify.test.ts
+```
+
+Expected: FAIL. It may fail to compile (the `pptx` kind is not yet handled in `slideify`) or return `[]`. Either is a valid red.
+
+- [ ] **Step 5: Add the slideify branch**
+
+In `src/renderer/src/lib/slideify.ts`, immediately before the `const _never: never = item` line, add:
+
+```ts
+  if (item.kind === 'pptx') {
+    // Expand into N pptx-slide payloads, one per VISIBLE slide. slideCount was
+    // recorded at add-time (via probeVisibleSlideCount) so this stays a pure
+    // synchronous fan-out, exactly like the deck branch above. A deck with 0
+    // slides (unreadable / all-hidden) is dropped rather than shown broken.
+    if (!item.pptxPath || item.slideCount <= 0) return null
+    const slides: SlidePayload[] = []
+    for (let i = 1; i <= item.slideCount; i++) {
+      slides.push({
+        kind: 'pptx-slide',
+        pptxPath: item.pptxPath,
+        slideOrdinal: i,
+        slideCount: item.slideCount
+      })
+    }
+    return {
+      id: item.id,
+      kind: 'pptx',
+      label: item.title?.trim() || 'PowerPoint',
+      slides
+    }
+  }
+```
+
+- [ ] **Step 6: Run test to verify it passes**
+
+```bash
+pnpm vitest run src/renderer/src/lib/slideify.test.ts
+```
+
+Expected: PASS, 5 tests.
+
+- [ ] **Step 7: Verify the whole tree compiles**
+
+```bash
+pnpm typecheck && pnpm test
+```
+
+Expected: PASS. If typecheck reports a non-exhaustive switch anywhere else, add a `pptx` case there — search for `item.kind ===` and `case 'deck'` to find every site. Those sites are handled properly in later tasks; here, do the minimum that compiles and does not lie (for example, fall through to the same branch `deck` uses for its label, not a silent `null`).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/shared/types.ts src/shared/ipc-contract.ts src/renderer/src/lib/slideify.ts src/renderer/src/lib/slideify.test.ts
+git commit -m "feat: pptx item kind, pptx-slide payload, and slideify fan-out
+
+Types and fan-out land together so the exhaustiveness check is satisfied by
+real behaviour rather than a stub."
+```
 
 ### Task 4: pptxLoader
 
@@ -656,167 +787,7 @@ churches that never project PowerPoint do not pay for ECharts and JSZip."
 
 ---
 
-### Task 5: slideify fan-out
-
-Replace the Task 2 stub with the real fan-out, beside the `deck` branch.
-
-**Files:**
-- Modify: `src/renderer/src/lib/slideify.ts` (replace the `if (item.kind === 'pptx') return null` stub)
-- Test: `src/renderer/src/lib/slideify.test.ts`
-
-**Interfaces:**
-- Consumes: `SetlistItem` `pptx` variant and `SlidePayload` `pptx-slide` variant from Task 2.
-- Produces: `slideifySetlist` emits a `RenderableItem` with `kind: 'pptx'` and `slideCount` payloads.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `src/renderer/src/lib/slideify.test.ts`:
-
-```ts
-import { describe, it, expect } from 'vitest'
-import { slideifySetlist } from './slideify'
-import type { Setlist } from '@shared/types'
-
-function setlistWith(items: Setlist['items']): Setlist {
-  return {
-    id: 's1',
-    name: 'Test',
-    date: '2026-07-26',
-    items,
-    createdAt: '2026-07-26T00:00:00.000Z',
-    updatedAt: '2026-07-26T00:00:00.000Z'
-  }
-}
-
-describe('slideifySetlist with pptx items', () => {
-  it('fans a pptx item into one payload per visible slide', () => {
-    const result = slideifySetlist(
-      setlistWith([
-        {
-          kind: 'pptx',
-          id: 'i1',
-          pptxPath: '/decks/announcements.pptx',
-          slideCount: 6,
-          title: 'announcements'
-        }
-      ]),
-      []
-    )
-
-    expect(result).toHaveLength(1)
-    expect(result[0].kind).toBe('pptx')
-    expect(result[0].label).toBe('announcements')
-    expect(result[0].slides).toHaveLength(6)
-    expect(result[0].slides.map((s) => s.kind)).toEqual(
-      Array(6).fill('pptx-slide')
-    )
-  })
-
-  it('numbers ordinals 1..N so operator slide numbers match', () => {
-    const result = slideifySetlist(
-      setlistWith([
-        {
-          kind: 'pptx',
-          id: 'i1',
-          pptxPath: '/decks/d.pptx',
-          slideCount: 3
-        }
-      ]),
-      []
-    )
-
-    const ordinals = result[0].slides.map((s) =>
-      s.kind === 'pptx-slide' ? s.slideOrdinal : null
-    )
-    expect(ordinals).toEqual([1, 2, 3])
-  })
-
-  it('falls back to a generic label when title is absent', () => {
-    const result = slideifySetlist(
-      setlistWith([
-        { kind: 'pptx', id: 'i1', pptxPath: '/d.pptx', slideCount: 1 }
-      ]),
-      []
-    )
-    expect(result[0].label).toBe('PowerPoint')
-  })
-
-  it('drops a deck with no visible slides, matching deck behaviour', () => {
-    const result = slideifySetlist(
-      setlistWith([
-        { kind: 'pptx', id: 'i1', pptxPath: '/d.pptx', slideCount: 0 }
-      ]),
-      []
-    )
-    expect(result).toHaveLength(0)
-  })
-
-  it('drops a deck with an empty path', () => {
-    const result = slideifySetlist(
-      setlistWith([{ kind: 'pptx', id: 'i1', pptxPath: '', slideCount: 4 }]),
-      []
-    )
-    expect(result).toHaveLength(0)
-  })
-})
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-```bash
-pnpm vitest run src/renderer/src/lib/slideify.test.ts
-```
-
-Expected: FAIL — first test gets `[]` because the stub returns `null`.
-
-- [ ] **Step 3: Replace the stub**
-
-In `src/renderer/src/lib/slideify.ts`, replace `if (item.kind === 'pptx') return null` with:
-
-```ts
-  if (item.kind === 'pptx') {
-    // Expand into N pptx-slide payloads, one per VISIBLE slide. slideCount was
-    // recorded at add-time (via probeVisibleSlideCount) so this stays a pure
-    // synchronous fan-out, exactly like the deck branch above. A deck with 0
-    // slides (unreadable / all-hidden) is dropped rather than shown broken.
-    if (!item.pptxPath || item.slideCount <= 0) return null
-    const slides: SlidePayload[] = []
-    for (let i = 1; i <= item.slideCount; i++) {
-      slides.push({
-        kind: 'pptx-slide',
-        pptxPath: item.pptxPath,
-        slideOrdinal: i,
-        slideCount: item.slideCount
-      })
-    }
-    return {
-      id: item.id,
-      kind: 'pptx',
-      label: item.title?.trim() || 'PowerPoint',
-      slides
-    }
-  }
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-```bash
-pnpm vitest run src/renderer/src/lib/slideify.test.ts
-```
-
-Expected: PASS, 5 tests.
-
-- [ ] **Step 5: Typecheck and commit**
-
-```bash
-pnpm typecheck
-git add src/renderer/src/lib/slideify.ts src/renderer/src/lib/slideify.test.ts
-git commit -m "feat: fan pptx items into per-slide payloads"
-```
-
----
-
-### Task 6: PptxSlideView
+### Task 5: PptxSlideView
 
 Renders exactly one slide. On failure it renders nothing, which leaves the previously painted slide on screen — the spec's chosen failure behaviour.
 
@@ -961,7 +932,7 @@ screen; the operator is notified via onError."
 
 ---
 
-### Task 7: Wire into SlideRenderer
+### Task 6: Wire into SlideRenderer
 
 Three edits, all mirroring how `pdf-page` is already handled.
 
@@ -969,7 +940,7 @@ Three edits, all mirroring how `pdf-page` is already handled.
 - Modify: `src/renderer/src/components/SlideRenderer.tsx` at lines 144, 243, 294
 
 **Interfaces:**
-- Consumes: `PptxSlideView` from Task 6, `pptx-slide` payload from Task 2.
+- Consumes: `PptxSlideView` from Task 5, `pptx-slide` payload from Task 3.
 - Produces: the projector renders `pptx-slide` payloads full-bleed on black.
 
 - [ ] **Step 1: Add to the full-bleed media test (line 144)**
@@ -1022,7 +993,7 @@ git commit -m "feat: render pptx-slide payloads in the projector"
 
 ---
 
-### Task 8: Add-time flow
+### Task 7: Add-time flow
 
 **Files:**
 - Modify: `src/main/ipc/dialog.ts:21` and its `dialogTitle` switch
@@ -1130,7 +1101,7 @@ which already works."
 
 ---
 
-### Task 9: Operator previews and warm-on-entry
+### Task 8: Operator previews and warm-on-entry
 
 **Files:**
 - Modify: `src/renderer/src/components/SetlistItemCard.tsx:143,150,280`
@@ -1139,7 +1110,7 @@ which already works."
 - Modify: `src/renderer/src/components/SlideCard.tsx:60`
 
 **Interfaces:**
-- Consumes: `loadPptxDeck` from Task 4, `pptx-slide` payload from Task 2.
+- Consumes: `loadPptxDeck` from Task 4, `pptx-slide` payload from Task 3.
 - Produces: operator-side thumbnails for pptx slides; decks parsed before the service starts.
 
 - [ ] **Step 1: Extend the preview source unions**
@@ -1224,7 +1195,7 @@ A missing deck is reported before the service starts, not on slide 12."
 
 ---
 
-### Task 10: Documentation
+### Task 9: Documentation
 
 **Files:**
 - Modify: `README.md` (Stack section)
@@ -1280,4 +1251,6 @@ Checked against the spec:
 - The spec's test-environment findings (node / xmldom / happy-dom / jsdom) are carried into Task 3 including the happy-dom warning, because a future contributor will otherwise reach for the faster option.
 - Naming is consistent across tasks: `PptxSlideMeta`, `visibleSlideCount`, `ordinalToSourceIndex`, `PptxDeck`, `loadPptxDeck`, `probeVisibleSlideCount`, `evictPptxDeck`, `parsePptxBuffer`, `slideOrdinal`, `sourceIndex`.
 - `evictPptxDeck` is exported in Task 4 and used in the Task 4 concurrency test, but no production call site exists yet. `pdfLoader.evictPdfDocument` has the same status, so this matches the existing pattern rather than adding dead code unique to this feature.
-- Task 2 deliberately leaves a stub that Task 5 replaces, so every commit compiles.
+- Tasks 2 and 3 were merged from the original plan's Tasks 2, 3 and 5 so no stub is
+  ever committed: the test environment widens first, then the type change and the
+  slideify fan-out land together and every commit compiles.
