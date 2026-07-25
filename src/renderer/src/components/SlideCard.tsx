@@ -1,23 +1,26 @@
 /**
- * SlideCard — visual preview of a single slide, FreeShow-style.
+ * SlideCard — visual preview of a single slide in Service Mode's slide
+ * grid, KLB-styled per design L583–591.
  *
  * Structure (all inside one `aspect-[16/9]` root so cards are uniformly
  * shaped regardless of grid column width):
  *
  *   ┌──────────────────────────┐
- *   │ Verse 1                  │  ← header strip, shrink-0
- *   ├──────────────────────────┤
+ *   │ Verse 1               1  │  ← header strip: mono label left,
+ *   ├──────────────────────────┤    shortcut glyph right, shrink-0
  *   │  [theme bg image]        │
  *   │    lyric line 1          │  ← body, flex-1, theme bg or media
  *   │    lyric line 2          │
- *   │                       1  │  ← shortcut, absolute bottom-right
  *   └──────────────────────────┘
  *
  * Body rendering modes (highest priority first):
  *   1. `preview` is set    → MediaPreview thumbnail (image/video/PDF)
  *   2. `theme` background  → text lines on top of the theme's
  *                            backgroundImagePath / backgroundColor
- *   3. neither             → text lines on plain black (fallback)
+ *   3. neither             → text lines on plain black (fallback) —
+ *                            `themedBodyStyle(null)` already resolves
+ *                            to `#000000`, matching the design's
+ *                            `bg-black` body.
  *
  * Why no background VIDEO support: a setlist with a video bg would
  * spawn N <video> elements (one per card in the grid) running
@@ -27,21 +30,15 @@
  *
  * A subtle dark scrim lifts text legibility on busy backgrounds — it's
  * 25% opacity black, just enough to read white text without obscuring
- * the image content underneath.
+ * the image content underneath. (Kept intact per the redesign brief —
+ * the Song Editor's own slide grid deliberately omits this scrim; see
+ * ../lib/slideTheming.ts's doc comment for why the two must differ.)
  *
- * Why the card-level aspect ratio: an earlier version put `aspect-[16/9]`
- * on the INNER body div inside a `flex-col` card. That confuses browsers
- * because the body didn't have an explicit width reference, so the
- * aspect-ratio calc produced inconsistent heights — the black rectangle
- * randomly ended up smaller than expected and text overflowed onto the
- * card's dark-grey background. Lifting aspect-ratio to the root fixes it:
- * the card gets its width from the grid column, height follows 9/16 of
- * that, and the header+body split fills the fixed total.
- *
- * Why a <div role="button"> instead of <button>: native button elements
- * have browser-default styles (alignment, min-width, inline-block) that
- * fight with flex + aspect-ratio in subtle ways. Using a div with ARIA
- * keyboard support is cleaner and visually reliable.
+ * Real `<button>` (not `<div role="button">`): the KLB redesign
+ * requires genuine keyboard-operable controls. `aspect-[16/9]` plus
+ * `flex flex-col` on the button works fine once the button's default
+ * `inline-block` display is overridden — no need for the ARIA-div
+ * workaround the pre-redesign version used.
  */
 
 import type { Theme } from '@shared/types'
@@ -72,9 +69,9 @@ interface SlideCardProps {
    * plain black body (the original v1 look).
    */
   theme?: Theme | null
-  /** Highlight ring — used when this is the currently-active slide in Service Mode */
+  /** Highlight — used when this is the currently-active slide in Service Mode */
   active?: boolean
-  /** Click handler — if provided, the card is clickable */
+  /** Click handler — Service Mode always supplies one (jumpTo). */
   onClick?: () => void
 }
 
@@ -98,30 +95,32 @@ export function SlideCard({
   const textStyle = themedTextStyle(theme, usingThemeBg)
 
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? -1 : undefined}
       data-active={active ? 'true' : undefined}
-      className={`relative flex aspect-[16/9] flex-col overflow-hidden rounded-md border text-left transition-colors ${
-        onClick ? 'cursor-pointer' : ''
-      } ${
-        active
-          ? 'border-amber-400 ring-2 ring-amber-400/40'
-          : 'border-white/10 hover:border-white/30'
+      className={`relative flex aspect-[16/9] w-full flex-col overflow-hidden border text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal ${
+        active ? 'border-signal' : 'border-border hover:border-dim'
       }`}
     >
-      {/* Header strip — fixed height, lighter background than the slide body */}
-      <div className="flex shrink-0 items-center border-b border-white/5 bg-neutral-800/80 px-2.5 py-1">
-        <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-white/70">
+      {/* Header bar — mono section label left, shortcut glyph right */}
+      <div
+        className={`flex shrink-0 items-center justify-between gap-1.5 border-b border-border px-[9px] py-[6px] ${
+          active ? 'bg-signal text-white' : 'bg-panel-hi text-soft'
+        }`}
+      >
+        <span className="truncate font-mono text-[8.5px] font-semibold uppercase tracking-[0.12em]">
           {sectionLabel || '—'}
         </span>
+        {shortcut && (
+          <span className="shrink-0 pl-1.5 font-mono text-[9px] font-medium">{shortcut}</span>
+        )}
       </div>
 
       {/* Slide body — fills remaining space. If a media preview is
-          provided, it renders edge-to-edge. Otherwise the body's
-          inline style applies the theme background (image + color) and
-          the text lines render on top with the theme's text color. */}
+          provided, it renders edge-to-edge. Otherwise the body's inline
+          style applies the theme background (image + color) and the
+          text lines render on top with the theme's text color. */}
       <div
         className="relative flex flex-1 items-center justify-center overflow-hidden"
         style={bodyStyle}
@@ -130,22 +129,18 @@ export function SlideCard({
             in play. Keeps text readable on busy photos without
             destroying the visual reference. */}
         {usingThemeBg && theme?.backgroundImagePath && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-black/25"
-          />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-black/25" />
         )}
 
         {preview ? (
-          <MediaPreview
-            source={preview}
-            className="h-full w-full rounded-none border-0"
-          />
+          <MediaPreview source={preview} className="h-full w-full border-0" />
         ) : lines.length === 0 ? (
-          <span className="relative text-[9px] italic text-white/30">(empty)</span>
+          <span className="relative text-[9px] italic text-dim">(empty)</span>
         ) : (
           <div
-            className="relative overflow-hidden p-2 text-center text-[10px] font-semibold leading-snug"
+            className={`relative overflow-hidden p-3 text-center text-[11.5px] font-bold leading-[1.5] ${
+              active ? 'text-white' : 'text-quiet'
+            }`}
             style={textStyle}
           >
             {lines.map((line, i) => (
@@ -155,13 +150,7 @@ export function SlideCard({
             ))}
           </div>
         )}
-
-        {shortcut && (
-          <div className="pointer-events-none absolute bottom-0.5 right-1.5 rounded bg-black/50 px-1 text-base font-light leading-tight text-white/70">
-            {shortcut}
-          </div>
-        )}
       </div>
-    </div>
+    </button>
   )
 }

@@ -14,11 +14,16 @@
  * derives everything through `resolveNext` (lib/serviceNext.ts), which
  * is the single source of truth for "what SPACE does" shared with the
  * service store's own traversal. Does not subscribe to IPC.
+ *
+ * The actual tag/label/hint COPY is computed by lib/serviceNextText.ts
+ * — pulled out so those pure functions get real test coverage (a
+ * component file under components/ is invisible to vitest's include
+ * glob; see that module's doc comment).
  */
 
-import type { SlidePayload } from '@shared/ipc-contract'
+import { resolveNext } from '../lib/serviceNext'
+import { describeNext } from '../lib/serviceNextText'
 import type { RenderableItem } from '../lib/slideify'
-import { resolveNext, type NextResolution } from '../lib/serviceNext'
 import { Badge } from './ui/Badge'
 import { Panel } from './ui/Card'
 
@@ -26,83 +31,6 @@ interface ServiceNextPanelProps {
   items: RenderableItem[]
   itemIndex: number
   slideIndex: number
-}
-
-interface NextDescription {
-  tag: string
-  tagTone: 'signal' | 'neutral'
-  label: string
-  previewText: string
-  hint: string
-}
-
-/**
- * For a `text` slide, the lines joined with newlines (rendered
- * `whitespace-pre-line`). Other kinds render their kind name. A `text`
- * slide with an empty `lines` array is a real case — song intro
- * slides are deliberately blank so the congregation gets a beat on
- * the new background before lyrics appear (see slideify.ts) — so it
- * renders an explicit description rather than an empty box.
- */
-function slidePreviewText(slide: SlidePayload): string {
-  switch (slide.kind) {
-    case 'text':
-      return slide.lines.length > 0 ? slide.lines.join('\n') : 'No lyrics — background only'
-    case 'image':
-      return 'Image'
-    case 'video':
-      return 'Video'
-    case 'pdf-page':
-      return `PDF page ${slide.pageIndex}`
-    case 'countdown':
-      return 'Countdown'
-    default: {
-      const _never: never = slide
-      return _never
-    }
-  }
-}
-
-/** The next slide's section label, falling back to the item's label for slide kinds that don't carry one (image/video/pdf-page/countdown), or a text slide with no sectionLabel set. */
-function sectionLabelFor(
-  resolution: Extract<NextResolution, { kind: 'same-item' | 'new-item' }>
-): string {
-  const { slide } = resolution
-  if (slide.kind === 'text' && slide.sectionLabel) return slide.sectionLabel
-  return resolution.itemLabel
-}
-
-function describeNext(resolution: NextResolution): NextDescription {
-  if (resolution.kind === 'end') {
-    return {
-      tag: 'END OF SERVICE',
-      tagTone: 'signal',
-      label: 'SERVICE ENDS',
-      previewText: '—',
-      hint: 'Blacks out the projector and ends the service.'
-    }
-  }
-
-  const label = sectionLabelFor(resolution)
-  const previewText = slidePreviewText(resolution.slide)
-
-  if (resolution.kind === 'new-item') {
-    return {
-      tag: 'NEW ITEM',
-      tagTone: 'signal',
-      label,
-      previewText,
-      hint: `Leaves ${resolution.fromItemLabel} and starts ${resolution.itemLabel}.`
-    }
-  }
-
-  return {
-    tag: 'SAME ITEM',
-    tagTone: 'neutral',
-    label,
-    previewText,
-    hint: `Stays inside ${resolution.itemLabel}.`
-  }
 }
 
 export function ServiceNextPanel({
