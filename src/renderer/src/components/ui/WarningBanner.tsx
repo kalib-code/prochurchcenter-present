@@ -17,19 +17,31 @@
 
 import { cn } from '../../lib/utils'
 
+export interface WarningItem {
+  /**
+   * Stable identity for React's key and for dismiss — deliberately NOT
+   * the message text. The caller (ServiceMode) keys its warnings by
+   * pptxPath so a deck's warning stays a single stable item even as its
+   * message text changes (e.g. the slide-failure count ticking up as
+   * more slides fail).
+   */
+  id: string
+  message: string
+}
+
 interface WarningBannerProps {
-  messages: string[]
-  /** Called with the exact message string to remove when its dismiss button is clicked. */
-  onDismiss?: (message: string) => void
+  items: WarningItem[]
+  /** Called with the dismissed item's `id`, not its message text. */
+  onDismiss?: (id: string) => void
   className?: string
 }
 
 export function WarningBanner({
-  messages,
+  items,
   onDismiss,
   className
 }: WarningBannerProps): JSX.Element | null {
-  if (messages.length === 0) return null
+  if (items.length === 0) return null
 
   return (
     <div
@@ -39,16 +51,16 @@ export function WarningBanner({
         className
       )}
     >
-      {messages.map((message) => (
-        <div key={message} className="flex items-start gap-2 text-xs text-rose-200">
+      {items.map((item) => (
+        <div key={item.id} className="flex items-start gap-2 text-xs text-rose-200">
           <span aria-hidden="true" className="mt-0.5 shrink-0">
             ⚠
           </span>
-          <span className="min-w-0 flex-1 leading-relaxed">{message}</span>
+          <span className="min-w-0 flex-1 leading-relaxed">{item.message}</span>
           {onDismiss && (
             <button
               type="button"
-              onClick={() => onDismiss(message)}
+              onClick={() => onDismiss(item.id)}
               className="shrink-0 text-rose-300/70 hover:text-rose-100"
               aria-label="Dismiss warning"
             >

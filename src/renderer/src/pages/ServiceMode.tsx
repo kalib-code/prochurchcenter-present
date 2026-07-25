@@ -38,7 +38,8 @@ import { loadPptxDeck } from '../lib/pptxLoader'
 import { OutputMirror } from '../components/OutputMirror'
 import { SlideCard } from '../components/SlideCard'
 import { KeyCheatSheet } from '../components/KeyCheatSheet'
-import { WarningBanner } from '../components/ui/WarningBanner'
+import { WarningBanner, type WarningItem } from '../components/ui/WarningBanner'
+import type { PptxThumbError } from '../components/MediaPreview'
 import { useKeyboard } from '../hooks/useKeyboard'
 import type { Song } from '@shared/types'
 import type { VideoControl, LowerThirdsContent, SlidePayload } from '@shared/ipc-contract'
@@ -470,7 +471,31 @@ function RunningView({
   // by OutputView or StageView (the projector / stage-monitor windows),
   // so nothing pushed into this list can end up on a screen the
   // congregation can see.
-  const [deckWarnings, setDeckWarnings] = useState<string[]>([])
+  //
+  // Keyed by `${pptxPath}::${reason}` rather than an array of composed
+  // strings. Two mechanisms feed this: the warm-on-entry preload below
+  // (one shot, whole-file) and reportPptxError (one call per failing
+  // slide's PptxThumb — see MediaPreview.tsx). The grid is unvirtualized,
+  // so a single broken deck can fail on all N of its slides at once;
+  // without this keying, that produces N near-identical banner lines
+  // (plus a 41st from preload) instead of the one line the operator
+  // actually needs. Keying on (path, reason) — not just path — means a
+  // deck that fails for the SAME underlying reason from both mechanisms
+  // (the common case: a missing/renamed file throws the identical
+  // "Could not read ... " message from loadPptxDeck whether it's caught
+  // here or inside PptxSlideView) collapses to one entry regardless of
+  // which mechanism reports it first; a deck failing for two genuinely
+  // different reasons still gets two distinct, honest lines.
+  interface DeckWarning {
+    kind: 'preload' | 'render'
+    message: string
+    /** Distinct slide ordinals counted so far (render kind only) — lets
+     *  the message grow "N slides failed" without re-counting a slide
+     *  that reports again (StrictMode's dev-mode double effect-invoke,
+     *  or a card re-mounting after a scroll). */
+    ordinals: Set<number>
+  }
+  const [deckWarnings, setDeckWarnings] = useState<Record<string, DeckWarning>>({})
 
   // Warm every PowerPoint deck referenced by this service up front. Two
   // reasons: it removes any stall on the first advance onto a pptx item,
@@ -494,11 +519,20 @@ function RunningView({
     for (const path of paths) {
       void loadPptxDeck(path).catch((err) => {
         console.error('[ServiceMode] deck failed to preload', path, err)
+        const reason = err instanceof Error ? err.message : String(err)
         const fileName = path.split(/[/\\]/).pop() ?? path
-        setDeckWarnings((prev) => [
+        // Unconditional overwrite (not a merge) — a whole-file preload
+        // failure is always the clearest framing for this key, whether
+        // it arrives before or after any per-slide render failures that
+        // share the same (path, reason).
+        setDeckWarnings((prev) => ({
           ...prev,
-          `${fileName} could not be opened. Its slides will not project.`
-        ])
+          [`${path}::${reason}`]: {
+            kind: 'preload',
+            message: `${fileName} could not be opened. Its slides will not project.`,
+            ordinals: new Set()
+          }
+        }))
       })
     }
   }, [state.items])
@@ -508,16 +542,44 @@ function RunningView({
   // sits in that component's effect dependency array. A fresh identity
   // per render would cancel and restart the in-flight slide render on
   // every unrelated ServiceMode re-render (video ticks, timer updates,
-  // keystrokes), repeatedly, mid-service. Dedupes identical messages so
-  // a slide that keeps failing on repeated views doesn't spam the
-  // banner with copies of the same line.
-  const reportPptxError = useCallback((message: string) => {
-    setDeckWarnings((prev) => (prev.includes(message) ? prev : [...prev, message]))
+  // keystrokes), repeatedly, mid-service.
+  const reportPptxError = useCallback(({ pptxPath, slideOrdinal, reason }: PptxThumbError) => {
+    setDeckWarnings((prev) => {
+      const key = `${pptxPath}::${reason}`
+      const existing = prev[key]
+      // A whole-deck preload failure already covers every slide in this
+      // file for this same reason — a per-slide render failure on top
+      // of it is the same root cause, not new information.
+      if (existing?.kind === 'preload') return prev
+      const ordinals = new Set(existing?.ordinals)
+      if (ordinals.has(slideOrdinal)) return prev
+      ordinals.add(slideOrdinal)
+      const fileName = pptxPath.split(/[/\\]/).pop() ?? pptxPath
+      const n = ordinals.size
+      return {
+        ...prev,
+        [key]: {
+          kind: 'render',
+          message: `${fileName} — ${n} slide${n === 1 ? '' : 's'} failed to render.`,
+          ordinals
+        }
+      }
+    })
   }, [])
 
-  const dismissDeckWarning = useCallback((message: string) => {
-    setDeckWarnings((prev) => prev.filter((m) => m !== message))
+  const dismissDeckWarning = useCallback((key: string) => {
+    setDeckWarnings((prev) => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
   }, [])
+
+  const deckWarningItems: WarningItem[] = Object.entries(deckWarnings).map(([key, w]) => ({
+    id: key,
+    message: w.message
+  }))
 
   // Flatten every slide of every item into one grid feed. Section label
   // and shortcut are derived here because the SlidePayload type (shared
@@ -661,7 +723,7 @@ function RunningView({
           failures during the service, both routed through
           reportPptxError/deckWarnings above. Operator-only: see
           WarningBanner.tsx for why this can never reach the projector. */}
-      <WarningBanner messages={deckWarnings} onDismiss={dismissDeckWarning} />
+      <WarningBanner items={deckWarningItems} onDismiss={dismissDeckWarning} />
 
       {/* Main: three-panel layout
           ┌─ items list ─┬──── slide grid ────┬─ confidence ─┐

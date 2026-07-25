@@ -14,7 +14,7 @@
  *   └──────────────────────────┘
  *
  * Body rendering modes (highest priority first):
- *   1. `preview` is set    → MediaPreview thumbnail (image/video/PDF)
+ *   1. `preview` is set    → MediaPreview thumbnail (image/video/PDF/PowerPoint)
  *   2. `theme` background  → text lines on top of the theme's
  *                            backgroundImagePath / backgroundColor
  *   3. neither             → text lines on plain black (fallback)
@@ -46,7 +46,7 @@
 
 import type { CSSProperties } from 'react'
 import type { Theme } from '@shared/types'
-import { MediaPreview } from './MediaPreview'
+import { MediaPreview, type PptxThumbError } from './MediaPreview'
 
 /**
  * Optional visual preview source rendered INSIDE the slide body,
@@ -70,9 +70,10 @@ interface SlideCardProps {
    * Forwarded to MediaPreview's `onError` — only fires for a `pptx`
    * preview whose PptxSlideView render fails. See MediaPreview.tsx for
    * why this must stay a stable reference (a `useCallback` with no
-   * unstable deps) rather than an inline arrow.
+   * unstable deps) rather than an inline arrow, and why it receives
+   * structured fields rather than a pre-composed message.
    */
-  onPreviewError?: (message: string) => void
+  onPreviewError?: (error: PptxThumbError) => void
   /**
    * Active theme — when provided, text-card bodies render with the
    * theme's background image / color and the lines pick up the theme's
