@@ -9,10 +9,10 @@
  * card — they're grouping-only (skipped during playback), so they
  * shouldn't visually compete with the actual items.
  *
- * Inline editing: scripture fields, countdown target, deck title — all
- * editable inline. Images and decks use the native file picker. Song
- * items show the resolved song title from the library (read-only; edit
- * the actual song in the library editor).
+ * Inline editing: scripture fields, countdown target, deck/pptx title — all
+ * editable inline. Images, decks, and pptx items use the native file
+ * picker. Song items show the resolved song title from the library
+ * (read-only; edit the actual song in the library editor).
  */
 
 import { useEffect, useState } from 'react'
@@ -392,13 +392,17 @@ function ItemBody({
             {item.pptxPath ? 'Change PowerPoint…' : 'Choose PowerPoint…'}
           </button>
           {item.pptxPath && (
-            <span
-              className="truncate text-[11px] text-muted-foreground"
-              title={item.pptxPath}
-            >
-              {displayFileName(item.pptxPath)} · {item.slideCount} slide
-              {item.slideCount === 1 ? '' : 's'}
-            </span>
+            <>
+              <span
+                className="truncate text-[11px] text-muted-foreground"
+                title={item.pptxPath}
+              >
+                {displayFileName(item.pptxPath)}
+              </span>
+              <span className="text-[11px] text-muted-foreground/70">
+                · {item.slideCount} slide{item.slideCount === 1 ? '' : 's'}
+              </span>
+            </>
           )}
         </div>
         <input
@@ -408,6 +412,12 @@ function ItemBody({
           placeholder="PowerPoint title (optional)"
           className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
         />
+        {!item.pptxPath && (
+          <p className="text-[11px] text-muted-foreground/80">
+            Projects directly — no PDF export needed. Only .pptx files work
+            (not the older .ppt format).
+          </p>
+        )}
       </div>
     )
   }
