@@ -206,5 +206,15 @@ export function formatFieldValue(def: ThemeFieldDef, value: unknown): string {
   }
 
   const match = def.options.find((o) => o.value === value)
-  return match ? match.label : String(value ?? '—')
+  if (match) return match.label
+
+  const raw = String(value ?? '—')
+  // Custom/system fonts are persisted as `"${family}"` (see ThemeFields.tsx)
+  // so a font family survives round-tripping through a CSS value. Strip
+  // exactly one wrapping pair of double quotes for display — never quotes
+  // appearing mid-string, and never an unquoted value.
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    return raw.slice(1, -1)
+  }
+  return raw
 }

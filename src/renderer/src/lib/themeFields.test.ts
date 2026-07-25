@@ -61,4 +61,36 @@ describe('formatFieldValue', () => {
     const logo = THEME_FIELDS.find((f) => f.key === 'logoPath')!
     expect(formatFieldValue(logo, '/Users/rose/Media/Paint Sweeps.png')).toBe('Paint Sweeps.png')
   })
+
+  it('shows only the basename of a Windows-style backslash file path', () => {
+    const logo = THEME_FIELDS.find((f) => f.key === 'logoPath')!
+    expect(formatFieldValue(logo, 'C:\\Users\\rose\\Media\\Paint Sweeps.png')).toBe(
+      'Paint Sweeps.png'
+    )
+  })
+
+  it('shows the option label for a swatch field that matches a preset', () => {
+    const textColor = THEME_FIELDS.find((f) => f.key === 'textColor')!
+    expect(formatFieldValue(textColor, '#FFFFFF')).toBe('WHITE')
+  })
+
+  it('falls back to the raw hex for a swatch field outside its presets', () => {
+    const textColor = THEME_FIELDS.find((f) => f.key === 'textColor')!
+    expect(formatFieldValue(textColor, '#4B0082')).toBe('#4B0082')
+  })
+
+  it('strips wrapping quotes from a custom font family for a select field', () => {
+    const font = THEME_FIELDS.find((f) => f.key === 'fontFamily')!
+    expect(formatFieldValue(font, '"Baskerville"')).toBe('Baskerville')
+  })
+
+  it('leaves an unquoted, non-preset select value as-is', () => {
+    const font = THEME_FIELDS.find((f) => f.key === 'fontFamily')!
+    expect(formatFieldValue(font, 'Baskerville')).toBe('Baskerville')
+  })
+
+  it('renders null as an em dash on a non-file field', () => {
+    const textColor = THEME_FIELDS.find((f) => f.key === 'textColor')!
+    expect(formatFieldValue(textColor, null)).toBe('—')
+  })
 })
