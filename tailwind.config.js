@@ -42,6 +42,18 @@ module.exports = {
           DEFAULT: 'hsl(var(--brand))',
           foreground: 'hsl(var(--brand-foreground))',
           muted: 'hsl(var(--brand-muted))'
+        },
+        rule: 'hsl(var(--rule) / <alpha-value>)',
+        dim: 'hsl(var(--dim) / <alpha-value>)',
+        soft: 'hsl(var(--soft-fg) / <alpha-value>)',
+        quiet: 'hsl(var(--quiet-fg) / <alpha-value>)',
+        bone: 'hsl(var(--bone) / <alpha-value>)',
+        ok: 'hsl(var(--ok) / <alpha-value>)',
+        ember: 'hsl(var(--ember) / <alpha-value>)',
+        'panel-hi': 'hsl(var(--panel-hi) / <alpha-value>)',
+        signal: {
+          DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
+          deep: 'hsl(var(--brand-muted) / <alpha-value>)'
         }
       },
       borderRadius: {
@@ -51,8 +63,13 @@ module.exports = {
         xl: 'calc(var(--radius) + 4px)',
         '2xl': 'calc(var(--radius) + 8px)'
       },
-      boxShadow: {
-        'glow-brand': '0 0 0 1px hsl(var(--brand) / 0.25), 0 8px 24px -12px hsl(var(--brand) / 0.45)'
+      fontFamily: {
+        sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono Variable', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+      },
+      animation: {
+        'pulse-signal': 'pulse-signal 2.4s ease-in-out infinite',
+        'pulse-signal-fast': 'pulse-signal 1.6s ease-in-out infinite'
       }
     }
   },
