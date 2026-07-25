@@ -125,6 +125,34 @@ interface RawExportJob {
   job: { id: string; status: 'in_progress' | 'success' | 'failed'; error?: { message?: string }; urls?: string[] }
 }
 
+const EXPORT_ERROR_MESSAGE_MAX_LEN = 200
+
+/**
+ * Sanitize Canva's own export-failure message for display.
+ *
+ * This is the one deliberate exception to "never put a response body into
+ * an error message" elsewhere in this module: Canva's `job.error.message`
+ * is operator-facing failure copy, not credential material (unlike, say,
+ * a token endpoint's body), and it explains the common real failure mode
+ * — premium elements on a free account — far better than any generic
+ * string this module could write. But it is still attacker/API-controlled
+ * text that ends up in UI (and potentially log) surfaces, so it must be
+ * bounded and stripped of control characters before use, rather than
+ * thrown verbatim. Returns `null` (rather than the generic fallback
+ * directly) so the caller can apply its own fallback message.
+ */
+function sanitizeExportErrorMessage(raw: string | undefined): string | null {
+  if (!raw) return null
+  const cleaned = raw
+    .replace(/[\x00-\x1f\x7f]+/g, ' ') // strip control chars / newlines
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return null
+  return cleaned.length > EXPORT_ERROR_MESSAGE_MAX_LEN
+    ? `${cleaned.slice(0, EXPORT_ERROR_MESSAGE_MAX_LEN)}…`
+    : cleaned
+}
+
 /**
  * Run an export job to completion and return the PDF download URL.
  *
@@ -156,9 +184,17 @@ export async function exportDesignToPdfUrl(
   if (job.status === 'failed') {
     // Premium elements on a free account are the common real cause.
     throw new Error(
-      job.error?.message ??
+      sanitizeExportErrorMessage(job.error?.message) ??
         'Canva could not export this design. If it uses premium elements, try removing them or exporting from Canva directly.'
     )
+  }
+
+  if (job.status !== 'success') {
+    // `job.status` is typed as a 3-value union, but it comes from an
+    // untyped `res.json() as T` — a status Canva has not documented would
+    // otherwise silently fall through to "no download link" below, which
+    // misdescribes what actually happened.
+    throw new Error('Canva returned an unrecognized export status. Please try again.')
   }
 
   const url = job.urls?.[0]
