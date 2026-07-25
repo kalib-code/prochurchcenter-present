@@ -44,6 +44,7 @@ import {
 } from '@dnd-kit/sortable'
 import type { Setlist, SetlistItem } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
+import type { CanvaImportResult } from '@shared/canva'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useAutosave } from '../hooks/useAutosave'
@@ -90,7 +91,7 @@ export function SetlistEditor(): JSX.Element {
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [insertAt, setInsertAt] = useState<InsertAt>(null)
-  const [pickerView, setPickerView] = useState<'grid' | 'song'>('grid')
+  const [pickerView, setPickerView] = useState<'grid' | 'song' | 'canva'>('grid')
 
   useEffect(() => {
     if (setlists.length === 0) loadSetlists()
@@ -228,6 +229,31 @@ export function SetlistEditor(): JSX.Element {
     }
   }
 
+  const addCanvaDeck = async (result: CanvaImportResult, designId: string): Promise<void> => {
+    try {
+      // Derive pageCount from the file itself, exactly as the manual deck
+      // flow does. Canva's page_count is ignored — it is optional for some
+      // design types, and this path is always correct.
+      const pageCount = await probePdfPageCount(result.pdfPath)
+      insertItem({
+        kind: 'deck',
+        id: genItemId(),
+        pdfPath: result.pdfPath,
+        pageCount,
+        title: result.title,
+        canva: {
+          designId,
+          designUpdatedAt: result.designUpdatedAt,
+          importedAt: new Date().toISOString()
+        }
+      })
+    } catch (err) {
+      console.error('[SetlistEditor] failed to open Canva PDF', result.pdfPath, err)
+      window.alert('Present could not open the PDF Canva produced. Please try importing again.')
+      closePicker()
+    }
+  }
+
   const addCountdown = (): void => {
     insertItem({
       kind: 'countdown',
@@ -259,7 +285,9 @@ export function SetlistEditor(): JSX.Element {
     onAddVideo: () => void addVideo(),
     onAddDeck: () => void addDeck(),
     onAddCountdown: addCountdown,
-    onAddDivider: addDivider
+    onAddDivider: addDivider,
+    onOpenCanva: () => setPickerView('canva'),
+    onImportCanva: (result: CanvaImportResult, designId: string) => void addCanvaDeck(result, designId)
   }
 
   const topAddOpen = insertAt === 0

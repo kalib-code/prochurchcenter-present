@@ -8,7 +8,12 @@
  */
 
 import { create } from 'zustand'
-import type { CanvaConnectionState, CanvaDesign, CanvaImportProgress } from '@shared/canva'
+import type {
+  CanvaConnectionState,
+  CanvaDesign,
+  CanvaImportProgress,
+  CanvaImportResult
+} from '@shared/canva'
 
 interface CanvaState {
   state: CanvaConnectionState
@@ -25,6 +30,14 @@ interface CanvaState {
   disconnect: () => Promise<void>
   search: (query: string) => Promise<void>
   loadMore: () => Promise<void>
+  /**
+   * Import one design as a PDF. Routed through `wrapCanvaCall` like every
+   * other Canva call — a revoked grant must flip connection state the
+   * same way a failed search does, or the picker would keep showing a
+   * retry affordance that can never succeed. Returns `null` on failure;
+   * the caller reads `error` (or `getState().error`) for what to show.
+   */
+  importDesign: (designId: string, title: string) => Promise<CanvaImportResult | null>
   setImporting: (importing: boolean) => void
   setProgress: (progress: CanvaImportProgress | null) => void
 }
@@ -185,6 +198,19 @@ export const useCanvaStore = create<CanvaState>((set, get) => ({
       continuation: result.value.continuation,
       loading: false
     })
+  },
+
+  importDesign: async (designId: string, title: string) => {
+    // Clear any stale error/progress from a previous attempt before this
+    // one starts, same as search() does for its own error slot.
+    set({ importing: true, progress: null, error: null })
+    const result = await wrapCanvaCall(
+      set,
+      () => window.api.canva.importDesign(designId, title),
+      'Could not import that design from Canva'
+    )
+    set({ importing: false, progress: null })
+    return result.ok ? result.value : null
   },
 
   setImporting: (importing) => set({ importing }),

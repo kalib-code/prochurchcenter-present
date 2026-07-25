@@ -14,7 +14,14 @@
 
 import type { SetlistItem } from '@shared/types'
 
-type Kind = SetlistItem['kind']
+/**
+ * Setlist item kinds, plus 'canva' — which is an import *source* rather
+ * than an item kind (a Canva import becomes a `deck`). It lives here
+ * anyway because this file exists to be the single glyph vocabulary, and
+ * splintering a second icon source into AddItemPicker costs more than
+ * one union member.
+ */
+type Kind = SetlistItem['kind'] | 'canva'
 
 interface Props {
   kind: Kind
@@ -95,6 +102,15 @@ export function ItemKindIcon({ kind, size = 20, className }: Props): JSX.Element
           <circle cx="12" cy="12" r="1.5" fill="currentColor" />
         </svg>
       )
+    case 'canva':
+      // Canva's mark is trademarked, so this is a neutral "design
+      // document" glyph rather than an imitation of their logo.
+      return (
+        <svg {...common}>
+          <rect x="3" y="3" width="18" height="18" rx="4" />
+          <circle cx="12" cy="12" r="4" />
+        </svg>
+      )
     default: {
       const _exhaustive: never = kind
       return <>{_exhaustive}</>
@@ -123,5 +139,7 @@ export function itemKindLabel(kind: Kind): string {
       return 'Countdown'
     case 'section-divider':
       return 'Section'
+    case 'canva':
+      return 'Canva'
   }
 }

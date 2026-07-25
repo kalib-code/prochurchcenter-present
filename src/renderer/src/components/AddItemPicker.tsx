@@ -33,8 +33,10 @@
 
 import { useEffect, useRef } from 'react'
 import type { Song } from '@shared/types'
+import type { CanvaImportResult } from '@shared/canva'
 import { ItemKindIcon, itemKindLabel } from './ItemKindIcon'
 import { SongPicker } from './SongPicker'
+import { CanvaPicker } from './CanvaPicker'
 
 interface Handlers {
   onPickSong: (songId: string) => void
@@ -44,15 +46,19 @@ interface Handlers {
   onAddDeck: () => void
   onAddCountdown: () => void
   onAddDivider: () => void
+  /** Opens the Canva sub-view. Mirrors the "song" two-step interaction. */
+  onOpenCanva: () => void
+  /** Fired once a Canva design has been downloaded as a PDF. */
+  onImportCanva: (result: CanvaImportResult, designId: string) => void
 }
 
 interface Props extends Handlers {
   songs: Song[]
   /** "inline" renders no chrome; "popover" wraps in an elevated panel. */
   mode: 'inline' | 'popover'
-  /** Controls which sub-view is showing: the grid or the song sublist. */
-  view: 'grid' | 'song'
-  setView: (view: 'grid' | 'song') => void
+  /** Controls which sub-view is showing: the grid, the song sublist, or Canva. */
+  view: 'grid' | 'song' | 'canva'
+  setView: (view: 'grid' | 'song' | 'canva') => void
   /** Called when the user dismisses the picker (ESC, outside click). */
   onClose: () => void
 }
@@ -66,6 +72,7 @@ interface KindCardSpec {
     | 'deck'
     | 'countdown'
     | 'section-divider'
+    | 'canva'
   hint: string
 }
 
@@ -76,7 +83,8 @@ const KIND_CARDS: KindCardSpec[] = [
   { kind: 'video', hint: 'Plays with sound' },
   { kind: 'deck', hint: 'Import a PDF' },
   { kind: 'countdown', hint: 'Pre-service timer' },
-  { kind: 'section-divider', hint: 'Grouping only' }
+  { kind: 'section-divider', hint: 'Grouping only' },
+  { kind: 'canva', hint: 'From your Canva account' }
 ]
 
 export function AddItemPicker(props: Props): JSX.Element {
@@ -92,7 +100,9 @@ export function AddItemPicker(props: Props): JSX.Element {
     onAddVideo,
     onAddDeck,
     onAddCountdown,
-    onAddDivider
+    onAddDivider,
+    onOpenCanva,
+    onImportCanva
   } = props
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -150,6 +160,9 @@ export function AddItemPicker(props: Props): JSX.Element {
       case 'section-divider':
         onAddDivider()
         return
+      case 'canva':
+        onOpenCanva()
+        return
     }
   }
 
@@ -194,6 +207,21 @@ export function AddItemPicker(props: Props): JSX.Element {
           onPick={(songId) => onPickSong(songId)}
           onClose={onClose}
         />
+      </div>
+    ) : view === 'canva' ? (
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <button
+            onClick={() => setView('grid')}
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            ← Back
+          </button>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/70">
+            Import from Canva
+          </span>
+        </div>
+        <CanvaPicker onImported={onImportCanva} onClose={onClose} />
       </div>
     ) : (
       <div>
