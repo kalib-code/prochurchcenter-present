@@ -39,7 +39,23 @@ export type ThemeFieldDef =
   | (FieldBase & { kind: 'seg'; options: FieldOption[] })
   | (FieldBase & { kind: 'swatch'; options: FieldOption[] })
   | (FieldBase & { kind: 'step'; step: number; min: number; max: number; unit: string })
-  | (FieldBase & { kind: 'file'; pickKind: PickFileKind })
+  | (FieldBase & {
+      kind: 'file'
+      pickKind: PickFileKind
+      /**
+       * A second Theme key this row co-owns. Only `backgroundImagePath`
+       * uses this today: `Theme` stores image and video backgrounds as
+       * two separate fields (video wins visually when both are set —
+       * see the Theme doc comment in shared/types.ts), but the design
+       * shows ONE "Background media" row. Every consumer that treats
+       * THEME_FIELDS as "one row per overridable thing" (override-active
+       * detection, revert, chip-promotion, display value) must treat
+       * `key` and `companionKey` as a single logical field — never write
+       * to `key` alone, or a picked video ends up stored under the image
+       * path while a stale video path lingers from a previous pick.
+       */
+      companionKey?: keyof ThemeOverride
+    })
 
 export const THEME_FIELDS: ThemeFieldDef[] = [
   {
@@ -67,7 +83,9 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
     label: 'Size',
     hint: 'scales the auto-fit baseline',
     kind: 'step',
-    step: 10,
+    // Matches ThemeFields.tsx's step={5} for the same field (L159) — the
+    // per-song override editor should not be coarser than the global one.
+    step: 5,
     min: 50,
     max: 150,
     unit: '%'
@@ -102,7 +120,9 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
     label: 'Background media',
     hint: 'image or ambient video',
     kind: 'file',
-    pickKind: 'media'
+    pickKind: 'media',
+    // See ThemeFieldDef['companionKey'] doc above for why this exists.
+    companionKey: 'backgroundVideoPath'
   },
   {
     key: 'textAlign',
