@@ -57,11 +57,15 @@ module.exports = {
         }
       },
       borderRadius: {
+        // Every size derives from --radius with no offset. The old scale
+        // added +4px/+8px for xl/2xl, which meant `--radius: 0` still left
+        // those two rounded — defeating the zero-radius constraint at eight
+        // call sites. The KLB system has exactly one radius: none.
         lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
-        xl: 'calc(var(--radius) + 4px)',
-        '2xl': 'calc(var(--radius) + 8px)'
+        md: 'var(--radius)',
+        sm: 'var(--radius)',
+        xl: 'var(--radius)',
+        '2xl': 'var(--radius)'
       },
       fontFamily: {
         sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
