@@ -1127,8 +1127,17 @@ naive per-cell border would double them."
 
 **Files:**
 - Modify: `src/shared/ipc-contract.ts`
+- Modify: `src/preload/index.ts`
 - Create: `src/renderer/src/lib/preflight.ts`
 - Create: `src/renderer/src/lib/preflight.test.ts`
+
+> **The preload wiring belongs in THIS task, not Task 7.** `src/preload/index.ts`
+> declares its `api` object as `const api: PresentApi`, so the moment `PresentApi`
+> grows `system` and `files`, an unwired preload is a TS2739 error. Deferring the
+> wiring would leave this task's commit failing `pnpm typecheck` — which the Global
+> Constraints forbid. The bridges are declared here and answered by the handlers in
+> Task 7; between the two commits a call would reject with "No handler registered",
+> which is harmless because nothing calls them until Task 9.
 
 **Interfaces:**
 - Produces: types `PreflightCheck`, `PreflightReport`, `PreflightRemedy`; channels `CHANNELS.system.getPreflight`, `CHANNELS.files.checkExists`; `PresentApi.system` and `PresentApi.files`; function `summarize(checks: PreflightCheck[]): { okCount: number; warningCount: number; headline: string; firstWarning: PreflightCheck | null }`.
@@ -1338,11 +1347,31 @@ export function summarize(checks: PreflightCheck[]): PreflightSummary {
 Run: `pnpm test src/renderer/src/lib/preflight.test.ts`
 Expected: PASS, 7 tests.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Wire the preload**
+
+Required in this task — see the note above. In `src/preload/index.ts`, add to the
+`api` object after the `settings` block:
+
+```ts
+  // Handlers for these arrive with the pre-flight main-process task. The
+  // bridge is declared here so `const api: PresentApi` stays fully
+  // implemented and the commit typechecks; until then a call would reject
+  // with "No handler registered", which nothing triggers yet.
+  system: {
+    getPreflight: (setlistId: string | null) =>
+      ipcRenderer.invoke(CHANNELS.system.getPreflight, setlistId),
+    openExternal: (url: string) => ipcRenderer.invoke(CHANNELS.system.openExternal, url)
+  },
+  files: {
+    checkExists: (paths: string[]) => ipcRenderer.invoke(CHANNELS.files.checkExists, paths)
+  },
+```
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/shared/ipc-contract.ts src/renderer/src/lib/preflight.ts src/renderer/src/lib/preflight.test.ts
-git commit -m "feat(preflight): contract types and summary reduction"
+git add src/shared/ipc-contract.ts src/preload/index.ts src/renderer/src/lib/preflight.ts src/renderer/src/lib/preflight.test.ts
+git commit -m "feat(preflight): contract types, preload bridge, summary reduction"
 ```
 
 ---
@@ -1674,20 +1703,12 @@ import { registerFilesHandlers } from './files'
   registerFilesHandlers()
 ```
 
-- [ ] **Step 5: Wire the preload**
+- [ ] **Step 5: Confirm the preload bridge is already wired**
 
-In `src/preload/index.ts`, add to the `api` object after the `settings` block:
-
-```ts
-  system: {
-    getPreflight: (setlistId: string | null) =>
-      ipcRenderer.invoke(CHANNELS.system.getPreflight, setlistId),
-    openExternal: (url: string) => ipcRenderer.invoke(CHANNELS.system.openExternal, url)
-  },
-  files: {
-    checkExists: (paths: string[]) => ipcRenderer.invoke(CHANNELS.files.checkExists, paths)
-  },
-```
+Task 6 wired `system` and `files` in `src/preload/index.ts` — it had to, or its own
+commit would not have typechecked. Verify the three bridges are present and their
+channel names match the handlers you just registered. **Do not re-add them.** If
+they are missing, add them per Task 6 Step 6 and note the discrepancy.
 
 - [ ] **Step 6: Verify end to end**
 
