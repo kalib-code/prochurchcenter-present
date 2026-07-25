@@ -52,6 +52,7 @@ import { AddItemPicker } from '../components/AddItemPicker'
 import { Button } from '../components/ui/Button'
 import { formatServiceDate } from '../lib/setlist-helpers'
 import { probePdfPageCount } from '../lib/pdfLoader'
+import { probeVisibleSlideCount } from '../lib/pptxLoader'
 
 interface Draft {
   name: string
@@ -228,6 +229,32 @@ export function SetlistEditor(): JSX.Element {
     }
   }
 
+  const addPptx = async (): Promise<void> => {
+    const picked = await window.api.dialog.pickFile('pptx')
+    if (!picked) {
+      closePicker()
+      return
+    }
+    try {
+      const slideCount = await probeVisibleSlideCount(picked)
+      const title =
+        picked.split(/[/\\]/).pop()?.replace(/\.pptx$/i, '') ?? 'PowerPoint'
+      insertItem({
+        kind: 'pptx',
+        id: genItemId(),
+        pptxPath: picked,
+        slideCount,
+        title
+      })
+    } catch (err) {
+      console.error('[SetlistEditor] failed to open pptx', picked, err)
+      window.alert(
+        'Could not open that PowerPoint file. Make sure it is a .pptx (not an older .ppt), or export it to PDF from PowerPoint (File → Export → Create PDF/XPS) and add it as a PDF deck instead.'
+      )
+      closePicker()
+    }
+  }
+
   const addCountdown = (): void => {
     insertItem({
       kind: 'countdown',
@@ -258,6 +285,7 @@ export function SetlistEditor(): JSX.Element {
     onAddImage: () => void addImage(),
     onAddVideo: () => void addVideo(),
     onAddDeck: () => void addDeck(),
+    onAddPptx: () => void addPptx(),
     onAddCountdown: addCountdown,
     onAddDivider: addDivider
   }

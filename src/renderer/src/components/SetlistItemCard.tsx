@@ -20,6 +20,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Setlist, SetlistItem, Song } from '@shared/types'
 import { probePdfPageCount } from '../lib/pdfLoader'
+import { probeVisibleSlideCount } from '../lib/pptxLoader'
 import { MediaPreview } from './MediaPreview'
 import { useBibleStore } from '../stores/useBibleStore'
 
@@ -362,17 +363,43 @@ function ItemBody({
   }
 
   if (item.kind === 'pptx') {
-    // No file picker here yet — picking a .pptx needs to probe the file
-    // for its visible slide count (probeVisibleSlideCount, built on top
-    // of @shared/pptxSlides), which is a later task's job. Task 3 only
-    // adds the data model + slideify fan-out, so this shows the item's
-    // current data honestly rather than faking a working picker.
+    const handlePick = async (): Promise<void> => {
+      const picked = await window.api.dialog.pickFile('pptx')
+      if (!picked) return
+      try {
+        const slideCount = await probeVisibleSlideCount(picked)
+        onChange({
+          ...item,
+          pptxPath: picked,
+          slideCount,
+          title: item.title || defaultPptxTitle(picked)
+        })
+      } catch (err) {
+        console.error('[pptx] failed to probe PowerPoint file', picked, err)
+        window.alert(
+          'Could not open that PowerPoint file. Make sure it is a .pptx (not an older .ppt), or export it to PDF from PowerPoint (File → Export → Create PDF/XPS) and add it as a PDF deck instead.'
+        )
+      }
+    }
+
     return (
       <div className="flex flex-col gap-1.5">
-        <div className="text-[11px] text-muted-foreground">
-          {item.pptxPath
-            ? `${displayFileName(item.pptxPath)} · ${item.slideCount} slide${item.slideCount === 1 ? '' : 's'}`
-            : 'No PowerPoint file selected yet'}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handlePick}
+            className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
+          >
+            {item.pptxPath ? 'Change PowerPoint…' : 'Choose PowerPoint…'}
+          </button>
+          {item.pptxPath && (
+            <span
+              className="truncate text-[11px] text-muted-foreground"
+              title={item.pptxPath}
+            >
+              {displayFileName(item.pptxPath)} · {item.slideCount} slide
+              {item.slideCount === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
         <input
           type="text"
@@ -399,6 +426,11 @@ function displayFileName(path: string): string {
 function defaultDeckTitle(path: string): string {
   const base = displayFileName(path)
   return base.replace(/\.pdf$/i, '')
+}
+
+function defaultPptxTitle(path: string): string {
+  const base = displayFileName(path)
+  return base.replace(/\.pptx$/i, '')
 }
 
 // ─── Scripture editor ────────────────────────────────────────────────

@@ -42,6 +42,7 @@ interface Handlers {
   onAddImage: () => void
   onAddVideo: () => void
   onAddDeck: () => void
+  onAddPptx: () => void
   onAddCountdown: () => void
   onAddDivider: () => void
 }
@@ -64,6 +65,7 @@ interface KindCardSpec {
     | 'image'
     | 'video'
     | 'deck'
+    | 'pptx'
     | 'countdown'
     | 'section-divider'
   hint: string
@@ -75,6 +77,7 @@ const KIND_CARDS: KindCardSpec[] = [
   { kind: 'image', hint: 'Full-screen photo' },
   { kind: 'video', hint: 'Plays with sound' },
   { kind: 'deck', hint: 'Import a PDF' },
+  { kind: 'pptx', hint: 'Import PowerPoint' },
   { kind: 'countdown', hint: 'Pre-service timer' },
   { kind: 'section-divider', hint: 'Grouping only' }
 ]
@@ -91,6 +94,7 @@ export function AddItemPicker(props: Props): JSX.Element {
     onAddImage,
     onAddVideo,
     onAddDeck,
+    onAddPptx,
     onAddCountdown,
     onAddDivider
   } = props
@@ -143,6 +147,9 @@ export function AddItemPicker(props: Props): JSX.Element {
         return
       case 'deck':
         onAddDeck()
+        return
+      case 'pptx':
+        onAddPptx()
         return
       case 'countdown':
         onAddCountdown()
