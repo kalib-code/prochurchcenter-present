@@ -796,7 +796,10 @@ import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 import { MonoLabel } from './MonoLabel'
 
-interface PanelProps extends HTMLAttributes<HTMLDivElement> {
+// `title` must be Omit'd from the DOM attributes: HTMLAttributes declares it
+// as `string`, so redeclaring it as ReactNode is a TS2430 conflict. It is
+// destructured out below and never reaches the rendered <div>.
+interface PanelProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   /** String titles are wrapped in a MonoLabel; nodes are rendered as-is. */
   title?: ReactNode
   action?: ReactNode
