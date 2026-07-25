@@ -25,6 +25,7 @@ import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import {
   formatServiceDate,
+  isToday,
   nextSundayISO,
   pickHero,
   suggestCloneDefaults
@@ -266,7 +267,9 @@ function HeroSetlist({
       <div className="min-w-0 px-[34px] pb-[30px] pt-[34px]">
         <div className="mb-5 flex items-center gap-2.5">
           <StatusDot tone="signal" pulse />
-          <MonoLabel tone="signal">NEXT UP</MonoLabel>
+          <MonoLabel tone="signal">
+            {isToday(setlist) ? 'TODAY · LIVE SERVICE' : 'NEXT UP'}
+          </MonoLabel>
         </div>
 
         <h2 className="mb-4 truncate text-[56px] font-extrabold leading-[1.02] tracking-[-0.035em] text-foreground">
