@@ -41,57 +41,34 @@
  * This mirrors ThemeFields.tsx's MediaPickerRow behaviour exactly (L192-210)
  * without touching that file — it is restyled separately in Task 21 and
  * still drives the global Settings editor.
+ *
+ * All of the actual override-manipulation logic (isFieldOverridden,
+ * effectiveDisplayValue, promoteField, revertField, pickField, etc.) is
+ * pure and lives in `../lib/themeOverrideFields.ts`, tested directly in
+ * `themeOverrideFields.test.ts`. This file keeps only JSX and the event
+ * wiring (including the one bit that genuinely needs to live here: the
+ * async `window.api.dialog.pickFile` call).
  */
 
 import type { Theme, ThemeOverride } from '@shared/types'
 import type { SlidePayload } from '@shared/ipc-contract'
 import { mergeThemeOverride } from '../lib/themeOverride'
 import { THEME_FIELDS, formatFieldValue, type ThemeFieldDef } from '../lib/themeFields'
+import {
+  effectiveDisplayValue,
+  fieldPatch,
+  isFieldOverridden,
+  applyOverridePatch,
+  pickField,
+  promoteField,
+  revertField
+} from '../lib/themeOverrideFields'
 import { SlideRenderer } from './SlideRenderer'
 import { Button } from './ui/Button'
 import { Panel } from './ui/Card'
 import { MonoLabel } from './ui/MonoLabel'
 import { Segmented } from './ui/Segmented'
 import { cn } from '../lib/utils'
-
-// Mirrors main/ipc/dialog.ts's 'video' filter extensions exactly, so the
-// image/video routing decision here always agrees with what the native
-// picker actually let the operator choose.
-const VIDEO_EXTENSION_RE = /\.(mp4|mov|webm|mkv|m4v)$/i
-
-function isVideoPath(path: string): boolean {
-  return VIDEO_EXTENSION_RE.test(path)
-}
-
-/** True when this def's key IS present in the override, OR (for the
- * background-media row) its companion key is. Treats a file row + its
- * companion as one logical field, per the module doc above. */
-function isFieldOverridden(def: ThemeFieldDef, override: ThemeOverride): boolean {
-  if (def.kind === 'file' && def.companionKey) {
-    return override[def.key] !== undefined || override[def.companionKey] !== undefined
-  }
-  return override[def.key] !== undefined
-}
-
-/** The value to DISPLAY for a field, given the effective (merged) theme.
- * For the background-media row this is whichever of image/video is
- * actually set, preferring video since it wins the render priority. */
-function effectiveDisplayValue(def: ThemeFieldDef, effective: Theme): unknown {
-  if (def.kind === 'file' && def.companionKey) {
-    return effective[def.companionKey] ?? effective[def.key]
-  }
-  return effective[def.key]
-}
-
-function fieldPatch(key: keyof ThemeOverride, value: unknown): Partial<Theme> {
-  return { [key]: value } as Partial<Theme>
-}
-
-function fieldsPatch(entries: Array<[keyof ThemeOverride, unknown]>): Partial<Theme> {
-  const obj: Record<string, unknown> = {}
-  for (const [k, v] of entries) obj[k] = v
-  return obj as Partial<Theme>
-}
 
 interface ThemeOverrideEditorProps {
   /** null = this song has no override and inherits the global theme entirely. */
@@ -157,69 +134,26 @@ function ActiveOverrideEditor({
   const inheritedDefs = THEME_FIELDS.filter((def) => !isFieldOverridden(def, override))
   const overriddenCount = activeDefs.length
 
-  // Real edits (seg/swatch/step/select/file changes). Mirrors the old
-  // ThemeOverrideSection.handleFieldChange: spread the patch onto the
-  // current override, then drop any resulting null/undefined entries —
-  // mergeThemeOverride treats "field is null in the override" as
-  // "inherit", not "force null on the projector" (see its doc comment),
-  // so a cleared media field must fall OUT of the override entirely
-  // rather than persist as an explicit null.
-  const applyPatch = (patch: Partial<Theme>): void => {
-    const merged: Record<string, unknown> = { ...override, ...patch }
-    const cleaned: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(merged)) {
-      if (value !== null && value !== undefined) cleaned[key] = value
-    }
-    onChange(cleaned as ThemeOverride)
+  // Real edits (seg/swatch/step/select/file changes) — see
+  // applyOverridePatch's doc comment for why nulls get stripped.
+  const handleApplyPatch = (patch: Partial<Theme>): void => {
+    onChange(applyOverridePatch(override, patch))
   }
 
-  // REVERT — deletes the key(s) entirely, not just clears them to null/
-  // undefined via applyPatch's cleaning. This is the one place a
-  // companion key must be well and truly ABSENT from the override
-  // afterward, so isFieldOverridden reports this field as inherited
-  // again for both the count and the chip tray.
-  const revertField = (def: ThemeFieldDef): void => {
-    const next: Record<string, unknown> = { ...override }
-    delete next[def.key]
-    if (def.kind === 'file' && def.companionKey) delete next[def.companionKey]
-    onChange(next as ThemeOverride)
+  const handleRevert = (def: ThemeFieldDef): void => {
+    onChange(revertField(override, def))
   }
 
-  // Promote an inherited chip — seed the override at its CURRENT
-  // EFFECTIVE value, straight onto `override` (NOT through applyPatch,
-  // which would strip a null value right back out and make a
-  // promoted-but-still-empty file field indistinguishable from
-  // "never promoted"). Because `effective` is computed from `override`
-  // BEFORE this field is added, effective[key] here equals whatever the
-  // song already showed — so the merge below is a no-op visually.
-  const promoteField = (def: ThemeFieldDef): void => {
-    const patch: Record<string, unknown> = { [def.key]: effective[def.key] }
-    if (def.kind === 'file' && def.companionKey) {
-      patch[def.companionKey] = effective[def.companionKey]
-    }
-    onChange({ ...override, ...patch } as ThemeOverride)
+  const handlePromote = (def: ThemeFieldDef): void => {
+    onChange(promoteField(override, def, globalTheme))
   }
 
-  // Route a picked file by extension, mirroring ThemeFields.tsx's
-  // mutual-clear rule for the two background-media fields exactly:
-  // picking a video clears the image key and vice versa.
-  const pickField = async (def: ThemeFieldDef & { kind: 'file' }): Promise<void> => {
+  // The one bit of IO in this file: ask the native dialog for a path,
+  // then hand it to the pure pickField() to route by extension.
+  const handlePickFile = async (def: ThemeFieldDef & { kind: 'file' }): Promise<void> => {
     const picked = await window.api.dialog.pickFile(def.pickKind)
     if (!picked) return
-    if (def.companionKey) {
-      const patch = isVideoPath(picked)
-        ? fieldsPatch([
-            [def.companionKey, picked],
-            [def.key, null]
-          ])
-        : fieldsPatch([
-            [def.key, picked],
-            [def.companionKey, null]
-          ])
-      applyPatch(patch)
-    } else {
-      applyPatch(fieldPatch(def.key, picked))
-    }
+    onChange(pickField(override, def, picked))
   }
 
   return (
@@ -283,9 +217,9 @@ function ActiveOverrideEditor({
           key={def.key}
           def={def}
           effective={effective}
-          onRevert={() => revertField(def)}
-          onApplyPatch={applyPatch}
-          onPickFile={() => pickField(def as ThemeFieldDef & { kind: 'file' })}
+          onRevert={() => handleRevert(def)}
+          onApplyPatch={handleApplyPatch}
+          onPickFile={() => handlePickFile(def as ThemeFieldDef & { kind: 'file' })}
         />
       ))}
 
@@ -300,7 +234,7 @@ function ActiveOverrideEditor({
             <button
               key={def.key}
               type="button"
-              onClick={() => promoteField(def)}
+              onClick={() => handlePromote(def)}
               className="flex items-baseline gap-[7px] border border-dashed border-dim bg-transparent px-[10px] py-[7px] hover:border-signal hover:border-solid"
             >
               <MonoLabel size="xs" tone="dim">
