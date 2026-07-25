@@ -301,6 +301,48 @@ export interface CustomFontEntry {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pre-flight (Home readiness checks)
+//
+// Four things break Sunday: the projector is on the wrong display, macOS
+// Screen Recording is off so the confidence monitor is black, a media file
+// moved since it was added, or there is no recent backup. Pre-flight surfaces
+// all four on Saturday night with the remedy attached.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the operator can do about a failing check.
+ *   'external' — `target` is a URL opened via shell.openExternal, e.g. the
+ *                macOS Screen Recording privacy pane.
+ *   'in-app'   — `target` is a renderer route, e.g. "/settings".
+ */
+export interface PreflightRemedy {
+  label: string
+  kind: 'external' | 'in-app'
+  target: string
+}
+
+export interface PreflightCheck {
+  id: 'display' | 'screenRecording' | 'media' | 'backup'
+  status: 'ready' | 'warning'
+  /** Short name, e.g. "Screen Recording" */
+  name: string
+  /** One-sentence explanation with the specific numbers filled in. */
+  detail: string
+  remedy?: PreflightRemedy
+}
+
+export interface PreflightReport {
+  /**
+   * Checks that APPLY on this platform. The screenRecording check is
+   * macOS-only and is omitted entirely elsewhere, rather than emitting a
+   * misleading disabled row — so consumers must never assume length 4.
+   */
+  checks: PreflightCheck[]
+  /** ISO timestamp of when the report was produced. */
+  checkedAt: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PresentApi — the surface exposed on `window.api`
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -338,6 +380,21 @@ export interface PresentApi {
   settings: {
     get(): Promise<Settings>
     update(patch: UpdateSettingsPatch): Promise<Settings>
+  }
+
+  /**
+   * Readiness checks surfaced on Home. `setlistId` is nullable so Home can
+   * ask before any setlist exists; the media check is then omitted.
+   */
+  system: {
+    getPreflight(setlistId: string | null): Promise<PreflightReport>
+    /** Open a remedy's target. Routes through shell.openExternal. */
+    openExternal(url: string): Promise<void>
+  }
+
+  /** Read-only existence probe. Used by pre-flight and the setlist editor. */
+  files: {
+    checkExists(paths: string[]): Promise<Record<string, boolean>>
   }
 
   dialog: {
@@ -632,6 +689,13 @@ export const CHANNELS = {
   settings: {
     get: 'settings:get',
     update: 'settings:update'
+  },
+  system: {
+    getPreflight: 'system:getPreflight',
+    openExternal: 'system:openExternal'
+  },
+  files: {
+    checkExists: 'files:checkExists'
   },
   dialog: {
     pickFile: 'dialog:pickFile'
