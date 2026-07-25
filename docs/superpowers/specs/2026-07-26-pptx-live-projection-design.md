@@ -67,6 +67,11 @@ The library is version 1.2.4, Apache-2.0, ships TypeScript types, runs CI and
 codecov, and diffs 452 visual-regression cases against PowerPoint output with
 SSIM and IoU metrics.
 
+Its runtime dependencies are `echarts ^6.0.0` and `jszip ^3.10.1`, which Vite
+bundles. It also declares an **optional** peer dependency on
+`pdfjs-dist >=5 <7`, which this app already satisfies at `^5.6.205`, so the
+EMF-embedded-PDF fallback works without adding anything.
+
 ## Architecture
 
 Nothing downstream of the slide payload changes. `slideify` fans a deck out into
@@ -113,6 +118,12 @@ someone swaps in a revised file.
 
 ## New modules
 
+### `src/shared/pptxSlides.ts`
+
+Pure slide arithmetic over `PptxSlideMeta[]`, with no DOM and no filesystem
+access, so it tests in the default node environment. See *Testing* for the
+interface and cases.
+
 ### `src/renderer/src/lib/pptxLoader.ts`
 
 A sibling of [pdfLoader.ts](../../../src/renderer/src/lib/pdfLoader.ts), with the
@@ -129,11 +140,14 @@ evictPresentation(absPath: string): void
 - Read bytes through the existing `present-media://local` protocol, the way
   `pdfLoader` builds its URL.
 - Use `parseZipLazyMedia` with `buildPresentation(files, { lazySlides: true })`.
-- `import()` the renderer dynamically inside this module. The browser build
-  inlines JSZip and ECharts at roughly 1.5 MB; loading it only when a setlist
-  contains a `.pptx` leaves projector startup untouched for churches that never
-  use PowerPoint.
-- `probeVisibleSlideCount` returns `presentation.slides.filter(s => !s.hidden).length`.
+- `import()` the renderer dynamically inside this module, from the package's
+  default entry (`'@aiden0z/pptx-renderer'`) so Vite resolves and bundles
+  ECharts and JSZip itself. Do **not** import the `/browser` standalone build;
+  that exists for bundler-free `<script type="module">` use. Loading the chunk
+  only when a setlist contains a `.pptx` leaves projector startup untouched for
+  churches that never use PowerPoint.
+- Map `presentation.slides` onto `PptxSlideMeta[]` and delegate counting to
+  `visibleSlideCount` from `@shared/pptxSlides`.
 
 ### `src/renderer/src/components/PptxSlideView.tsx`
 
@@ -231,15 +245,69 @@ Commit both fixtures generated during research, 38 KB each:
 - `test-deck.pptx` — 5 visible slides, with a table and a chart
 - `test-deck-hidden.pptx` — 7 slide parts, the sixth hidden, so 6 visible
 
-Vitest cases:
+### Test environment
 
-- `probeVisibleSlideCount` returns 5 and 6 for the two fixtures
-- ordinal-to-source-index mapping skips the hidden slide: ordinal 6 resolves to
-  source index 7
-- `loadPresentation` shares one promise across concurrent callers, and evicts on
-  rejection
+The current [vitest.config.ts](../../../vitest.config.ts) runs
+`src/shared/**/*.test.ts` under `environment: 'node'`. Neither setting suits this
+feature, and we measured why:
+
+| Environment | Result parsing `test-deck-hidden.pptx` |
+|---|---|
+| node, as configured | `ReferenceError: DOMParser is not defined` |
+| node + `@xmldom/xmldom` | `TypeError: e.querySelector is not a function` |
+| node + `happy-dom` | **0 slides, no error** — silent false pass |
+| node + `jsdom` | 7 parts, 6 visible, flags correct, 1280×720 |
+
+`happy-dom` is the trap: its `DOMParser` rejects the OOXML declaration, logs to
+stderr, and returns an empty presentation. A test written against it passes while
+asserting nothing. Use `jsdom`.
+
+Required changes:
+
+- add `jsdom` to `devDependencies`
+- widen `include` to `['src/shared/**/*.test.ts', 'src/renderer/**/*.test.ts']`,
+  keeping `environment: 'node'` as the default
+- the one test file that parses a real deck opts in per-file with
+  `// @vitest-environment jsdom`
+
+### Splitting pure logic from browser logic
+
+To keep index arithmetic testable in the default node environment, the slide-math
+lives in `src/shared/` as pure functions over plain data, separate from anything
+that touches a DOM or the filesystem:
+
+```ts
+// src/shared/pptxSlides.ts — pure, node-testable
+export interface PptxSlideMeta { sourceIndex: number; hidden: boolean }
+export function visibleSlideCount(slides: PptxSlideMeta[]): number
+export function ordinalToSourceIndex(slides: PptxSlideMeta[], ordinal: number): number | null
+```
+
+`pptxLoader` maps the library's presentation onto `PptxSlideMeta[]` and delegates
+the arithmetic. Two test layers result: pure math in node, and one jsdom test
+proving the real fixtures produce the metadata the math expects.
+
+### Cases
+
+Pure, node environment:
+
+- `visibleSlideCount` returns 6 for the hidden-slide metadata, 5 for the plain deck
+- `ordinalToSourceIndex` skips the hidden slide: ordinal 6 resolves to source
+  index 7, ordinals 1–5 map to 1–5
+- `ordinalToSourceIndex` returns `null` for ordinal 0, 7, and negatives
 - `slideify` fans a `pptx` item into `slideCount` payloads with ordinals 1..N
 - `slideify` drops a `pptx` item with `slideCount <= 0`, matching `deck`
+
+jsdom environment, real fixtures:
+
+- parsing `test-deck.pptx` yields 5 slide metas, none hidden
+- parsing `test-deck-hidden.pptx` yields 7 metas with only index 6 hidden
+- `probeVisibleSlideCount` returns 5 and 6 respectively
+
+Cache behaviour, node environment with a stubbed parse:
+
+- `loadPresentation` shares one promise across concurrent callers
+- a rejected parse is evicted so a retry re-attempts
 
 Development-time visual regression: convert a fixture with
 `soffice --headless --convert-to pdf` and diff the renderer's output against
