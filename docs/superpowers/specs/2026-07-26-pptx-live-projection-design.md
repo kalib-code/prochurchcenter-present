@@ -139,7 +139,21 @@ evictPresentation(absPath: string): void
   concurrent callers share one parse. Evict on rejection so a retry re-attempts.
 - Read bytes through the existing `present-media://local` protocol, the way
   `pdfLoader` builds its URL.
-- Use `parseZipLazyMedia` with `buildPresentation(files, { lazySlides: true })`.
+- Use `parseZipLazyMedia`, but **eager** `buildPresentation(files)` — *not*
+  `{ lazySlides: true }`.
+
+  Measured on `test-deck-hidden.pptx`:
+
+  ```
+  lazySlides:true  hidden = [null,null,null,null,null,null,null]   → 7 visible
+  eager            hidden = [false,false,false,false,false,true,false] → 6 visible
+  ```
+
+  With `lazySlides`, `hidden` is `null` until a slide is materialized. `null` is
+  falsy, so `!s.hidden` is true for every slide and the hidden draft slide gets
+  projected — the exact failure this design exists to prevent, surfacing in
+  front of a congregation. Media laziness is unaffected and still worth having,
+  so keep `parseZipLazyMedia` and drop only `lazySlides`.
 - `import()` the renderer dynamically inside this module, from the package's
   default entry (`'@aiden0z/pptx-renderer'`) so Vite resolves and bundles
   ECharts and JSZip itself. Do **not** import the `/browser` standalone build;
