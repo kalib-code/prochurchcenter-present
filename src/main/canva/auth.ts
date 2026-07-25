@@ -34,7 +34,6 @@ const EXPIRY_SKEW_MS = 60_000
 
 interface RedirectResult {
   code: string
-  state: string
 }
 
 /**
@@ -42,73 +41,139 @@ interface RedirectResult {
  * shut down. Resolves with the code, or rejects on error/timeout — in
  * every case the listener is closed, so an abandoned consent screen
  * never leaves a server running.
+ *
+ * `port` and `result` are settled by the same two functions (`succeed` /
+ * `fail`), so every path that rejects `result` also rejects `port` (a
+ * no-op if `port` already resolved). This matters because `server.listen`
+ * can itself fail — EACCES, EMFILE, a sandbox denying the loopback bind —
+ * in which case the success callback that would normally call
+ * `resolvePort` never runs. Without `fail` also settling `port`, that
+ * path would leave `connect()`'s `await port` hanging forever, since
+ * `CONNECT_TIMEOUT_MS` only guards `result`.
+ *
+ * `cancel` lets a caller tear the listener down immediately for a
+ * reason unrelated to the HTTP side (e.g. the browser itself failed to
+ * open), rather than leaving it bound until the timeout.
  */
 function awaitRedirect(
   expectedState: string
-): { port: Promise<number>; result: Promise<RedirectResult> } {
+): { port: Promise<number>; result: Promise<RedirectResult>; cancel: (err: Error) => void } {
   let server: Server
   let resolvePort: (p: number) => void
-  const port = new Promise<number>((r) => (resolvePort = r))
-
-  const result = new Promise<RedirectResult>((resolve, reject) => {
-    let settled = false
-    const finish = (fn: () => void): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      server.close()
-      fn()
-    }
-
-    const timer = setTimeout(
-      () => finish(() => reject(new Error('Timed out waiting for Canva sign-in'))),
-      CONNECT_TIMEOUT_MS
-    )
-
-    server = createServer((req, res) => {
-      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-      if (url.pathname !== '/callback') {
-        res.writeHead(404).end()
-        return
-      }
-
-      const error = url.searchParams.get('error')
-      const code = url.searchParams.get('code')
-      const state = url.searchParams.get('state')
-
-      const body = error
-        ? 'Could not connect Canva. You can close this tab and try again in Present.'
-        : 'Canva connected. You can close this tab and return to Present.'
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end(body)
-
-      if (error) return finish(() => reject(new Error(`Canva returned: ${error}`)))
-      if (state !== expectedState) {
-        return finish(() => reject(new Error('State mismatch — sign-in was not completed safely')))
-      }
-      if (!code) return finish(() => reject(new Error('Canva did not return an authorization code')))
-      finish(() => resolve({ code, state }))
-    })
-
-    server.on('error', (err) => finish(() => reject(err)))
-    // Port 0 → OS assigns an ephemeral port.
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address()
-      if (addr && typeof addr === 'object') resolvePort(addr.port)
-    })
+  let rejectPort: (err: Error) => void
+  const port = new Promise<number>((res, rej) => {
+    resolvePort = res
+    rejectPort = rej
   })
 
-  return { port, result }
+  let settled = false
+  let resolveResult: (r: RedirectResult) => void
+  let rejectResult: (err: Error) => void
+  const result = new Promise<RedirectResult>((res, rej) => {
+    resolveResult = res
+    rejectResult = rej
+  })
+
+  const succeed = (value: RedirectResult): void => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    server.close()
+    resolveResult(value)
+  }
+
+  const fail = (err: Error): void => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    rejectPort(err) // no-op if `port` already resolved
+    server.close()
+    rejectResult(err)
+  }
+
+  const timer = setTimeout(
+    () => fail(new Error('Timed out waiting for Canva sign-in')),
+    CONNECT_TIMEOUT_MS
+  )
+
+  server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    if (url.pathname !== '/callback') {
+      res.writeHead(404).end()
+      return
+    }
+
+    const error = url.searchParams.get('error')
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state')
+
+    const body = error
+      ? 'Could not connect Canva. You can close this tab and try again in Present.'
+      : 'Canva connected. You can close this tab and return to Present.'
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end(body)
+
+    if (error) return fail(new Error(`Canva returned: ${error}`))
+    if (state !== expectedState) {
+      return fail(new Error('State mismatch — sign-in was not completed safely'))
+    }
+    if (!code) return fail(new Error('Canva did not return an authorization code'))
+    succeed({ code })
+  })
+
+  server.on('error', (err) => fail(err))
+  // Port 0 → OS assigns an ephemeral port.
+  server.listen(0, '127.0.0.1', () => {
+    const addr = server.address()
+    if (addr && typeof addr === 'object') resolvePort(addr.port)
+  })
+
+  return { port, result, cancel: fail }
+}
+
+/**
+ * Thrown by {@link postJson} for a non-2xx backend response. Carries only
+ * the HTTP status — never the response body, since a body can contain
+ * token material — so callers can tell a genuine rejection (400/401)
+ * apart from a transient service failure (e.g. 502) without ever seeing
+ * token data.
+ */
+class CanvaHttpError extends Error {
+  constructor(public readonly status: number) {
+    super(`Canva sign-in service returned ${status}`)
+    this.name = 'CanvaHttpError'
+  }
+}
+
+/**
+ * Thrown by {@link getValidAccessToken} when Canva has genuinely rejected
+ * the stored refresh token (HTTP 400/401), as opposed to the service
+ * merely being unreachable. Callers can use this to distinguish
+ * "reconnect Canva" from "try again in a moment".
+ */
+export class CanvaReauthRequiredError extends Error {
+  constructor() {
+    super('Canva sign-in expired. Please connect Canva again.')
+    this.name = 'CanvaReauthRequiredError'
+  }
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await net.fetch(`${BACKEND_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  })
+  let res: Response
+  try {
+    res = await net.fetch(`${BACKEND_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+  } catch {
+    // net.fetch throws on offline / DNS failure / connection refused.
+    throw new Error(
+      'Could not reach the Canva sign-in service. Check your internet connection and try again.'
+    )
+  }
   if (!res.ok) {
     // Status only — the body can contain tokens.
-    throw new Error(`Canva sign-in service returned ${res.status}`)
+    throw new CanvaHttpError(res.status)
   }
   return (await res.json()) as T
 }
@@ -158,14 +223,27 @@ export async function connect(): Promise<CanvaTokens> {
   const challenge = await deriveCodeChallenge(verifier)
   const state = generateState()
 
-  const { port, result } = awaitRedirect(state)
+  const { port, result, cancel } = awaitRedirect(state)
   const listenPort = await port
 
   const startUrl = new URL(`${BACKEND_BASE}/canva/start`)
   startUrl.searchParams.set('challenge', challenge)
   startUrl.searchParams.set('state', state)
   startUrl.searchParams.set('port', String(listenPort))
-  await shell.openExternal(startUrl.toString())
+
+  try {
+    await shell.openExternal(startUrl.toString())
+  } catch (err) {
+    const openError =
+      err instanceof Error ? err : new Error('Could not open the system browser')
+    // Nobody else will observe `result` now — attach a no-op handler so
+    // rejecting it below doesn't surface as an unhandled rejection, and
+    // tear the listener down immediately rather than leaving it bound
+    // for the rest of CONNECT_TIMEOUT_MS.
+    result.catch(() => {})
+    cancel(openError)
+    throw openError
+  }
 
   const { code } = await result
 
@@ -188,9 +266,14 @@ export async function disconnect(): Promise<void> {
  * A usable access token, refreshing when near expiry.
  *
  * Canva rotates refresh tokens, so the rotated one is persisted on every
- * refresh. A rejected refresh clears storage: the operator is genuinely
- * disconnected and needs to reconnect, and keeping a dead token would
- * only produce confusing failures later.
+ * refresh. Storage is cleared only when Canva genuinely rejects the
+ * refresh token (HTTP 400/401 — {@link CanvaReauthRequiredError}): the
+ * operator is disconnected and a dead credential would only produce
+ * confusing failures later. Any other failure — a 5xx, an unexpected
+ * status, or a network-level error (offline wifi, backend unreachable)
+ * — is treated as transient and rethrown without touching storage, so a
+ * dropped connection on a Sunday morning never destroys an otherwise
+ * valid refresh token.
  */
 export async function getValidAccessToken(): Promise<string> {
   const tokens = await loadTokens()
@@ -208,7 +291,12 @@ export async function getValidAccessToken(): Promise<string> {
     await saveTokens(refreshed)
     return refreshed.accessToken
   } catch (err) {
-    await clearTokens()
-    throw new Error('Canva sign-in expired. Please connect Canva again.')
+    if (err instanceof CanvaHttpError && (err.status === 400 || err.status === 401)) {
+      await clearTokens()
+      throw new CanvaReauthRequiredError()
+    }
+    throw new Error(
+      'Could not reach Canva right now. Your connection is still saved — try again shortly.'
+    )
   }
 }
