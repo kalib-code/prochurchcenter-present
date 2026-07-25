@@ -224,6 +224,17 @@ export async function connect(): Promise<CanvaTokens> {
   const state = generateState()
 
   const { port, result, cancel } = awaitRedirect(state)
+  // `result` can reject before anything below ever awaits it — e.g. a
+  // listen() error rejects both `port` and `result` together, and the
+  // `await port` right below throws first, so `await result` is never
+  // reached. Without a handler attached here, that abandoned rejection
+  // has no listener and takes down the Electron main process via
+  // Node's default unhandled-rejection behavior. This single guard
+  // covers every current and future early-exit path uniformly; the
+  // `.then`/`await` below still observes the real value or throws
+  // normally, since `.catch()` only attaches a handler — it doesn't
+  // consume the original promise.
+  void result.catch(() => {})
   const listenPort = await port
 
   const startUrl = new URL(`${BACKEND_BASE}/canva/start`)
@@ -236,11 +247,9 @@ export async function connect(): Promise<CanvaTokens> {
   } catch (err) {
     const openError =
       err instanceof Error ? err : new Error('Could not open the system browser')
-    // Nobody else will observe `result` now — attach a no-op handler so
-    // rejecting it below doesn't surface as an unhandled rejection, and
-    // tear the listener down immediately rather than leaving it bound
-    // for the rest of CONNECT_TIMEOUT_MS.
-    result.catch(() => {})
+    // Tear the listener down immediately rather than leaving it bound
+    // for the rest of CONNECT_TIMEOUT_MS. The unhandled-rejection guard
+    // above already covers `result`.
     cancel(openError)
     throw openError
   }
