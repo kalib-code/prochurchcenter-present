@@ -2,23 +2,32 @@
  * SongLibrary — the list view of every song on disk.
  *
  * Layout:
- *   PageHeader with search + New Song button in the actions slot.
- *   Body is a "table-lite" list — each row shows the song title, the
- *   author, metadata badges (language, CCLI, section count), and a
- *   last-updated relative time.
+ *   PageHeader with search + New Song button in the actions slot, and a
+ *   live song count underneath the title.
+ *   Body is a sticky-header table — title, author, tag badges (language +
+ *   section count), and last-updated. A fifth column binds to whichever
+ *   setlist Home is spotlighting (`pickHero`) so operators can build next
+ *   Sunday's setlist without leaving the library: click a row's cell to
+ *   toggle that song's membership. When there is no setlist at all, the
+ *   column — and its grid track — disappear entirely.
  *
- * Rows are divided by subtle borders rather than full card chrome so
- * the page scans like a hymnal index rather than a dashboard.
+ * Rows are divided by the inner hairline (`border-rule`) rather than full
+ * card chrome so the page scans like a hymnal index rather than a
+ * dashboard. `border-border`, the heavier line, is reserved for the
+ * container edges (header bottom, page frame).
  */
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import type { Song, SongLanguage } from '@shared/types'
+import type { Setlist, SetlistItem, Song, SongLanguage } from '@shared/types'
 import { useLibraryStore } from '../stores/useLibraryStore'
+import { useSetlistStore } from '../stores/useSetlistStore'
+import { pickHero } from '../lib/setlist-helpers'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { PageHeader } from '../components/ui/PageHeader'
 import { EmptyState } from '../components/ui/EmptyState'
+import { MonoLabel } from '../components/ui/MonoLabel'
 
 const LANGUAGE_LABELS: Record<SongLanguage, string> = {
   en: 'EN',
@@ -28,14 +37,33 @@ const LANGUAGE_LABELS: Record<SongLanguage, string> = {
   other: 'OTH'
 }
 
+// Grid templates for the song table. The trailing 130px track is the
+// setlist-membership column — present only while `pickHero` resolves to
+// a real setlist. Both literal strings need to stay intact in this file
+// (not string-concatenated) so Tailwind's JIT scanner emits both
+// grid-template-columns rules; only one is picked at runtime.
+const GRID_WITH_SETLIST = 'grid-cols-[1fr_190px_150px_96px_130px]'
+const GRID_WITHOUT_SETLIST = 'grid-cols-[1fr_190px_150px_96px]'
+
+function genItemId(): string {
+  return `item-${Math.random().toString(36).slice(2, 10)}`
+}
+
 export function SongLibrary(): JSX.Element {
   const navigate = useNavigate()
-  const { songs, loading, error, load, create, remove } = useLibraryStore()
+  const { songs, loading, error, load, create } = useLibraryStore()
+  const { setlists, load: loadSetlists, update: updateSetlist } = useSetlistStore()
   const [query, setQuery] = useState('')
 
   useEffect(() => {
     load()
-  }, [load])
+    loadSetlists()
+  }, [load, loadSetlists])
+
+  // Same setlist Home spotlights — today's service, else the next
+  // upcoming one, else the most recent past one, else null.
+  const heroSetlist = pickHero(setlists)
+  const gridCols = heroSetlist ? GRID_WITH_SETLIST : GRID_WITHOUT_SETLIST
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -56,46 +84,48 @@ export function SongLibrary(): JSX.Element {
     navigate(`/library/${created.id}`)
   }
 
-  const handleDelete = async (id: string, title: string): Promise<void> => {
-    const ok = window.confirm(`Delete "${title}"? This cannot be undone.`)
-    if (!ok) return
-    await remove(id)
+  const handleToggleMembership = async (songId: string): Promise<void> => {
+    if (!heroSetlist) return
+    const isMember = heroSetlist.items.some((i) => i.kind === 'song' && i.songId === songId)
+    const nextItems: SetlistItem[] = isMember
+      ? heroSetlist.items.filter((i) => !(i.kind === 'song' && i.songId === songId))
+      : [...heroSetlist.items, { kind: 'song', id: genItemId(), songId }]
+    await updateSetlist(heroSetlist.id, { items: nextItems })
   }
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
       <PageHeader
-        eyebrow="Library"
+        back={{ to: '/', label: 'HOME' }}
+        eyebrow="LIBRARY"
         title="Songs"
-        description={
-          songs.length > 0
-            ? `${songs.length} song${songs.length === 1 ? '' : 's'} in your library`
-            : 'Add the songs your team uses most often'
-        }
-        back={{ to: '/', label: 'Home' }}
         action={
           <>
             <SearchInput value={query} onChange={setQuery} />
             <Button variant="signal" size="md" onClick={handleNew}>
-              + New Song
+              + NEW SONG
             </Button>
           </>
         }
-      />
+      >
+        <MonoLabel size="xs" className="pb-5">
+          {songs.length} IN LIBRARY
+        </MonoLabel>
+      </PageHeader>
 
-      <main className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="mx-auto max-w-5xl">
-          {loading && songs.length === 0 && (
-            <p className="text-sm text-muted-foreground">Loading library…</p>
-          )}
+      <main className="flex-1 overflow-y-auto">
+        {loading && songs.length === 0 && (
+          <p className="px-6 py-6 text-[13px] text-muted-foreground">Loading library…</p>
+        )}
 
-          {error && (
-            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              Failed to load library: {error}
-            </p>
-          )}
+        {error && (
+          <p className="mx-6 mt-6 border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+            Failed to load library: {error}
+          </p>
+        )}
 
-          {!loading && !error && songs.length === 0 && (
+        {!loading && !error && songs.length === 0 && (
+          <div className="px-6 py-6">
             <EmptyState
               icon="♪"
               title="No songs yet"
@@ -106,46 +136,55 @@ export function SongLibrary(): JSX.Element {
                 </Button>
               }
             />
-          )}
+          </div>
+        )}
 
-          {!loading &&
-            !error &&
-            songs.length > 0 &&
-            filtered.length === 0 && (
-              <EmptyState
-                title={`No songs match "${query}"`}
-                description="Try a different search, or clear the search to see all songs."
-                cta={
-                  <Button variant="secondary" size="sm" onClick={() => setQuery('')}>
-                    Clear search
-                  </Button>
-                }
-              />
-            )}
+        {!loading && !error && songs.length > 0 && filtered.length === 0 && (
+          <div className="px-6 py-6">
+            <EmptyState
+              title={`No songs match "${query}"`}
+              description="Try a different search, or clear the search to see all songs."
+              cta={
+                <Button variant="outline" size="sm" onClick={() => setQuery('')}>
+                  Clear search
+                </Button>
+              }
+            />
+          </div>
+        )}
 
-          {filtered.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-border/50 bg-card/30">
-              {/* Column headers — deliberately lowercase + spaced-out,
-                  reads like a library catalog entry */}
-              <div className="hidden grid-cols-[1fr_180px_140px_100px] items-center gap-4 border-b border-border/40 px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/70 md:grid">
-                <div>Title</div>
-                <div>Author</div>
-                <div>Tags</div>
-                <div className="text-right">Updated</div>
-              </div>
-
-              <ul className="divide-y divide-border/30">
-                {filtered.map((song) => (
-                  <SongRow
-                    key={song.id}
-                    song={song}
-                    onDelete={() => handleDelete(song.id, song.title)}
-                  />
-                ))}
-              </ul>
+        {filtered.length > 0 && (
+          <>
+            {/* Sticky column-header row */}
+            <div
+              className={`sticky top-0 z-10 grid ${gridCols} items-center gap-4 border-b border-border bg-card px-6 py-[11px]`}
+            >
+              <MonoLabel size="xs">TITLE</MonoLabel>
+              <MonoLabel size="xs">AUTHOR</MonoLabel>
+              <MonoLabel size="xs">TAGS</MonoLabel>
+              <MonoLabel size="xs" className="text-right">
+                UPDATED
+              </MonoLabel>
+              {heroSetlist && (
+                <MonoLabel size="xs" tone="signal" className="text-right">
+                  {formatSetlistHeaderDate(heroSetlist.date)}
+                </MonoLabel>
+              )}
             </div>
-          )}
-        </div>
+
+            <ul>
+              {filtered.map((song) => (
+                <SongRow
+                  key={song.id}
+                  song={song}
+                  gridCols={gridCols}
+                  heroSetlist={heroSetlist}
+                  onToggleMembership={() => handleToggleMembership(song.id)}
+                />
+              ))}
+            </ul>
+          </>
+        )}
       </main>
     </div>
   )
@@ -161,29 +200,27 @@ function SearchInput({
   onChange: (v: string) => void
 }): JSX.Element {
   return (
-    <div className="relative">
+    <div className="flex h-[38px] w-[280px] items-center gap-[9px] border border-border px-3">
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        className="shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      >
+        <circle cx="7" cy="7" r="4.5" />
+        <path d="M10.5 10.5L14 14" />
+      </svg>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Search songs, authors, tags…"
-        className="h-9 w-72 rounded-md border border-border/60 bg-background/60 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition-colors focus:border-brand/40 focus:bg-background"
+        placeholder="Search title, author, tag…"
+        className="w-full bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground"
       />
-      <div className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60">
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="11" cy="11" r="7" />
-          <path d="m20 20-3.5-3.5" />
-        </svg>
-      </div>
     </div>
   )
 }
@@ -192,72 +229,81 @@ function SearchInput({
 
 function SongRow({
   song,
-  onDelete
+  gridCols,
+  heroSetlist,
+  onToggleMembership
 }: {
   song: Song
-  onDelete: () => void
+  gridCols: string
+  heroSetlist: Setlist | null
+  onToggleMembership: () => void
 }): JSX.Element {
+  const isMember =
+    heroSetlist?.items.some((i) => i.kind === 'song' && i.songId === song.id) ?? false
+
   return (
-    <li className="group relative">
+    <li className="border-b border-rule">
       <Link
         to={`/library/${song.id}`}
-        className="grid grid-cols-1 items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/30 md:grid-cols-[1fr_180px_140px_100px] md:gap-4"
+        className={`grid ${gridCols} items-center gap-4 px-6 py-3.5 hover:bg-panel-hi`}
       >
-        {/* Title */}
-        <div className="min-w-0">
-          <div className="truncate font-semibold text-foreground">
-            {song.title}
-          </div>
-          <div className="mt-0.5 truncate text-[11px] text-muted-foreground md:hidden">
-            {song.author || 'Unknown author'} ·{' '}
-            {song.sections.length} section
-            {song.sections.length === 1 ? '' : 's'}
-          </div>
-        </div>
+        <span className="min-w-0 truncate text-[14.5px] font-semibold tracking-[-0.01em] text-foreground">
+          {song.title}
+        </span>
 
-        {/* Author — desktop column */}
-        <div className="hidden min-w-0 truncate text-sm text-muted-foreground md:block">
+        <span className="min-w-0 truncate text-[13px] text-soft">
           {song.author || <span className="italic opacity-60">Unknown</span>}
-        </div>
+        </span>
 
-        {/* Tags — desktop column (language + CCLI + section count) */}
-        <div className="hidden flex-wrap items-center gap-1 md:flex">
-          <Badge tone="neutral">{LANGUAGE_LABELS[song.language]}</Badge>
-          {song.ccli && (
-            <Badge tone="neutral" title={`CCLI ${song.ccli}`}>
-              CCLI
-            </Badge>
-          )}
-          {song.sections.length > 0 && (
-            <Badge tone="neutral">
-              {song.sections.length}§
-            </Badge>
-          )}
-        </div>
+        <span className="flex items-center gap-[5px]">
+          <Badge tone="signal">{LANGUAGE_LABELS[song.language]}</Badge>
+          <Badge tone="neutral">{song.sections.length}§</Badge>
+        </span>
 
-        {/* Updated — desktop column */}
-        <div className="hidden text-right text-[11px] text-muted-foreground/80 md:block">
+        <span className="text-right font-mono text-[10px] tracking-[0.06em] text-muted-foreground">
           {relativeTime(song.updatedAt)}
-        </div>
-      </Link>
+        </span>
 
-      <button
-        onClick={onDelete}
-        className="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded p-1 text-[11px] text-muted-foreground/60 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 md:block"
-        aria-label={`Delete ${song.title}`}
-      >
-        Delete
-      </button>
+        {heroSetlist && (
+          <span
+            className="text-right"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onToggleMembership()
+            }}
+          >
+            {isMember ? (
+              <Badge tone="signal" className="cursor-pointer">
+                IN SETLIST
+              </Badge>
+            ) : (
+              <span className="inline-flex cursor-pointer items-center gap-1 border border-dim/50 px-1.5 py-[3px] font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.08em] text-dim hover:border-dim hover:text-soft">
+                + ADD
+              </span>
+            )}
+          </span>
+        )}
+      </Link>
     </li>
   )
 }
 
-// ─── Relative time helper ────────────────────────────────────────────
-//
+// ─── Formatting helpers ────────────────────────────────────────────────
+
+/** "SUN APR 19" — the setlist-membership column header. */
+function formatSetlistHeaderDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  return date
+    .toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+    .toUpperCase()
+    .replace(',', '')
+}
+
 // Tiny inline formatter — avoids pulling in Intl.RelativeTimeFormat
 // ceremony for a handful of buckets. "Just now / 5m / 2h / 3d / Apr 3"
 // is the whole vocabulary we need.
-
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime()
   if (!Number.isFinite(then)) return ''
