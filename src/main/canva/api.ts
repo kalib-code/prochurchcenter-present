@@ -10,7 +10,7 @@ import {
   type CanvaDesign,
   type CanvaDesignPage
 } from '@shared/canva'
-import { getValidAccessToken, CanvaReauthRequiredError } from './auth'
+import { getValidAccessToken, requireReauth } from './auth'
 
 const API_BASE = 'https://api.canva.com/rest/v1'
 
@@ -18,9 +18,10 @@ const API_BASE = 'https://api.canva.com/rest/v1'
  * Thrown for HTTP failures other than 401/403 so callers can map status to
  * operator-facing copy. A 401/403 from Canva itself means the operator's
  * connection needs to be re-established, which is signaled instead by
- * throwing {@link CanvaReauthRequiredError} (imported from ./auth) — one
- * type for "reconnect needed" everywhere in this codebase, rather than a
- * string here that duplicates what auth.ts already expresses as a type.
+ * calling {@link requireReauth} (imported from ./auth) — the single place
+ * that both clears the stored connection and throws
+ * `CanvaReauthRequiredError`, so a subsequent `canva.getState()` call is
+ * truthful. See the IPC note on `CanvaReauthRequiredError` in auth.ts.
  */
 export class CanvaApiError extends Error {
   constructor(
@@ -59,10 +60,11 @@ async function canvaFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (res.status === 401 || res.status === 403) {
-    // Canva itself rejected the access token on this call. Signal by type
-    // — not by a message string — so downstream UI can branch on "reconnect
-    // needed" the same way it does for auth.ts's own token refresh failures.
-    throw new CanvaReauthRequiredError()
+    // Canva itself rejected the access token on this call. Clear the
+    // stored connection and throw the same way auth.ts's own token
+    // refresh failures do, so `canva.getState()` truthfully reports
+    // `disconnected` afterward — see requireReauth's doc comment.
+    return requireReauth()
   }
   if (!res.ok) throw new CanvaApiError(messageForStatus(res.status), res.status)
   return (await res.json()) as T

@@ -145,16 +145,41 @@ class CanvaHttpError extends Error {
 }
 
 /**
- * Thrown by {@link getValidAccessToken} when Canva has genuinely rejected
- * the stored refresh token (HTTP 400/401), as opposed to the service
- * merely being unreachable. Callers can use this to distinguish
- * "reconnect Canva" from "try again in a moment".
+ * Thrown when Canva has genuinely rejected the stored connection — either
+ * the refresh token itself (HTTP 400/401 from `/canva/refresh`) or a
+ * 401/403 on a live API call using what looked like a still-valid access
+ * token — as opposed to the service merely being unreachable. Callers can
+ * use this to distinguish "reconnect Canva" from "try again in a moment".
+ *
+ * IPC NOTE: this class identity does NOT survive the renderer boundary —
+ * Electron serialises a rejected `ipcMain.handle` into a plain `Error`
+ * with only a message string, so `err instanceof CanvaReauthRequiredError`
+ * is meaningless in the renderer. That is why {@link requireReauth}
+ * — the only place this error is thrown — always clears the stored
+ * connection first: `canva.getState()` becomes the truthful, serialisable
+ * stand-in for this type at the IPC boundary. See the `canva` doc comment
+ * on PresentApi in shared/ipc-contract.ts for the renderer-side contract.
  */
 export class CanvaReauthRequiredError extends Error {
   constructor() {
     super('Canva sign-in expired. Please connect Canva again.')
     this.name = 'CanvaReauthRequiredError'
   }
+}
+
+/**
+ * Clears the stored connection and throws {@link CanvaReauthRequiredError}.
+ *
+ * This is the single call site that couples "Canva genuinely rejected our
+ * credential" to "the stored connection is gone" — used both when a
+ * refresh is rejected below and by api.ts's canvaFetch when a live call
+ * gets a 401/403. Centralising it here (rather than duplicating
+ * `clearTokens()` in api.ts) means a subsequent `getState()` is always
+ * truthful, from whichever call site detected the rejection.
+ */
+export async function requireReauth(): Promise<never> {
+  await clearTokens()
+  throw new CanvaReauthRequiredError()
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -301,8 +326,7 @@ export async function getValidAccessToken(): Promise<string> {
     return refreshed.accessToken
   } catch (err) {
     if (err instanceof CanvaHttpError && (err.status === 400 || err.status === 401)) {
-      await clearTokens()
-      throw new CanvaReauthRequiredError()
+      return requireReauth()
     }
     throw new Error(
       'Could not reach Canva right now. Your connection is still saved — try again shortly.'
