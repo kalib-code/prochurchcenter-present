@@ -58,6 +58,7 @@ export type SlideCardPreview =
   | { kind: 'image'; path: string }
   | { kind: 'video'; path: string }
   | { kind: 'deck'; pdfPath: string; pageIndex: number }
+  | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
 
 interface SlideCardProps {
   sectionLabel: string
@@ -65,6 +66,13 @@ interface SlideCardProps {
   lines: string[]
   /** When set, renders a media thumbnail in place of the text lines. */
   preview?: SlideCardPreview
+  /**
+   * Forwarded to MediaPreview's `onError` — only fires for a `pptx`
+   * preview whose PptxSlideView render fails. See MediaPreview.tsx for
+   * why this must stay a stable reference (a `useCallback` with no
+   * unstable deps) rather than an inline arrow.
+   */
+  onPreviewError?: (message: string) => void
   /**
    * Active theme — when provided, text-card bodies render with the
    * theme's background image / color and the lines pick up the theme's
@@ -91,6 +99,7 @@ export function SlideCard({
   shortcut,
   lines,
   preview,
+  onPreviewError,
   theme,
   active = false,
   onClick
@@ -165,6 +174,7 @@ export function SlideCard({
           <MediaPreview
             source={preview}
             className="h-full w-full rounded-none border-0"
+            onError={onPreviewError}
           />
         ) : lines.length === 0 ? (
           <span className="relative text-[9px] italic text-white/30">(empty)</span>

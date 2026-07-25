@@ -34,12 +34,14 @@ import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { shortcutFromLabel, slideifySetlist } from '../lib/slideify'
 import { mergeThemeOverride } from '../lib/themeOverride'
+import { loadPptxDeck } from '../lib/pptxLoader'
 import { OutputMirror } from '../components/OutputMirror'
 import { SlideCard } from '../components/SlideCard'
 import { KeyCheatSheet } from '../components/KeyCheatSheet'
+import { WarningBanner } from '../components/ui/WarningBanner'
 import { useKeyboard } from '../hooks/useKeyboard'
 import type { Song } from '@shared/types'
-import type { VideoControl, LowerThirdsContent } from '@shared/ipc-contract'
+import type { VideoControl, LowerThirdsContent, SlidePayload } from '@shared/ipc-contract'
 
 export function ServiceMode(): JSX.Element {
   const { setlistId } = useParams<{ setlistId: string }>()
@@ -178,14 +180,15 @@ interface GridEntry {
   shortcut: string
   lines: string[]
   /**
-   * Optional media thumbnail preview source. Populated for image,
-   * video, and pdf-page slides so the grid shows visual content
+   * Optional media thumbnail preview source. Populated for image, video,
+   * pdf-page, and pptx-slide slides so the grid shows visual content
    * instead of "(image)" placeholder text.
    */
   preview?:
     | { kind: 'image'; path: string }
     | { kind: 'video'; path: string }
     | { kind: 'deck'; pdfPath: string; pageIndex: number }
+    | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
 }
 
 function RunningView({
@@ -461,6 +464,61 @@ function RunningView({
   // not an independent re-render.
   const baseTheme = useThemeStore((s) => s.theme)
 
+  // ── PowerPoint deck warnings ────────────────────────────────────────
+  // Operator-facing only — RunningView is the ServiceMode component tree,
+  // which renders inside the operator's own window. It is never reached
+  // by OutputView or StageView (the projector / stage-monitor windows),
+  // so nothing pushed into this list can end up on a screen the
+  // congregation can see.
+  const [deckWarnings, setDeckWarnings] = useState<string[]>([])
+
+  // Warm every PowerPoint deck referenced by this service up front. Two
+  // reasons: it removes any stall on the first advance onto a pptx item,
+  // and it surfaces a missing or corrupt file NOW — while the operator
+  // can still fix it — instead of on slide 12 mid-service. loadPptxDeck
+  // caches its parse promise per path, so this is a cheap no-op if a
+  // grid thumbnail (below) already triggered the same parse.
+  useEffect(() => {
+    const paths = [
+      ...new Set(
+        state.items.flatMap((item) =>
+          item.slides
+            .filter(
+              (s): s is Extract<SlidePayload, { kind: 'pptx-slide' }> =>
+                s.kind === 'pptx-slide'
+            )
+            .map((s) => s.pptxPath)
+        )
+      )
+    ]
+    for (const path of paths) {
+      void loadPptxDeck(path).catch((err) => {
+        console.error('[ServiceMode] deck failed to preload', path, err)
+        const fileName = path.split(/[/\\]/).pop() ?? path
+        setDeckWarnings((prev) => [
+          ...prev,
+          `${fileName} could not be opened. Its slides will not project.`
+        ])
+      })
+    }
+  }, [state.items])
+
+  // Stable across every render and every grid card — required because
+  // this callback is threaded down into PptxSlideView's onError, which
+  // sits in that component's effect dependency array. A fresh identity
+  // per render would cancel and restart the in-flight slide render on
+  // every unrelated ServiceMode re-render (video ticks, timer updates,
+  // keystrokes), repeatedly, mid-service. Dedupes identical messages so
+  // a slide that keeps failing on repeated views doesn't spam the
+  // banner with copies of the same line.
+  const reportPptxError = useCallback((message: string) => {
+    setDeckWarnings((prev) => (prev.includes(message) ? prev : [...prev, message]))
+  }, [])
+
+  const dismissDeckWarning = useCallback((message: string) => {
+    setDeckWarnings((prev) => prev.filter((m) => m !== message))
+  }, [])
+
   // Flatten every slide of every item into one grid feed. Section label
   // and shortcut are derived here because the SlidePayload type (shared
   // with the output IPC) can't carry operator-only metadata.
@@ -509,15 +567,17 @@ function RunningView({
             preview: { kind: 'video', path: slide.videoPath }
           })
         } else if (slide.kind === 'pptx-slide') {
-          // No thumbnail preview yet — that lands with the pptx live
-          // renderer task. Shortcut shows the visible-slide ordinal so
-          // the grid still reads sensibly, matching pdf-page's pattern.
           out.push({
             itemIndex: itemIdx,
             slideIndex: slideIdx,
             sectionLabel: item.label,
             shortcut: `${slide.slideOrdinal}`,
-            lines: []
+            lines: [],
+            preview: {
+              kind: 'pptx',
+              pptxPath: slide.pptxPath,
+              slideOrdinal: slide.slideOrdinal
+            }
           })
         } else {
           // countdown
@@ -596,6 +656,12 @@ function RunningView({
           </button>
         </div>
       </header>
+
+      {/* Deck warnings — preload failures at entry + per-slide render
+          failures during the service, both routed through
+          reportPptxError/deckWarnings above. Operator-only: see
+          WarningBanner.tsx for why this can never reach the projector. */}
+      <WarningBanner messages={deckWarnings} onDismiss={dismissDeckWarning} />
 
       {/* Main: three-panel layout
           ┌─ items list ─┬──── slide grid ────┬─ confidence ─┐
@@ -690,6 +756,7 @@ function RunningView({
                     shortcut={entry.shortcut}
                     lines={entry.lines}
                     preview={entry.preview}
+                    onPreviewError={reportPptxError}
                     theme={cardTheme}
                     active={active}
                     onClick={() => jumpTo(entry.itemIndex, entry.slideIndex)}

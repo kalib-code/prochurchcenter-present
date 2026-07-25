@@ -88,8 +88,8 @@ export function SetlistItemCard({
   }
 
   // Which kinds get a visual thumbnail instead of a text badge?
-  // Media items (image, video, PDF deck) show their preview; everything
-  // else keeps the lowercase kind label for scannability.
+  // Media items (image, video, PDF deck, PowerPoint) show their preview;
+  // everything else keeps the lowercase kind label for scannability.
   const previewSource = getPreviewSource(item)
 
   return (
@@ -141,7 +141,12 @@ export function SetlistItemCard({
  */
 function getPreviewSource(
   item: SetlistItem
-): { kind: 'image'; path: string } | { kind: 'video'; path: string } | { kind: 'deck'; pdfPath: string } | null {
+):
+  | { kind: 'image'; path: string }
+  | { kind: 'video'; path: string }
+  | { kind: 'deck'; pdfPath: string }
+  | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
+  | null {
   if (item.kind === 'image' && item.imagePath) {
     return { kind: 'image', path: item.imagePath }
   }
@@ -150,6 +155,11 @@ function getPreviewSource(
   }
   if (item.kind === 'deck' && item.pdfPath) {
     return { kind: 'deck', pdfPath: item.pdfPath }
+  }
+  if (item.kind === 'pptx' && item.pptxPath) {
+    // Ordinal 1 — first visible slide, same "cover thumbnail" convention
+    // as the deck case defaulting to PDF page 1.
+    return { kind: 'pptx', pptxPath: item.pptxPath, slideOrdinal: 1 }
   }
   return null
 }

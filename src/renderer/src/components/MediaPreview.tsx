@@ -19,15 +19,22 @@
  *     We render at device pixel ratio capped at 1.5 for thumbnails —
  *     sharper than 1.0, cheaper than 2.0.
  *
+ *   - pptx: a live PptxSlideView scaled into the thumbnail box, same
+ *     idea as the `deck` case but for PowerPoint decks rendered
+ *     directly (no PDF export step). Uses the same module-level parse
+ *     cache as the projector (pptxLoader.ts), so many pptx thumbnails
+ *     pointing at the same file only parse it once.
+ *
  * A 120 × 72 px box (classic 16:9 thumbnail aspect) is the default.
  * Override via the `className` prop if a caller wants bigger.
  *
  * Loading + error states are inline placeholders — no skeleton library.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../lib/utils'
 import { loadPdfDocument } from '../lib/pdfLoader'
+import PptxSlideView from './PptxSlideView'
 
 function fileUrl(path: string): string {
   return `present-media://local${encodeURI(path)}`
@@ -42,15 +49,32 @@ type Source =
    * single-thumbnail-per-deck preview).
    */
   | { kind: 'deck'; pdfPath: string; pageIndex?: number }
+  /**
+   * Live PowerPoint slide source. `slideOrdinal` is 1-based over VISIBLE
+   * slides — same convention as the projector (see @shared/pptxSlides).
+   */
+  | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
 
 interface MediaPreviewProps {
   source: Source
   className?: string
+  /**
+   * Bubbles a human-readable message when the `pptx` source fails to
+   * render (PptxSlideView's onError contract). This is how a per-slide
+   * render failure — corrupt slide XML, an unsupported node — reaches the
+   * operator instead of dying silently in a console.error. Ignored for
+   * every other source kind. Callers that have nowhere to route the
+   * message (e.g. the setlist editor, which has no live-service warning
+   * strip) can omit it — the thumbnail still falls back to a local error
+   * placeholder either way.
+   */
+  onError?: (message: string) => void
 }
 
 export function MediaPreview({
   source,
-  className
+  className,
+  onError
 }: MediaPreviewProps): JSX.Element {
   return (
     <div
@@ -63,6 +87,13 @@ export function MediaPreview({
       {source.kind === 'video' && <VideoThumb path={source.path} />}
       {source.kind === 'deck' && (
         <PdfThumb pdfPath={source.pdfPath} pageIndex={source.pageIndex ?? 1} />
+      )}
+      {source.kind === 'pptx' && (
+        <PptxThumb
+          pptxPath={source.pptxPath}
+          slideOrdinal={source.slideOrdinal}
+          onError={onError}
+        />
       )}
     </div>
   )
@@ -205,6 +236,74 @@ function PdfThumb({
       )}
       <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
         pdf
+      </div>
+    </div>
+  )
+}
+
+// ─── PowerPoint slide ─────────────────────────────────────────────────
+
+/**
+ * PptxThumb — thumbnail wrapper around PptxSlideView.
+ *
+ * Why a wrapper instead of using PptxSlideView directly: two things need
+ * layering on top of the raw renderer —
+ *
+ *   1. A local error placeholder, same visual contract as PdfThumb/
+ *      VideoThumb, so a failed thumbnail reads as "pptx" + blank rather
+ *      than a half-drawn slide.
+ *   2. Bubbling the failure to the caller's `onError`, composed with
+ *      enough context (file name + slide number) to be useful in a
+ *      banner that may be listing several decks' worth of problems.
+ *
+ * Callback stability (critical): `onError` sits in PptxSlideView's effect
+ * dependency array (see PptxSlideView.tsx). A new function identity on
+ * every render would cancel the in-flight parse/render and restart it —
+ * repeatedly, mid-service, for a card that never actually changed. The
+ * `useCallback` below only produces a new identity if pptxPath,
+ * slideOrdinal, or the caller's `onError` reference changes — none of
+ * which happen on a normal parent re-render (grid cards are stably keyed
+ * by item/slide index, and callers pass a `useCallback`'d function with
+ * no deps of their own).
+ */
+function PptxThumb({
+  pptxPath,
+  slideOrdinal,
+  onError
+}: {
+  pptxPath: string
+  slideOrdinal: number
+  onError?: (message: string) => void
+}): JSX.Element {
+  const [errored, setErrored] = useState(false)
+
+  useEffect(() => {
+    setErrored(false)
+  }, [pptxPath, slideOrdinal])
+
+  const handleError = useCallback(
+    (message: string) => {
+      setErrored(true)
+      const fileName = pptxPath.split(/[/\\]/).pop() ?? pptxPath
+      onError?.(`${fileName} — slide ${slideOrdinal}: ${message}`)
+    },
+    [pptxPath, slideOrdinal, onError]
+  )
+
+  if (errored) return <Placeholder label="pptx" />
+
+  return (
+    <div className="relative h-full w-full">
+      <PptxSlideView
+        pptxPath={pptxPath}
+        slideOrdinal={slideOrdinal}
+        animate={false}
+        transitionDurationMs={0}
+        useFade={false}
+        onError={handleError}
+      />
+      <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
+        pptx
       </div>
     </div>
   )
