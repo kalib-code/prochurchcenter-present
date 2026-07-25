@@ -67,6 +67,21 @@ export interface Song {
 // Setlist
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Provenance for a deck imported from a connected Canva account.
+ *
+ * Grouped into one object (rather than three optional fields on the deck
+ * item) so it is wholly present or wholly absent — there is no
+ * representable half-state holding a design id with nothing to compare
+ * it against.
+ */
+export interface CanvaOrigin {
+  designId: string
+  /** Canva's `updated_at` as of import. ISO 8601 — Canva sends Unix seconds. */
+  designUpdatedAt: string
+  importedAt: string
+}
+
 export type SetlistItem =
   | { kind: 'song'; id: string; songId: string }
   | {
@@ -121,6 +136,12 @@ export type SetlistItem =
       pageCount: number
       /** Optional display name shown in the operator upcoming list */
       title?: string
+      /**
+       * Present only when this deck was pulled from a connected Canva
+       * account. Its presence is the sole trigger for the refresh
+       * affordance — a hand-picked PDF deck has no `canva` key at all.
+       */
+      canva?: CanvaOrigin
     }
 
 export interface Setlist {
