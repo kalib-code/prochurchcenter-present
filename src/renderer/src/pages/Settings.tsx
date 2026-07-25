@@ -111,8 +111,8 @@ export function Settings(): JSX.Element {
       <PageHeader
         eyebrow="Workspace"
         title="Settings"
-        subtitle="Changes save instantly. The projector restyles on the next frame."
-        backTo="/"
+        description="Changes save instantly. The projector restyles on the next frame."
+        back={{ to: '/', label: 'Home' }}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -924,7 +924,7 @@ function Row({
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-      <PageHeader eyebrow="Workspace" title="Settings" backTo="/" />
+      <PageHeader eyebrow="Workspace" title="Settings" back={{ to: '/', label: 'Home' }} />
       <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         {children}
       </main>

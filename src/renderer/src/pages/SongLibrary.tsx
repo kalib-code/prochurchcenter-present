@@ -67,13 +67,13 @@ export function SongLibrary(): JSX.Element {
       <PageHeader
         eyebrow="Library"
         title="Songs"
-        subtitle={
+        description={
           songs.length > 0
             ? `${songs.length} song${songs.length === 1 ? '' : 's'} in your library`
             : 'Add the songs your team uses most often'
         }
-        backTo="/"
-        actions={
+        back={{ to: '/', label: 'Home' }}
+        action={
           <>
             <SearchInput value={query} onChange={setQuery} />
             <Button variant="signal" size="md" onClick={handleNew}>

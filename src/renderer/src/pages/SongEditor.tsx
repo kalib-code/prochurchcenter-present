@@ -132,7 +132,7 @@ export function SongEditor(): JSX.Element {
   if (!id) {
     return (
       <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-        <PageHeader eyebrow="Library" title="Edit song" backTo="/library" />
+        <PageHeader eyebrow="Library" title="Edit song" back={{ to: '/library', label: 'Home' }} />
         <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           No song id in URL.
         </main>
@@ -143,7 +143,7 @@ export function SongEditor(): JSX.Element {
   if (!draft) {
     return (
       <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-        <PageHeader eyebrow="Library" title="Loading song…" backTo="/library" />
+        <PageHeader eyebrow="Library" title="Loading song…" back={{ to: '/library', label: 'Home' }} />
         <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Reading from disk…
         </main>
@@ -190,10 +190,9 @@ export function SongEditor(): JSX.Element {
       <PageHeader
         eyebrow="Library"
         title={draft.title.trim() || 'Untitled Song'}
-        subtitle={draft.author || 'Unknown author'}
-        backTo="/library"
-        backLabel="Library"
-        actions={
+        description={draft.author || 'Unknown author'}
+        back={{ to: '/library', label: 'Library' }}
+        action={
           <>
             <AutosaveStatus status={status} error={error} />
             <Button variant="danger" size="sm" onClick={handleDelete}>
