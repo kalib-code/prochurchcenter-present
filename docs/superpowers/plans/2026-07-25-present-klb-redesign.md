@@ -96,28 +96,88 @@
 **Interfaces:**
 - Produces: `pnpm test` now collects `src/renderer/src/lib/**/*.test.ts`; the `@renderer` alias resolves in tests.
 
-- [ ] **Step 1: Write a failing canary test**
+- [ ] **Step 1: Seed `serviceClock.ts` with its time parser**
+
+The glob change is proven by a REAL test being collected, not by a
+`true === true` canary. So Task 1 lands the first genuine piece of
+`serviceClock` — start-time parsing — and Task 14 builds `computeSchedule`
+on top of it.
+
+Create `src/renderer/src/lib/serviceClock.ts`:
+
+```ts
+/**
+ * serviceClock — the setlist editor's running clock.
+ *
+ * Pure: no React, no IPC, no Date.now(). The schedule depends only on its
+ * inputs, so the same setlist always renders the same times.
+ *
+ * Task 1 seeds the time parser; Task 14 adds computeSchedule.
+ */
+
+export const DEFAULT_START_MINUTES = 10 * 60 // 10:00
+export const MINUTES_PER_DAY = 24 * 60
+
+/**
+ * "HH:MM" → minutes since midnight.
+ *
+ * Falls back to 10:00 on anything invalid rather than throwing: this
+ * parses a value that round-trips through JSON on disk, and a corrupt
+ * startTime must not be able to break the whole setlist editor.
+ */
+export function parseStart(startTime: string | undefined): number {
+  if (!startTime) return DEFAULT_START_MINUTES
+  const m = startTime.match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return DEFAULT_START_MINUTES
+  const hours = Number(m[1])
+  const minutes = Number(m[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return DEFAULT_START_MINUTES
+  }
+  return hours * 60 + minutes
+}
+```
+
+- [ ] **Step 2: Write the test**
 
 Create `src/renderer/src/lib/serviceClock.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
+import { parseStart } from './serviceClock'
 
-describe('vitest picks up renderer lib tests', () => {
-  it('runs', () => {
-    expect(true).toBe(true)
+describe('parseStart', () => {
+  it('parses a valid time to minutes since midnight', () => {
+    expect(parseStart('09:30')).toBe(570)
+  })
+
+  it('accepts a single-digit hour', () => {
+    expect(parseStart('9:05')).toBe(545)
+  })
+
+  it('defaults to 10:00 when absent', () => {
+    expect(parseStart(undefined)).toBe(600)
+  })
+
+  it('defaults to 10:00 on a malformed string', () => {
+    expect(parseStart('not-a-time')).toBe(600)
+  })
+
+  it('defaults to 10:00 on an out-of-range time', () => {
+    expect(parseStart('25:99')).toBe(600)
   })
 })
 ```
 
-- [ ] **Step 2: Run the suite and confirm the canary is NOT collected**
+- [ ] **Step 3: Run the suite and confirm the test is NOT collected**
 
 Run: `pnpm test`
 Expected: the run passes but reports only the existing `src/shared` test files
 (`parser.test.ts`, `bibleReference.test.ts`). `serviceClock.test.ts` does not
-appear in the output. That absence is the failure being fixed.
+appear. **That absence is the failure being fixed** — five real assertions
+exist and the runner cannot see them.
 
-- [ ] **Step 3: Widen the include glob and add the renderer alias**
+- [ ] **Step 4: Widen the include glob and add the renderer alias**
 
 Replace the whole of `vitest.config.ts`:
 
@@ -146,12 +206,13 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 4: Run the suite and confirm the canary IS collected**
+- [ ] **Step 5: Run the suite and confirm the test IS collected and passing**
 
 Run: `pnpm test`
-Expected: PASS, and `src/renderer/src/lib/serviceClock.test.ts` now appears in the file list.
+Expected: PASS, and `src/renderer/src/lib/serviceClock.test.ts` now appears in
+the file list with 5 passing assertions.
 
-- [ ] **Step 5: Add the font packages**
+- [ ] **Step 6: Add the font packages**
 
 Run: `pnpm add @fontsource-variable/inter @fontsource-variable/jetbrains-mono`
 
@@ -160,21 +221,25 @@ build output, so the app has both faces offline — which a Google Fonts `<link>
 could never provide in a church AV booth. Variable versions carry every weight
 in one file, so no per-weight imports are needed.
 
-- [ ] **Step 6: Verify the packages resolve**
+- [ ] **Step 7: Verify the packages resolve**
 
 Run: `node -e "console.log(require.resolve('@fontsource-variable/inter/index.css'))"`
 Expected: prints a path inside `node_modules`. If it fails, the package name is
 wrong — check `ls node_modules/@fontsource-variable/`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add vitest.config.ts package.json pnpm-lock.yaml src/renderer/src/lib/serviceClock.test.ts
+git add vitest.config.ts package.json pnpm-lock.yaml src/renderer/src/lib/serviceClock.ts src/renderer/src/lib/serviceClock.test.ts
 git commit -m "build: run renderer lib tests, add Inter + JetBrains Mono
 
 vitest's include glob only covered src/shared, so any test under
 src/renderer was created and then silently skipped. Widening it is a
-prerequisite for the serviceClock / serviceNext / preflight tests.
+prerequisite for the serviceClock / serviceNext / preflight tests, and
+also explains why slideify.ts has never had one.
+
+Seeds serviceClock with its start-time parser so the glob change is
+proven by real assertions being collected rather than a placeholder.
 
 Fonts are self-hosted via @fontsource-variable so the app keeps both
 faces offline."
@@ -2396,17 +2461,19 @@ zips load unchanged."
 ### Task 14: `serviceClock` [TDD]
 
 **Files:**
-- Modify: `src/renderer/src/lib/serviceClock.test.ts` (replace the Task 1 canary)
-- Create: `src/renderer/src/lib/serviceClock.ts`
+- Modify: `src/renderer/src/lib/serviceClock.ts` (Task 1 seeded it with `parseStart`, `DEFAULT_START_MINUTES`, `MINUTES_PER_DAY` — extend, do not replace)
+- Modify: `src/renderer/src/lib/serviceClock.test.ts` (append; keep Task 1's five `parseStart` tests)
 
 **Interfaces:**
+- Consumes: `parseStart`, `DEFAULT_START_MINUTES`, `MINUTES_PER_DAY` from Task 1.
 - Produces: `computeSchedule(items: SetlistItem[], startTime?: string): Schedule` where `Schedule = { at: string[]; totalMinutes: number; endsAt: string }`.
 - Consumed by: Task 16.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Append the failing tests**
+
+Keep the existing `describe('parseStart', …)` block and add below it:
 
 ```ts
-import { describe, expect, it } from 'vitest'
 import type { SetlistItem } from '@shared/types'
 import { computeSchedule } from './serviceClock'
 
@@ -2494,20 +2561,15 @@ describe('computeSchedule', () => {
 - [ ] **Step 2: Run and verify it fails**
 
 Run: `pnpm test src/renderer/src/lib/serviceClock.test.ts`
-Expected: FAIL — cannot resolve `./serviceClock`.
+Expected: FAIL — `computeSchedule is not exported`. The five `parseStart`
+tests from Task 1 still pass; only the new block fails.
 
-- [ ] **Step 3: Implement `serviceClock.ts`**
+- [ ] **Step 3: Extend `serviceClock.ts`**
+
+Task 1 already created this file with `parseStart`, `DEFAULT_START_MINUTES`,
+and `MINUTES_PER_DAY`. **Keep them** and add the following below.
 
 ```ts
-/**
- * serviceClock — the setlist editor's running clock.
- *
- * Given the items and a service start time, produces the wall-clock time
- * each item begins, the total planned minutes, and the projected end.
- * Pure: no React, no IPC, no Date.now() — the schedule depends only on
- * its inputs, so the same setlist always renders the same times.
- */
-
 import type { SetlistItem } from '@shared/types'
 
 export interface Schedule {
@@ -2516,22 +2578,6 @@ export interface Schedule {
   totalMinutes: number
   /** Projected end, "H:MM AM/PM". */
   endsAt: string
-}
-
-const DEFAULT_START_MINUTES = 10 * 60 // 10:00
-const MINUTES_PER_DAY = 24 * 60
-
-/** "HH:MM" → minutes since midnight. Falls back to 10:00 on anything invalid. */
-function parseStart(startTime: string | undefined): number {
-  if (!startTime) return DEFAULT_START_MINUTES
-  const m = startTime.match(/^(\d{1,2}):(\d{2})$/)
-  if (!m) return DEFAULT_START_MINUTES
-  const hours = Number(m[1])
-  const minutes = Number(m[2])
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-    return DEFAULT_START_MINUTES
-  }
-  return hours * 60 + minutes
 }
 
 /** Minutes since midnight → "H:MM", 12-hour, no meridiem. */
@@ -2587,7 +2633,8 @@ export function computeSchedule(
 - [ ] **Step 4: Run and verify it passes**
 
 Run: `pnpm test src/renderer/src/lib/serviceClock.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 16 tests — Task 1's five `parseStart` cases plus the eleven
+`computeSchedule` cases.
 
 - [ ] **Step 5: Commit**
 
