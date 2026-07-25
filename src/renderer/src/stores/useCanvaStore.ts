@@ -50,26 +50,47 @@ type CanvaCallResult<T> = { ok: true; value: T } | { ok: false }
  * call through this one helper makes forgetting that re-check
  * impossible rather than merely documented — there's no other way to
  * reach the Canva API from this store to forget it in.
+ *
+ * `isCurrent` separates two things that must not share one on/off
+ * switch: connection state is a fact about the account, not about which
+ * request asked for it, so it is always refreshed and always applied.
+ * The `error` text, though, belongs to one specific call — for a
+ * query-scoped call (`search`/`loadMore`) a request that a newer query
+ * has already superseded must not paint a stale failure over a newer,
+ * successful result. `isCurrent` lets a caller opt into that
+ * suppression; calls that are never superseded by anything
+ * (`getState`, `connect`, `disconnect`) simply omit it and get the
+ * default "always current" behaviour, so their errors are never
+ * silently dropped.
  */
 async function wrapCanvaCall<T>(
   set: (partial: Partial<CanvaState>) => void,
   call: () => Promise<T>,
-  fallback: string
+  fallback: string,
+  isCurrent: () => boolean = () => true
 ): Promise<CanvaCallResult<T>> {
   try {
     return { ok: true, value: await call() }
   } catch (err) {
     const error = message(err, fallback)
+    let state: CanvaConnectionState | undefined
     try {
-      // Refresh connection state before surfacing the error, so the UI
-      // renders the correct branch (reconnect vs. retry) on the same
-      // tick that the error appears.
-      set({ state: await window.api.canva.getState(), error })
+      // Refresh connection state unconditionally, before surfacing the
+      // error, so the UI renders the correct branch (reconnect vs.
+      // retry) on the same tick that the error appears.
+      state = await window.api.canva.getState()
     } catch {
       // getState() itself failed. Keep whatever connection state we
       // already had rather than guess at it — but that second failure
-      // must not swallow the original error.
-      set({ error })
+      // must not swallow the original error below.
+    }
+    if (isCurrent()) {
+      set(state ? { state, error } : { error })
+    } else if (state) {
+      // Superseded call: still apply the refreshed connection state
+      // (it's not query-scoped), but do not surface its error — a
+      // newer, current call owns the error slot now.
+      set({ state })
     }
     return { ok: false }
   }
@@ -86,6 +107,11 @@ export const useCanvaStore = create<CanvaState>((set, get) => ({
   progress: null,
 
   loadState: async () => {
+    // Note: if this call itself fails, wrapCanvaCall's failure branch
+    // calls getState() a second time as its own refresh step — a
+    // harmless retry of the same local read, not a network round trip.
+    // That is the intended, uniform behaviour for every call through
+    // this helper; do not special-case it away.
     const result = await wrapCanvaCall(
       set,
       () => window.api.canva.getState(),
@@ -121,7 +147,8 @@ export const useCanvaStore = create<CanvaState>((set, get) => ({
     const result = await wrapCanvaCall(
       set,
       () => window.api.canva.listDesigns(query || null, null),
-      'Could not reach Canva'
+      'Could not reach Canva',
+      () => get().query === query
     )
     if (!result.ok) {
       // Only clear the spinner if a newer search hasn't already taken
@@ -142,7 +169,8 @@ export const useCanvaStore = create<CanvaState>((set, get) => ({
     const result = await wrapCanvaCall(
       set,
       () => window.api.canva.listDesigns(query || null, continuation),
-      'Could not load more designs'
+      'Could not load more designs',
+      () => get().query === query
     )
     if (!result.ok) {
       if (get().query === query) set({ loading: false })
