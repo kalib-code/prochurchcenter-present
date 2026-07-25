@@ -1053,6 +1053,22 @@ function VideoSlideOutput({
     )
     let nearEndFired = false
     const handleTimeUpdate = (): void => {
+      // Broadcast position to the operator's runway readout. Sent BEFORE
+      // the duration guard below so the operator gets currentTime
+      // immediately; `duration` is NaN until metadata loads and the
+      // consumer is documented to guard with Number.isFinite. Coercing
+      // it here would be a lie. `v.paused` (not the `paused` prop) is
+      // read so the operator sees the element's actual playback state,
+      // not just the last commanded intent (e.g. if a play() call was
+      // rejected by autoplay policy, `v.paused` stays true even though
+      // the prop says otherwise).
+      void window.api.output.setVideoTimeUpdate({
+        videoPath,
+        currentTime: v.currentTime,
+        duration: v.duration,
+        paused: v.paused
+      })
+
       if (!v.duration || !Number.isFinite(v.duration)) return
       const nearEnd = v.currentTime >= v.duration - 0.5
       if (nearEnd && !nearEndFired) {
