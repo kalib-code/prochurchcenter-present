@@ -25,12 +25,13 @@ import { useThemeStore } from '../stores/useThemeStore'
 import { useServiceStore } from '../stores/useServiceStore'
 import { SlideRenderer } from '../components/SlideRenderer'
 import { ThemeFields } from '../components/ThemeFields'
+import { CanvaConnectionCard } from '../components/CanvaConnectionCard'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { cn } from '../lib/utils'
 
-type Section = 'display' | 'theme' | 'output' | 'data' | 'about'
+type Section = 'display' | 'theme' | 'output' | 'data' | 'connections' | 'about'
 
 const SECTIONS: { id: Section; label: string; description: string }[] = [
   {
@@ -53,6 +54,11 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
     label: 'Data',
     description:
       'Backups, restore, and library transfer between machines. Auto-backup runs daily on app launch.'
+  },
+  {
+    id: 'connections',
+    label: 'Connections',
+    description: 'Link Present to the other tools your church already uses.'
   },
   {
     id: 'about',
@@ -211,6 +217,8 @@ export function Settings(): JSX.Element {
             {section === 'output' && <OutputDisplaySection />}
 
             {section === 'data' && <DataSection />}
+
+            {section === 'connections' && <CanvaConnectionCard />}
 
             {section === 'about' && <AboutSection />}
           </div>
