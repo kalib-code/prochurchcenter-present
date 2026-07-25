@@ -54,7 +54,11 @@ This runs `node node_modules/electron/install.js` directly and downloads the Ele
 
 ## Stack
 
-Electron 34 · electron-vite · React 18 · TypeScript · Tailwind v3 · shadcn/ui · Zustand · react-router
+Electron 34 · electron-vite · React 18 · TypeScript · Tailwind v3 · shadcn/ui · Zustand · react-router · @aiden0z/pptx-renderer (live .pptx projection)
+
+PowerPoint decks project directly — pick a `.pptx` when adding a setlist item, and it projects with no PDF export step.
+Only `.pptx` is supported; for `.ppt`, `.key`, or Google Slides, export to PDF
+and add it as a PDF deck.
 
 ## License
 
