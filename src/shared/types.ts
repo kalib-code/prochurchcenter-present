@@ -122,6 +122,25 @@ export type SetlistItem =
       /** Optional display name shown in the operator upcoming list */
       title?: string
     }
+  /**
+   * PowerPoint deck rendered live — no PDF export step. The operator picks a
+   * .pptx and we render each slide in the projector via @aiden0z/pptx-renderer.
+   *
+   * slideCount counts VISIBLE slides only (PowerPoint skips slides marked
+   * hidden when presenting, so we do too). It is cached at add-time for the
+   * same reason deck.pageCount is: slideify expands items synchronously.
+   *
+   * Only .pptx is supported — the renderer parses Office Open XML, so legacy
+   * binary .ppt, .key, and .odp are not accepted by the file picker.
+   */
+  | {
+      kind: 'pptx'
+      id: string
+      pptxPath: string
+      slideCount: number
+      /** Optional display name shown in the operator upcoming list */
+      title?: string
+    }
 
 export interface Setlist {
   id: string

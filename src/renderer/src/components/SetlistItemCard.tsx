@@ -361,6 +361,30 @@ function ItemBody({
     )
   }
 
+  if (item.kind === 'pptx') {
+    // No file picker here yet — picking a .pptx needs to probe the file
+    // for its visible slide count (probeVisibleSlideCount, built on top
+    // of @shared/pptxSlides), which is a later task's job. Task 3 only
+    // adds the data model + slideify fan-out, so this shows the item's
+    // current data honestly rather than faking a working picker.
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="text-[11px] text-muted-foreground">
+          {item.pptxPath
+            ? `${displayFileName(item.pptxPath)} · ${item.slideCount} slide${item.slideCount === 1 ? '' : 's'}`
+            : 'No PowerPoint file selected yet'}
+        </div>
+        <input
+          type="text"
+          value={item.title ?? ''}
+          onChange={(e) => onChange({ ...item, title: e.target.value })}
+          placeholder="PowerPoint title (optional)"
+          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
+        />
+      </div>
+    )
+  }
+
   // Exhaustiveness check — if you add a new SetlistItem kind and forget
   // to add a branch above, TypeScript complains here.
   const _exhaustive: never = item

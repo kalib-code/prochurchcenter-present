@@ -95,6 +95,17 @@ export function ItemKindIcon({ kind, size = 20, className }: Props): JSX.Element
           <circle cx="12" cy="12" r="1.5" fill="currentColor" />
         </svg>
       )
+    case 'pptx':
+      // Reuses the deck glyph until a dedicated PowerPoint icon is
+      // designed (Task 3 only adds the data model — icon design is a
+      // later task per the setlist-item visual vocabulary).
+      return (
+        <svg {...common}>
+          <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M9 13h6M9 17h4" />
+        </svg>
+      )
     default: {
       const _exhaustive: never = kind
       return <>{_exhaustive}</>
@@ -123,5 +134,7 @@ export function itemKindLabel(kind: Kind): string {
       return 'Countdown'
     case 'section-divider':
       return 'Section'
+    case 'pptx':
+      return 'PowerPoint'
   }
 }

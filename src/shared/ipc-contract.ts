@@ -177,6 +177,18 @@ export type SlidePayload =
       title?: string
       loop?: boolean
     }
+  /**
+   * One slide of a live-rendered PowerPoint deck.
+   *
+   * slideOrdinal is 1-based over VISIBLE slides — see @shared/pptxSlides for
+   * why that differs from the slide's position in the file.
+   */
+  | {
+      kind: 'pptx-slide'
+      pptxPath: string
+      slideOrdinal: number
+      slideCount: number
+    }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input shapes (what the renderer sends over IPC)
@@ -228,7 +240,7 @@ export type UpdateSettingsPatch = Partial<Settings>
  * the Deck setlist item, which accepts PDFs exported from PowerPoint,
  * Keynote, Google Slides, or LibreOffice Impress.
  */
-export type PickFileKind = 'image' | 'video' | 'media' | 'pdf' | 'font'
+export type PickFileKind = 'image' | 'video' | 'media' | 'pdf' | 'pptx' | 'font'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backup (library export / import / restore)

@@ -35,6 +35,9 @@ const FILTERS: Record<PickFileKind, Electron.FileFilter[]> = {
     }
   ],
   pdf: [{ name: 'PDF decks', extensions: ['pdf'] }],
+  // .pptx only — the live renderer parses Office Open XML, so legacy
+  // binary .ppt, .key, and .odp are deliberately not offered here.
+  pptx: [{ name: 'PowerPoint files', extensions: ['pptx'] }],
   font: [{ name: 'Font files', extensions: ['ttf', 'otf', 'woff', 'woff2'] }]
 }
 
@@ -44,6 +47,8 @@ function dialogTitle(kind: PickFileKind): string {
       return 'Choose a video'
     case 'pdf':
       return 'Choose a PDF deck'
+    case 'pptx':
+      return 'Choose a PowerPoint file'
     case 'image':
       return 'Choose an image'
     case 'font':

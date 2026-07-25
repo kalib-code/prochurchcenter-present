@@ -508,6 +508,17 @@ function RunningView({
             lines: [],
             preview: { kind: 'video', path: slide.videoPath }
           })
+        } else if (slide.kind === 'pptx-slide') {
+          // No thumbnail preview yet — that lands with the pptx live
+          // renderer task. Shortcut shows the visible-slide ordinal so
+          // the grid still reads sensibly, matching pdf-page's pattern.
+          out.push({
+            itemIndex: itemIdx,
+            slideIndex: slideIdx,
+            sectionLabel: item.label,
+            shortcut: `${slide.slideOrdinal}`,
+            lines: []
+          })
         } else {
           // countdown
           out.push({

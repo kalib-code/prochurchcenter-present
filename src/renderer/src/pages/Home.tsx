@@ -440,6 +440,8 @@ function previewLabel(item: SetlistItem, songsById: Map<string, Song>): string {
       return item.label.trim() || 'Countdown'
     case 'section-divider':
       return item.label.trim() || 'Section'
+    case 'pptx':
+      return item.title?.trim() || 'PowerPoint'
   }
 }
 

@@ -431,6 +431,8 @@ function payloadKey(payload: SlidePayload): string {
   if (payload.kind === 'countdown') return `countdown:${payload.targetTime}:${payload.label}`
   if (payload.kind === 'pdf-page')
     return `pdf:${payload.pdfPath}#${payload.pageIndex}`
+  if (payload.kind === 'pptx-slide')
+    return `pptx:${payload.pptxPath}#${payload.slideOrdinal}`
   // video — included for exhaustiveness; video renders outside AutoFitSlide
   return `video:${payload.videoPath}`
 }
@@ -637,10 +639,17 @@ function SlideContent({
     )
   }
 
-  if (payload.kind === 'pdf-page' || payload.kind === 'video') {
+  if (
+    payload.kind === 'pdf-page' ||
+    payload.kind === 'video' ||
+    payload.kind === 'pptx-slide'
+  ) {
     // Defensive: AutoFitSlide is bypassed for pdf-page and video at the
-    // SlideRenderer level, so these branches don't render in practice.
-    // Kept for exhaustiveness and as a safety net.
+    // SlideRenderer level (see isFullBleedMedia / the content-layer guard
+    // above), so those branches don't render in practice. pptx-slide has
+    // no dedicated full-bleed layer yet — that's the live-rendering task
+    // (via @aiden0z/pptx-renderer) — so for now it renders nothing rather
+    // than faking slide content. Kept for exhaustiveness and as a safety net.
     return <></>
   }
 
