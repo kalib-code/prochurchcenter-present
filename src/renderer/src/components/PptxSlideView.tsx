@@ -23,6 +23,19 @@
  *   Waiting avoids swapping in a slide that visibly finishes rendering after
  *   it's already on screen.
  *
+ * Why the host is NEVER hidden (no whole-container visibility gate):
+ *   An earlier version of this component pre-emptively set the host's
+ *   opacity to 0 at the start of every render, on the theory that it would
+ *   be flipped back to 1 once the new slide was ready. That's exactly
+ *   backwards: on a render FAILURE nothing ever flips it back, so the
+ *   previous slide — still sitting untouched in the DOM — goes invisible
+ *   behind opacity:0. The projector would go dark on every render failure,
+ *   the opposite of this component's one job. Instead, entrance animation
+ *   is applied only to the NEW element at the moment it is swapped in (see
+ *   `host.replaceChildren` below), mirroring PdfPageView's canvas-level
+ *   fade. The host itself carries no opacity state and is never touched by
+ *   the failure path, so whatever was on screen before stays on screen.
+ *
  * Why a failure renders nothing:
  *   Leaving the DOM untouched leaves the PREVIOUS slide on screen. The
  *   congregation sees no glitch; the operator gets the message via onError
@@ -34,13 +47,15 @@
  *     change, or the component unmounted mid-render) is disposed in the
  *     effect cleanup — nothing else references it, so nothing else would
  *     free it.
- *   - A handle that DOES get swapped in is tracked in `currentHandleRef`.
- *     The next successful render disposes it right before replacing it.
+ *   - A handle that DOES get swapped in is tracked in `currentHandleRef`,
+ *     assigned only AFTER the DOM swap succeeds so the ref can never point
+ *     at an element that was never attached. The next successful render
+ *     disposes it right after committing its replacement.
  *   - On real unmount (not just a prop change), a dedicated mount-once
  *     effect disposes whatever is currently displayed.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { PresentationData, SlideHandle } from '@aiden0z/pptx-renderer'
 import { ordinalToSourceIndex } from '@shared/pptxSlides'
 import { loadPptxDeck } from '../lib/pptxLoader'
@@ -71,7 +86,6 @@ export default function PptxSlideView({
   // Native pixel size of the currently-displayed slide, cached so the resize
   // observer can recompute the fit scale without re-rendering anything.
   const deckSizeRef = useRef<{ width: number; height: number } | null>(null)
-  const [visible, setVisible] = useState(!animate)
 
   // Scale the displayed slide element to contain-fit the host, centered.
   // Transforms don't change layout box size, so the flex-centered host still
@@ -92,7 +106,7 @@ export default function PptxSlideView({
 
   // Dispose whatever's on screen when this component is truly unmounted
   // (not just re-rendered for a new slide/path — that path disposes the old
-  // handle itself right before committing the new one).
+  // handle itself right after committing its replacement).
   useEffect(() => {
     return () => {
       currentHandleRef.current?.dispose()
@@ -116,7 +130,6 @@ export default function PptxSlideView({
     // currentHandleRef — if this effect is cancelled before the commit,
     // this is the only reference to it, so cleanup must dispose it here.
     let inFlightHandle: SlideHandle | null = null
-    setVisible(!animate)
 
     void (async () => {
       try {
@@ -154,7 +167,11 @@ export default function PptxSlideView({
         inFlightHandle = handle
 
         // `ready` only covers slower fallback work (e.g. EMF-embedded PDF
-        // pages) and never rejects — it's a Promise.allSettled internally.
+        // pages). Verified against the library's source: it's built from
+        // `Promise.allSettled(asyncTasks).then(() => {})`, and every task
+        // pushed into that list is itself wrapped so its own rejections are
+        // caught internally — so this promise settles in practice and never
+        // rejects. No timeout guard is needed here.
         await handle.ready
         if (cancelled) {
           handle.dispose()
@@ -169,16 +186,32 @@ export default function PptxSlideView({
           return
         }
 
-        // The slide we're replacing is done being shown; free its chart
-        // instances / blob URLs before handing off to the new one.
-        currentHandleRef.current?.dispose()
-        currentHandleRef.current = handle
         inFlightHandle = null
         deckSizeRef.current = { width: deck.width, height: deck.height }
 
+        // Fade-in (if enabled) applies only to this NEW element, at the
+        // moment it's inserted. The host is never hidden, so a later
+        // failure has nothing to leave dark — whatever is on screen when
+        // this swap happens stays on screen until the next successful one.
+        if (useFade && animate) {
+          handle.element.style.opacity = '0'
+        }
         host.replaceChildren(handle.element)
         applyFit()
-        setVisible(true)
+        if (useFade && animate) {
+          // Force a style recalc so the browser commits the opacity:0
+          // starting point as a distinct frame before we flip to 1 —
+          // otherwise the two writes coalesce and no transition plays.
+          void handle.element.offsetHeight
+          handle.element.style.transition = `opacity ${transitionDurationMs}ms ease`
+          handle.element.style.opacity = '1'
+        }
+
+        // Commit to currentHandleRef only now that the swap has actually
+        // happened, then free the slide it replaced.
+        const previousHandle = currentHandleRef.current
+        currentHandleRef.current = handle
+        previousHandle?.dispose()
       } catch (err) {
         // Whether or not we were cancelled, a handle created in this pass
         // that never got committed would otherwise leak its resources.
@@ -196,16 +229,12 @@ export default function PptxSlideView({
       cancelled = true
       inFlightHandle?.dispose()
     }
-  }, [pptxPath, slideOrdinal, animate, onError])
+  }, [pptxPath, slideOrdinal, animate, useFade, transitionDurationMs, onError])
 
   return (
     <div
       ref={hostRef}
       className="relative flex h-full w-full items-center justify-center overflow-hidden"
-      style={{
-        opacity: visible ? 1 : 0,
-        transition: useFade ? `opacity ${transitionDurationMs}ms ease` : 'none'
-      }}
     />
   )
 }
