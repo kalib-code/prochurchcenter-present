@@ -22,7 +22,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import type { Setlist, SetlistItem, Song, SongLanguage } from '@shared/types'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useSetlistStore } from '../stores/useSetlistStore'
-import { pickHero } from '../lib/setlist-helpers'
+import { formatServiceDate, pickHero } from '../lib/setlist-helpers'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -241,11 +241,24 @@ function SongRow({
   const isMember =
     heroSetlist?.items.some((i) => i.kind === 'song' && i.songId === song.id) ?? false
 
+  // The setlist-membership toggle must be a real <button> for keyboard/
+  // screen-reader access, and a <button> cannot nest inside the <Link>'s
+  // <a> (invalid HTML, and the reason the old span-with-onClick had no
+  // keyboard path at all). So the <li> — not the Link — owns the row
+  // grid: the Link spans the first four tracks as one item (col-span-4)
+  // with its own identical inner grid (GRID_WITHOUT_SETLIST, same gap),
+  // which lines its four cells up with the outer header's four columns
+  // exactly, byte-for-byte the same template. The toggle button is a
+  // sibling grid item in the fifth track. Mirrors Home.tsx's setlist
+  // cell, where the delete button is a sibling of the Link, not nested
+  // inside it.
   return (
-    <li className="border-b border-rule">
+    <li
+      className={`grid ${gridCols} items-center gap-4 border-b border-rule px-6 py-3.5 hover:bg-panel-hi`}
+    >
       <Link
         to={`/library/${song.id}`}
-        className={`grid ${gridCols} items-center gap-4 px-6 py-3.5 hover:bg-panel-hi`}
+        className={`col-span-4 grid ${GRID_WITHOUT_SETLIST} items-center gap-4`}
       >
         <span className="min-w-0 truncate text-[14.5px] font-semibold tracking-[-0.01em] text-foreground">
           {song.title}
@@ -263,28 +276,30 @@ function SongRow({
         <span className="text-right font-mono text-[10px] tracking-[0.06em] text-muted-foreground">
           {relativeTime(song.updatedAt)}
         </span>
-
-        {heroSetlist && (
-          <span
-            className="text-right"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onToggleMembership()
-            }}
-          >
-            {isMember ? (
-              <Badge tone="signal" className="cursor-pointer">
-                IN SETLIST
-              </Badge>
-            ) : (
-              <span className="inline-flex cursor-pointer items-center gap-1 border border-dim/50 px-1.5 py-[3px] font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.08em] text-dim hover:border-dim hover:text-soft">
-                + ADD
-              </span>
-            )}
-          </span>
-        )}
       </Link>
+
+      {heroSetlist && (
+        <button
+          type="button"
+          onClick={onToggleMembership}
+          aria-label={
+            isMember
+              ? `Remove "${song.title}" from ${formatServiceDate(heroSetlist.date)}`
+              : `Add "${song.title}" to ${formatServiceDate(heroSetlist.date)}`
+          }
+          className="border-0 bg-transparent p-0 text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal"
+        >
+          {isMember ? (
+            <Badge tone="signal" className="cursor-pointer">
+              IN SETLIST
+            </Badge>
+          ) : (
+            <span className="inline-flex cursor-pointer items-center gap-1 border border-dim/50 px-1.5 py-[3px] font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.08em] text-dim hover:border-dim hover:text-soft">
+              + ADD
+            </span>
+          )}
+        </button>
+      )}
     </li>
   )
 }
