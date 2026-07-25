@@ -1,31 +1,40 @@
 /**
  * SetlistEditor — plan a service.
  *
- * Layout: top bar with name + date, then a scrolling list of items.
- * Each item is a draggable card; items reorder via @dnd-kit/sortable
- * for mouse OR via ↑/↓ keys when the list container is focused.
+ * Layout: top bar, a meta strip (name/date/service-start + the running
+ * total), then a scrolling run-of-show list. Each item is a draggable
+ * card; items reorder via @dnd-kit/sortable for mouse OR via ↑/↓ keys
+ * when the list container is focused.
  *
  * Autosave: whenever the draft changes, debounced 500ms, patch goes
  * to main. Same pattern as SongEditor.
  *
- * Item creation:
- *   - The primary "+ Add item" button sits at the TOP of the list, not
- *     the bottom. Rose and the volunteer operators kept scrolling to
- *     the bottom to add, which was extra work — the top button is in
- *     their line-of-sight as soon as the editor opens.
- *   - Between each existing item there is a quiet hover-reveal "+
- *     insert here" drop-zone. This lets the operator add mid-list
- *     without reordering after the fact — the old flow required
- *     adding to the bottom then dragging into position.
- *   - When the list is empty, the inline picker takes over the main
- *     area as a large kind-chooser grid so there is literally nothing
- *     else to click.
+ * Timing: `computeSchedule` (Task 14) turns the ordered items + each
+ * item's `durationMinutes` + the setlist's `startTime` into a per-item
+ * clock column, a running total, and a projected end time. Section
+ * dividers never consume service time — enforced inside
+ * computeSchedule, not here.
  *
- * The AddItemPicker component owns the grid + song-sublist UI; this
- * file just wires it into the different insertion points.
+ * Media-missing: `useMediaCheck` flags items whose backing file no
+ * longer exists on disk (moved/renamed since it was added). The count
+ * surfaces in the meta strip; the per-item banner + RELINK live in
+ * SetlistItemCard.
+ *
+ * Item creation — the gap-insert model:
+ *   A `GapInsert` ("+ INSERT HERE") renders above every item and once
+ *   more after the last, so there is always an explicit slot for every
+ *   possible insertion point (including the very top and the very
+ *   bottom). Clicking one opens an inline kind-picker panel AT that
+ *   position; picking a kind inserts there and closes the panel. This
+ *   replaces the old "top Add button + hover inserters" pair with a
+ *   single, uniform mechanism that covers exactly the same positions.
+ *
+ * The AddItemPicker component owns the grid + song-sublist body; this
+ * file wires it into the different insertion points and supplies the
+ * position-specific header ("INSERT AT POSITION N" / "ADD TO THE END").
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   DndContext,
@@ -44,12 +53,21 @@ import {
 } from '@dnd-kit/sortable'
 import type { Setlist, SetlistItem } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
+import type { AutosaveStatus } from '../hooks/useAutosave'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useAutosave } from '../hooks/useAutosave'
+import { useMediaCheck } from '../hooks/useMediaCheck'
+import { computeSchedule } from '../lib/serviceClock'
 import { SetlistItemCard } from '../components/SetlistItemCard'
 import { AddItemPicker } from '../components/AddItemPicker'
 import { Button } from '../components/ui/Button'
+import { Panel } from '../components/ui/Card'
+import { Badge } from '../components/ui/Badge'
+import { MonoLabel } from '../components/ui/MonoLabel'
+import { StatusDot } from '../components/ui/StatusDot'
+import { Segmented } from '../components/ui/Segmented'
+import { GapInsert } from '../components/ui/GapInsert'
 import { formatServiceDate } from '../lib/setlist-helpers'
 import { probePdfPageCount } from '../lib/pdfLoader'
 
@@ -57,17 +75,21 @@ interface Draft {
   name: string
   date: string
   items: SetlistItem[]
+  startTime?: string
 }
 
+const EMPTY_ITEMS: SetlistItem[] = []
+
 function setlistToDraft(s: Setlist): Draft {
-  return { name: s.name, date: s.date, items: s.items }
+  return { name: s.name, date: s.date, items: s.items, startTime: s.startTime }
 }
 
 function draftToPatch(d: Draft): UpdateSetlistPatch {
   return {
     name: d.name.trim() || 'Untitled Setlist',
     date: d.date,
-    items: d.items
+    items: d.items,
+    startTime: d.startTime
   }
 }
 
@@ -82,6 +104,26 @@ function genItemId(): string {
  */
 type InsertAt = number | null
 
+const STATUS_LABEL: Record<AutosaveStatus, string> = {
+  idle: '',
+  pending: 'UNSAVED CHANGES…',
+  saving: 'SAVING…',
+  saved: 'SAVED',
+  error: 'ERROR SAVING'
+}
+
+function statusDotTone(status: AutosaveStatus): 'signal' | 'ok' | 'dim' {
+  if (status === 'saved') return 'ok'
+  if (status === 'idle') return 'dim'
+  return 'signal'
+}
+
+function statusDotPulse(status: AutosaveStatus): boolean | 'fast' {
+  if (status === 'saving') return 'fast'
+  if (status === 'pending') return true
+  return false
+}
+
 export function SetlistEditor(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -91,6 +133,7 @@ export function SetlistEditor(): JSX.Element {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [insertAt, setInsertAt] = useState<InsertAt>(null)
   const [pickerView, setPickerView] = useState<'grid' | 'song'>('grid')
+  const [density, setDensity] = useState<'detail' | 'compact'>('detail')
 
   useEffect(() => {
     if (setlists.length === 0) loadSetlists()
@@ -118,6 +161,15 @@ export function SetlistEditor(): JSX.Element {
     return m
   }, [songs])
 
+  // Hooks below must run unconditionally — `draft` may still be null
+  // while the setlist loads, so every read of it falls back safely.
+  const items = draft?.items ?? EMPTY_ITEMS
+  const { missing } = useMediaCheck(items)
+  const schedule = useMemo(
+    () => computeSchedule(items, draft?.startTime),
+    [items, draft?.startTime]
+  )
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -138,6 +190,15 @@ export function SetlistEditor(): JSX.Element {
     setPickerView('grid')
   }
 
+  const openPickerAt = (pos: number): void => {
+    if (insertAt === pos) {
+      closePicker()
+      return
+    }
+    setInsertAt(pos)
+    setPickerView('grid')
+  }
+
   /** Insert a new item at the pending `insertAt` index. Defaults to append. */
   const insertItem = (newItem: SetlistItem): void => {
     const at = insertAt ?? draft.items.length
@@ -155,6 +216,15 @@ export function SetlistEditor(): JSX.Element {
 
   const deleteItem = (itemId: string): void => {
     patch({ items: draft.items.filter((i) => i.id !== itemId) })
+  }
+
+  const duplicateItem = (itemId: string): void => {
+    const idx = draft.items.findIndex((i) => i.id === itemId)
+    if (idx < 0) return
+    const copy: SetlistItem = { ...draft.items[idx], id: genItemId() }
+    const next = [...draft.items]
+    next.splice(idx + 1, 0, copy)
+    patch({ items: next })
   }
 
   const handleDragEnd = (e: DragEndEvent): void => {
@@ -244,14 +314,6 @@ export function SetlistEditor(): JSX.Element {
     navigate('/')
   }
 
-  const statusLabel: Record<typeof status, string> = {
-    idle: '',
-    pending: 'Unsaved changes…',
-    saving: 'Saving…',
-    saved: 'Saved',
-    error: `Error: ${error ?? 'unknown'}`
-  }
-
   const pickerHandlers = {
     onPickSong: addSong,
     onAddScripture: addScripture,
@@ -262,211 +324,213 @@ export function SetlistEditor(): JSX.Element {
     onAddDivider: addDivider
   }
 
-  const topAddOpen = insertAt === 0
-  const itemCountLabel = `${draft.items.length} item${draft.items.length === 1 ? '' : 's'}`
+  /** The signal-bordered "INSERT AT POSITION n" / "ADD TO THE END" panel. */
+  const renderInsertPanel = (position: number): ReactNode => {
+    const label =
+      position >= draft.items.length ? 'ADD TO THE END' : `INSERT AT POSITION ${position + 1}`
+    return (
+      <Panel
+        emphasis
+        className="mb-2"
+        title={<MonoLabel tone="signal">{label}</MonoLabel>}
+        action={
+          <button
+            type="button"
+            onClick={closePicker}
+            aria-label="Close"
+            className="font-mono text-[13px] text-muted-foreground hover:text-white"
+          >
+            ✕
+          </button>
+        }
+      >
+        <AddItemPicker
+          {...pickerHandlers}
+          songs={songs}
+          view={pickerView}
+          setView={setPickerView}
+          onClose={closePicker}
+        />
+      </Panel>
+    )
+  }
+
+  const itemsLabel = `${draft.items.length} ITEMS`
+  const endOpen = insertAt === draft.items.length
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-      {/* ── Header ─────────────────────────────────────────────────── */}
-      <header className="flex items-center gap-4 border-b border-border/40 px-6 py-3">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Home
-        </Link>
-        <span className="text-xs text-muted-foreground">{statusLabel[status]}</span>
-        <div className="ml-auto flex items-center gap-2">
+      {/* ── Top bar ──────────────────────────────────────────────── */}
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-6">
+        <div className="flex items-center gap-4">
+          <Link
+            to="/"
+            className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-signal"
+          >
+            ← HOME
+          </Link>
+          <span className="flex items-center gap-2">
+            <StatusDot tone={statusDotTone(status)} pulse={statusDotPulse(status)} />
+            <MonoLabel size="xs" tone="dim">
+              {status === 'error' ? `${STATUS_LABEL.error}: ${error ?? 'unknown'}` : STATUS_LABEL[status]}
+            </MonoLabel>
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
           <Button variant="signal" size="md" asChild>
-            <Link to={`/service/${id}`}>Start Service →</Link>
+            <Link to={`/service/${id}`}>START SERVICE →</Link>
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleDelete}>
-            Delete
+          <Button variant="danger" size="md" onClick={() => void handleDelete()}>
+            DELETE
           </Button>
         </div>
       </header>
 
-      {/* ── Metadata ─────────────────────────────────────────────── */}
-      <section className="border-b border-border/40 px-6 py-4">
-        <div className="mx-auto flex max-w-4xl gap-3">
-          <label className="flex-1">
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-              Name
+      {/* ── Meta strip ───────────────────────────────────────────── */}
+      <section className="grid shrink-0 grid-cols-[1fr_240px] border-b border-border bg-card">
+        <div className="border-r border-border px-6 py-5">
+          <MonoLabel size="xs" className="mb-2 block">
+            NAME
+          </MonoLabel>
+          <input
+            type="text"
+            value={draft.name}
+            onChange={(e) => patch({ name: e.target.value })}
+            className="w-full border border-border bg-background px-[13px] py-[11px] text-[15px] font-semibold tracking-[-0.01em] text-foreground outline-none focus:border-signal/50"
+          />
+          <div className="mt-2.5 flex flex-wrap items-center gap-3.5">
+            <span className="font-mono text-[10px] font-medium tracking-[0.08em] text-muted-foreground">
+              {formatServiceDate(draft.date).toUpperCase()} · {itemsLabel}
             </span>
-            <input
-              type="text"
-              value={draft.name}
-              onChange={(e) => patch({ name: e.target.value })}
-              className="w-full rounded-md border border-border/60 bg-background px-3 py-1.5 text-sm outline-none focus:border-brand/50"
-            />
-          </label>
-          <label className="w-56">
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-              Date
+            <span className="font-mono text-[10px] font-semibold tracking-[0.08em] text-signal">
+              ≈ {schedule.totalMinutes} MIN · ENDS {schedule.endsAt}
             </span>
+            {missing.size > 0 && (
+              <Badge tone="signal">{missing.size} MEDIA MISSING</Badge>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col gap-3.5 px-6 py-5">
+          <label>
+            <MonoLabel size="xs" className="mb-2 block">
+              DATE
+            </MonoLabel>
             <input
               type="date"
               value={draft.date}
               onChange={(e) => patch({ date: e.target.value })}
-              className="w-full rounded-md border border-border/60 bg-background px-3 py-1.5 text-sm outline-none focus:border-brand/50"
+              className="w-full border border-border bg-background px-[13px] py-[11px] font-mono text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
+            />
+          </label>
+          <label>
+            <MonoLabel size="xs" className="mb-2 block">
+              SERVICE STARTS
+            </MonoLabel>
+            <input
+              type="time"
+              value={draft.startTime ?? '10:00'}
+              onChange={(e) => patch({ startTime: e.target.value })}
+              className="w-full border border-border bg-background px-[13px] py-[11px] font-mono text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
             />
           </label>
         </div>
-        <div className="mx-auto mt-2 max-w-4xl text-xs text-muted-foreground">
-          {formatServiceDate(draft.date)} · {itemCountLabel}
-        </div>
       </section>
 
-      {/* ── Items list ─────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto max-w-4xl">
-          {/* Empty state: inline picker takes over the whole canvas. */}
-          {draft.items.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border/60 bg-card/20 p-8">
-              <div className="mb-5 text-center">
-                <h2 className="font-editorial text-xl font-semibold text-foreground">
-                  Start your setlist
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Pick a kind of item to add. You can reorder later.
-                </p>
-              </div>
+      {/* ── Run of show ──────────────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto px-6 pb-10">
+        {draft.items.length === 0 ? (
+          <div className="py-6">
+            <div className="mb-5 text-center">
+              <h2 className="text-[22px] font-extrabold tracking-[-0.02em] text-foreground">
+                Start your setlist
+              </h2>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                Pick a kind of item to add. You can reorder later.
+              </p>
+            </div>
+            <Panel emphasis title={<MonoLabel tone="signal">ADD YOUR FIRST ITEM</MonoLabel>}>
               <AddItemPicker
                 {...pickerHandlers}
                 songs={songs}
-                mode="inline"
                 view={pickerView}
                 setView={setPickerView}
-                onClose={closePicker}
+                onClose={() => setPickerView('grid')}
               />
-            </div>
-          ) : (
-            <>
-              {/* Sticky top-of-list Add button + popover */}
-              <div className="relative mb-3 flex justify-center">
-                <Button
-                  variant={topAddOpen ? 'signal' : 'secondary'}
-                  size="md"
-                  onClick={() => {
-                    setInsertAt(topAddOpen ? null : 0)
-                    setPickerView('grid')
-                  }}
-                >
-                  + Add item
-                </Button>
-                {topAddOpen && (
-                  <div className="absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2">
-                    <AddItemPicker
-                      {...pickerHandlers}
-                      songs={songs}
-                      mode="popover"
-                      view={pickerView}
-                      setView={setPickerView}
-                      onClose={closePicker}
-                    />
-                  </div>
-                )}
+            </Panel>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between py-4">
+              <div className="flex items-baseline gap-3.5">
+                <MonoLabel tone="dim">RUN OF SHOW · {itemsLabel}</MonoLabel>
+                <span className="text-[11.5px] text-dim">
+                  Drag to reorder · click any gap to insert
+                </span>
               </div>
-
-              {/* The list itself. Each item is followed by a hover-
-                  reveal inline inserter so the operator can add BETWEEN
-                  items without going back to the top button. */}
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext
-                  items={draft.items.map((i) => i.id)}
-                  strategy={verticalListSortingStrategy}
+              <div className="flex items-center gap-3">
+                <Segmented
+                  size="sm"
+                  value={density}
+                  onChange={setDensity}
+                  options={[
+                    { value: 'detail', label: 'DETAIL' },
+                    { value: 'compact', label: 'COMPACT' }
+                  ]}
+                />
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={() => (endOpen ? closePicker() : openPickerAt(draft.items.length))}
                 >
-                  <ul className="flex flex-col">
-                    {draft.items.map((item, idx) => (
-                      <li key={item.id}>
-                        <SetlistItemCard
-                          item={item}
-                          songsById={songsById}
-                          onChange={(next) => updateItem(item.id, next)}
-                          onDelete={() => deleteItem(item.id)}
-                        />
-                        <InlineInserter
-                          open={insertAt === idx + 1}
-                          onOpen={() => {
-                            setInsertAt(idx + 1)
-                            setPickerView('grid')
-                          }}
-                          picker={
-                            <AddItemPicker
-                              {...pickerHandlers}
-                              songs={songs}
-                              mode="popover"
-                              view={pickerView}
-                              setView={setPickerView}
-                              onClose={closePicker}
-                            />
-                          }
-                          /* The final inserter doubles as the
-                             bottom-of-list "append" affordance — keep
-                             it visible even without hover. */
-                          isLast={idx === draft.items.length - 1}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </SortableContext>
-              </DndContext>
-            </>
-          )}
-        </div>
-      </main>
-    </div>
-  )
-}
+                  + ADD ITEM
+                </Button>
+              </div>
+            </div>
 
-/**
- * Inline inserter — a thin horizontal zone between two list items that
- * reveals a "+ add here" pill on hover. Clicking it opens the picker
- * anchored to this slot, so the next kind chosen gets inserted at this
- * exact index rather than appended to the end.
- *
- * The last-in-list one stays subtly visible even when not hovered so
- * users always have a visible "append" target.
- */
-function InlineInserter({
-  open,
-  onOpen,
-  picker,
-  isLast
-}: {
-  open: boolean
-  onOpen: () => void
-  picker: JSX.Element
-  isLast: boolean
-}): JSX.Element {
-  return (
-    <div className="relative">
-      <div
-        className={
-          'group flex h-6 items-center justify-center ' +
-          (isLast ? 'pt-1' : '')
-        }
-      >
-        <button
-          onClick={onOpen}
-          className={
-            'flex items-center gap-1.5 rounded-full border border-dashed px-3 py-0.5 text-[11px] font-medium transition-all ' +
-            (isLast
-              ? 'border-border/50 text-muted-foreground opacity-80 hover:border-brand/60 hover:text-brand hover:opacity-100'
-              : 'border-transparent text-muted-foreground opacity-0 hover:border-brand/60 hover:text-brand group-hover:opacity-100')
-          }
-          aria-label="Insert item here"
-        >
-          <span className="text-sm leading-none">+</span>
-          <span>Add item</span>
-        </button>
-      </div>
-      {open && (
-        <div className="absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2">
-          {picker}
-        </div>
-      )}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={draft.items.map((i) => i.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ul className="flex flex-col">
+                  {draft.items.map((item, idx) => (
+                    <li key={item.id}>
+                      <GapInsert active={insertAt === idx} onClick={() => openPickerAt(idx)} />
+                      {insertAt === idx && renderInsertPanel(idx)}
+                      <SetlistItemCard
+                        item={item}
+                        songsById={songsById}
+                        at={schedule.at[idx] ?? ''}
+                        missing={missing.has(item.id)}
+                        density={density}
+                        onChange={(next) => updateItem(item.id, next)}
+                        onDelete={() => deleteItem(item.id)}
+                        onDuplicate={() => duplicateItem(item.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
+
+            <GapInsert active={endOpen} onClick={() => openPickerAt(draft.items.length)} />
+            {endOpen && renderInsertPanel(draft.items.length)}
+
+            <div className="mt-3.5 flex items-center justify-between border-t border-border pt-3">
+              <MonoLabel tone="dim">
+                {itemsLabel} · {schedule.totalMinutes} MIN · ENDS {schedule.endsAt}
+              </MonoLabel>
+              <span className="text-[11.5px] text-muted-foreground">
+                Section dividers are grouping only — they never reach the projector.
+              </span>
+            </div>
+          </>
+        )}
+      </main>
     </div>
   )
 }

@@ -125,3 +125,27 @@ export function itemKindLabel(kind: Kind): string {
       return 'Section'
   }
 }
+
+/**
+ * Three-letter mono code shown on kind Badges in the setlist editor —
+ * the add-item grid and every item row's own kind chip. Matches the
+ * KLB design file exactly (SNG / SCR / IMG / VID / PDF / CDN / SEC).
+ */
+export function itemKindCode(kind: Kind): string {
+  switch (kind) {
+    case 'song':
+      return 'SNG'
+    case 'scripture':
+      return 'SCR'
+    case 'image':
+      return 'IMG'
+    case 'video':
+      return 'VID'
+    case 'deck':
+      return 'PDF'
+    case 'countdown':
+      return 'CDN'
+    case 'section-divider':
+      return 'SEC'
+  }
+}
