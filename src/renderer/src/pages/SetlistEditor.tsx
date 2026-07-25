@@ -274,7 +274,7 @@ export function SetlistEditor(): JSX.Element {
         </Link>
         <span className="text-xs text-muted-foreground">{statusLabel[status]}</span>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="primary" size="md" asChild>
+          <Button variant="signal" size="md" asChild>
             <Link to={`/service/${id}`}>Start Service →</Link>
           </Button>
           <Button variant="ghost" size="sm" onClick={handleDelete}>
@@ -342,7 +342,7 @@ export function SetlistEditor(): JSX.Element {
               {/* Sticky top-of-list Add button + popover */}
               <div className="relative mb-3 flex justify-center">
                 <Button
-                  variant={topAddOpen ? 'primary' : 'secondary'}
+                  variant={topAddOpen ? 'signal' : 'secondary'}
                   size="md"
                   onClick={() => {
                     setInsertAt(topAddOpen ? null : 0)

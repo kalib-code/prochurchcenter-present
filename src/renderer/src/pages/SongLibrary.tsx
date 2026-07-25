@@ -76,7 +76,7 @@ export function SongLibrary(): JSX.Element {
         actions={
           <>
             <SearchInput value={query} onChange={setQuery} />
-            <Button variant="primary" size="md" onClick={handleNew}>
+            <Button variant="signal" size="md" onClick={handleNew}>
               + New Song
             </Button>
           </>
@@ -101,7 +101,7 @@ export function SongLibrary(): JSX.Element {
               title="No songs yet"
               description="Your song library is where every hymn, worship song, and chorus lives. Add one to get started."
               cta={
-                <Button variant="primary" size="md" onClick={handleNew}>
+                <Button variant="signal" size="md" onClick={handleNew}>
                   + Add your first song
                 </Button>
               }
@@ -222,7 +222,7 @@ function SongRow({
 
         {/* Tags — desktop column (language + CCLI + section count) */}
         <div className="hidden flex-wrap items-center gap-1 md:flex">
-          <Badge tone="outline">{LANGUAGE_LABELS[song.language]}</Badge>
+          <Badge tone="neutral">{LANGUAGE_LABELS[song.language]}</Badge>
           {song.ccli && (
             <Badge tone="neutral" title={`CCLI ${song.ccli}`}>
               CCLI

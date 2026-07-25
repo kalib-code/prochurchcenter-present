@@ -112,7 +112,7 @@ export function Home(): JSX.Element {
             <Link to="/settings">Settings</Link>
           </Button>
           <div className="mx-2 h-5 w-px bg-border/60" />
-          <Button variant="primary" size="sm" onClick={handleNew} disabled={busy}>
+          <Button variant="signal" size="sm" onClick={handleNew} disabled={busy}>
             + New Setlist
           </Button>
         </nav>
@@ -161,7 +161,7 @@ export function Home(): JSX.Element {
                 title="No setlists yet"
                 description="Plan your first service to see it here. You'll be able to add songs, scripture, PDFs, and videos."
                 cta={
-                  <Button variant="primary" size="md" onClick={handleNew}>
+                  <Button variant="signal" size="md" onClick={handleNew}>
                     + Create your first setlist
                   </Button>
                 }
@@ -231,7 +231,7 @@ function HeroSetlist({
             <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand">
               {eyebrow}
             </div>
-            {today && <Badge tone="brand">Today</Badge>}
+            {today && <Badge tone="signal">Today</Badge>}
           </div>
 
           <h2 className="mt-3 truncate font-editorial text-[44px] font-semibold leading-[1.05] tracking-tight text-foreground">
@@ -247,7 +247,7 @@ function HeroSetlist({
           </div>
 
           <div className="mt-7 flex flex-wrap items-center gap-2">
-            <Button variant="primary" size="lg" asChild>
+            <Button variant="signal" size="lg" asChild>
               <Link to={today ? `/service/${setlist.id}` : `/setlists/${setlist.id}`}>
                 {today ? 'Start Service →' : 'Open setlist'}
               </Link>

@@ -196,7 +196,7 @@ export function SongEditor(): JSX.Element {
         actions={
           <>
             <AutosaveStatus status={status} error={error} />
-            <Button variant="destructive" size="sm" onClick={handleDelete}>
+            <Button variant="danger" size="sm" onClick={handleDelete}>
               Delete
             </Button>
           </>
@@ -338,7 +338,7 @@ export function SongEditor(): JSX.Element {
                 {previewSlides.length === 1 ? '' : 's'}
               </h2>
             </div>
-            <Badge tone="outline">max {maxLines} lines</Badge>
+            <Badge tone="neutral">max {maxLines} lines</Badge>
           </div>
 
           <div className="flex-1 overflow-y-auto px-8 py-6">
