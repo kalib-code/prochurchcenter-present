@@ -335,6 +335,28 @@ function PptxThumb({
       setInView(true)
       return
     }
+
+    // An IntersectionObserver only delivers callbacks as part of the
+    // document's rendering lifecycle, and a HIDDEN document does not run
+    // one — so on a hidden page this observer would sit armed and silent,
+    // and the thumbnail would never mount at all.
+    //
+    // That is not a hypothetical: on a single-display setup the projector
+    // window covers the operator window (Service Mode's own preflight warns
+    // about exactly this), so the operator document is hidden for the whole
+    // time the slide grid is mounting. Every pptx card in the grid stayed a
+    // bare "pptx" badge on a black body, which is precisely the "previews
+    // don't work" report this guard exists to prevent.
+    //
+    // Deferring is a cost optimisation; being invisible is a correctness
+    // bug. When the document is hidden there is no meaningful on-screen /
+    // off-screen distinction to exploit anyway — nothing is being painted —
+    // so mount and let the parse cache absorb the cost.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      setInView(true)
+      return
+    }
+
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) setInView(true)
@@ -344,7 +366,20 @@ function PptxThumb({
       { rootMargin: '600px 0px' }
     )
     io.observe(el)
-    return () => io.disconnect()
+
+    // Re-run this effect when the page's visibility flips, so a grid that
+    // mounted while visible and was then covered (operator switches to the
+    // projector and back) still resolves rather than waiting on a callback
+    // the hidden lifecycle will not deliver.
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') setInView(true)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      io.disconnect()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [inView])
 
   const handleError = useCallback(

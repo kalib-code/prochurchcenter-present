@@ -151,6 +151,20 @@ export default function PptxSlideView({
   const applyFitTo = (element: HTMLElement, size: { width: number; height: number }): void => {
     const host = hostRef.current
     if (!host) return
+    // The host is a flex container, so the slide element is a flex ITEM and
+    // picks up `flex-shrink: 1` by default. renderSlide() gives the element a
+    // fixed inline width (the deck's native size, e.g. 960px), but that is
+    // only its flex BASE size — a host narrower than the deck shrinks the
+    // used width down, and `min-width: auto` resolves to min-content, which
+    // is ~0 here because every shape inside is absolutely positioned. The
+    // scale below is computed from the NATIVE size, so a shrunken box gets
+    // scaled a second time and collapses to a sliver.
+    //
+    // This is invisible on the projector — that host is LARGER than the deck,
+    // so nothing shrinks — and only bites the small hosts: Service Mode's
+    // slide-grid thumbnails. Pinning flex-shrink keeps the element at its
+    // native size so `scale` is the only thing sizing it, at every host size.
+    element.style.flexShrink = '0'
     const scaleX = host.clientWidth / size.width
     const scaleY = host.clientHeight / size.height
     const scale = Math.min(scaleX, scaleY)

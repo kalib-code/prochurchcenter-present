@@ -35,14 +35,23 @@
  * ../lib/slideTheming.ts's doc comment for why the two must differ.)
  *
  * Real `<button>` (not `<div role="button">`): the KLB redesign
- * requires genuine keyboard-operable controls. `aspect-[16/9]` plus
- * `flex flex-col` on the button works fine once the button's default
- * `inline-block` display is overridden — no need for the ARIA-div
- * workaround the pre-redesign version used.
+ * requires genuine keyboard-operable controls. No ARIA-div workaround is
+ * needed, but a button carries TWO UA-stylesheet defaults that have to be
+ * overridden, not one: `display: inline-block` AND
+ * `align-items: flex-start`. Overriding only the display leaves the header
+ * strip and the slide body sizing to their own content instead of
+ * spanning the card — see the `items-stretch` note on the element below.
+ *
+ * Lyric text wraps and auto-shrinks (../hooks/useAutoFitText.ts) rather
+ * than being clipped per line. On a card this small a clipped line is
+ * worse than a small one: "and all who will believe" rendered as "and all
+ * who will be…" reads as different words, and nothing distinguishes a
+ * truncated card from a genuinely short slide.
  */
 
 import type { Theme } from '@shared/types'
 import { themedBodyStyle, themedTextStyle } from '../lib/slideTheming'
+import { useAutoFitText } from '../hooks/useAutoFitText'
 import { MediaPreview, type PptxThumbError } from './MediaPreview'
 
 /**
@@ -112,13 +121,28 @@ export function SlideCard({
   const bodyStyle = themedBodyStyle(theme, usingThemeBg)
   const textStyle = themedTextStyle(theme, usingThemeBg)
 
+  // Lyrics wrap and shrink to fit rather than being clipped per line. A
+  // clipped line is actively misleading here — "and all who will believe"
+  // rendered as "and all who will be…" reads as different words, and the
+  // operator has no way to tell a truncated card from a genuinely short
+  // slide. See ../hooks/useAutoFitText.ts.
+  const { containerRef, contentRef } = useAutoFitText(lines.join('\n'))
+
   return (
     <button
       type="button"
       onClick={onClick}
       data-active={active ? 'true' : undefined}
       style={style}
-      className={`relative flex aspect-[16/9] w-full flex-col overflow-hidden border text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal ${
+      // `items-stretch` is load-bearing, not decoration: Chromium's UA
+      // stylesheet gives `button` `align-items: flex-start`, which in a
+      // `flex-col` card means the header strip and the slide body size
+      // themselves to their CONTENT instead of spanning the card. The
+      // visible symptom is a header that renders as a short chip in the
+      // top-left and a body that shrink-wraps around the lyrics, so a
+      // media thumbnail has almost no box to render into. Overriding
+      // `display` alone is not enough — `align-items` has to be reset too.
+      className={`relative flex aspect-[16/9] w-full flex-col items-stretch overflow-hidden border text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal ${
         active ? 'border-signal' : 'border-border hover:border-dim'
       }`}
     >
@@ -141,7 +165,8 @@ export function SlideCard({
           style applies the theme background (image + color) and the
           text lines render on top with the theme's text color. */}
       <div
-        className="relative flex flex-1 items-center justify-center overflow-hidden"
+        ref={containerRef}
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
         style={bodyStyle}
       >
         {/* Subtle dark scrim — only when a real background image is
@@ -161,15 +186,22 @@ export function SlideCard({
           <span className="relative text-[9px] italic text-dim">(empty)</span>
         ) : (
           <div
-            className={`relative overflow-hidden p-3 text-center text-[11.5px] font-bold leading-[1.5] ${
+            ref={contentRef}
+            // `text-[11.5px]` is the DESIGN size and stays here on purpose:
+            // useAutoFitText only ever shrinks below it, and only once it
+            // has really measured the card, so a card that can't be measured
+            // still renders at the intended size instead of the browser's
+            // 16px default. `max-w-full` + `break-words` keep a single long
+            // word (a URL, a run-on lyric) inside the card rather than
+            // forcing the block wider than its container, which would defeat
+            // the width half of the fit measurement.
+            className={`relative max-w-full overflow-hidden break-words p-2 text-center text-[11.5px] font-bold leading-[1.35] ${
               active ? 'text-white' : 'text-quiet'
             }`}
             style={textStyle}
           >
             {lines.map((line, i) => (
-              <div key={i} className="truncate">
-                {line}
-              </div>
+              <div key={i}>{line}</div>
             ))}
           </div>
         )}
