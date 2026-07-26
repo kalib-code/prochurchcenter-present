@@ -48,6 +48,15 @@ interface CanvaState {
    * this call succeeding.
    */
   deletePdf: (absPath: string) => Promise<boolean>
+  /**
+   * Check a batch of previously-imported designs for changes since import.
+   * Used by SetlistEditor's background staleness check, which by design
+   * must be completely silent on failure (offline is a normal condition
+   * for this app, not an error) — see the `isCurrent: () => false` note
+   * at the call site below. Returns `[]` on failure, same "nothing to
+   * report" shape as "no designs are stale".
+   */
+  checkStale: (items: { designId: string; designUpdatedAt: string }[]) => Promise<string[]>
   setImporting: (importing: boolean) => void
   setProgress: (progress: CanvaImportProgress | null) => void
 }
@@ -230,6 +239,27 @@ export const useCanvaStore = create<CanvaState>((set, get) => ({
       'Could not delete the superseded PDF'
     )
     return result.ok
+  },
+
+  checkStale: async (items) => {
+    const result = await wrapCanvaCall(
+      set,
+      () => window.api.canva.checkStale(items),
+      'Could not check design staleness',
+      // `isCurrent` normally gates whether a *superseded* call's error is
+      // suppressed while its connection-state refresh still applies (see
+      // the doc comment on wrapCanvaCall). Here we reuse that same
+      // suppression for a different reason: this call is a silent
+      // background nicety, never something the operator should see fail.
+      // Passing "always false" means "never current" — the error is
+      // ALWAYS suppressed, not just when superseded — while the
+      // connection-state refresh (e.g. noticing a revoked grant) still
+      // happens unconditionally, same as every other call through this
+      // helper. Do not "fix" this to `() => true`; that would start
+      // painting a Canva error banner over an ordinary offline week.
+      () => false
+    )
+    return result.ok ? result.value : []
   },
 
   setImporting: (importing) => set({ importing }),

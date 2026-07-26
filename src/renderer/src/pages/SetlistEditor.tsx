@@ -47,6 +47,7 @@ import type { UpdateSetlistPatch } from '@shared/ipc-contract'
 import type { CanvaImportResult } from '@shared/canva'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
+import { useCanvaStore } from '../stores/useCanvaStore'
 import { useAutosave } from '../hooks/useAutosave'
 import { SetlistItemCard } from '../components/SetlistItemCard'
 import { AddItemPicker } from '../components/AddItemPicker'
@@ -88,10 +89,12 @@ export function SetlistEditor(): JSX.Element {
   const navigate = useNavigate()
   const { setlists, load: loadSetlists, update, remove, getById } = useSetlistStore()
   const { songs, load: loadLibrary } = useLibraryStore()
+  const checkStale = useCanvaStore((s) => s.checkStale)
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [insertAt, setInsertAt] = useState<InsertAt>(null)
   const [pickerView, setPickerView] = useState<'grid' | 'song' | 'canva'>('grid')
+  const [staleDesignIds, setStaleDesignIds] = useState<string[]>([])
 
   useEffect(() => {
     if (setlists.length === 0) loadSetlists()
@@ -104,6 +107,47 @@ export function SetlistEditor(): JSX.Element {
     const s = getById(id)
     if (s) setDraft(setlistToDraft(s))
   }, [id, draft, setlists, getById])
+
+  // Background staleness check: which Canva-sourced decks in this setlist
+  // have changed in Canva since import. Deliberately fire-and-forget and
+  // silent on failure — this app is offline-first, so an unreachable
+  // Canva is a normal condition, not an error to surface. See
+  // useCanvaStore's `checkStale` for how it avoids painting the shared
+  // error banner.
+  //
+  // `canvaCheckKey` is a primitive summary (design id + updated-at pairs)
+  // of the setlist's Canva decks, not the `draft` object itself. `draft`
+  // is a fresh object on every keystroke (autosave patches it constantly
+  // while the operator edits), so depending on it directly would refire
+  // this check on every edit. The key only changes when a Canva deck is
+  // added/removed/refreshed, which is what should actually trigger a
+  // recheck — plus `id`, so switching setlists (if this component were
+  // ever reused across ids) always keys the check to the right one.
+  const canvaCheckItems = draft
+    ? draft.items.flatMap((item) =>
+        item.kind === 'deck' && item.canva
+          ? [{ designId: item.canva.designId, designUpdatedAt: item.canva.designUpdatedAt }]
+          : []
+      )
+    : []
+  const canvaCheckKey = canvaCheckItems.length > 0 ? JSON.stringify(canvaCheckItems) : ''
+
+  useEffect(() => {
+    if (!canvaCheckKey) return
+    const items = JSON.parse(canvaCheckKey) as { designId: string; designUpdatedAt: string }[]
+
+    let cancelled = false
+    void checkStale(items).then((ids) => {
+      // Guards against a late response applying to a setlist the
+      // operator has since navigated away from, or to items that have
+      // since changed (e.g. the deck was refreshed while the check was
+      // in flight).
+      if (!cancelled) setStaleDesignIds(ids)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [id, canvaCheckKey, checkStale])
 
   const { status, error } = useAutosave<Draft | null>({
     value: draft,
@@ -413,6 +457,7 @@ export function SetlistEditor(): JSX.Element {
                           songsById={songsById}
                           onChange={(next) => updateItem(item.id, next)}
                           onDelete={() => deleteItem(item.id)}
+                          staleDesignIds={staleDesignIds}
                         />
                         <InlineInserter
                           open={insertAt === idx + 1}
