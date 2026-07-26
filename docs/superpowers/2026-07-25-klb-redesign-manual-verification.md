@@ -91,7 +91,31 @@ The highest-risk area. Start a service with **≥4 items and ≥30 slides**.
 - [ ] Trigger `ended` (run a service to completion). This is the last thing an operator sees every Sunday.
 - [ ] Both should be KLB, not the old white-button chrome.
 
-## 11. Fonts
+## 11. PowerPoint + Canva integration (added by the merge with `main`)
+
+These two features were built on `main` while the redesign was in flight. The
+merge reconciled them; **none of the combined surfaces has been seen rendered.**
+
+- [ ] Add a `.pptx` via the gap-insert picker. It should show a `PPT` badge, a
+      live first-slide thumbnail, and `N SLIDES` in the run of show.
+- [ ] Give it a duration and confirm it participates in the running clock like
+      any other item.
+- [ ] **Move the .pptx file on disk**, reopen the setlist. It must show
+      `MEDIA MISSING` with a working `RELINK` that offers only `.pptx`, and it
+      must appear in Home's pre-flight media check. *(This is the wiring the
+      exhaustiveness guard forced — verify it actually works end to end.)*
+- [ ] Present a pptx deck. Confirm slides advance, the NEXT panel describes
+      them as `PowerPoint slide N`, and the grouped grid shows thumbnails.
+- [ ] Confirm the deck-warming lookahead still works: advancing from the last
+      slide of the item *before* a pptx deck should pre-parse it, so the first
+      pptx slide doesn't stall. This is why the stage lookahead crosses the
+      item boundary.
+- [ ] Open Settings → **Connections**, the new sixth tab, and confirm the Canva
+      card renders correctly inside the KLB shell.
+- [ ] Import a Canva deck; confirm the staleness indicator appears when the
+      design is newer in Canva than the imported copy.
+
+## 12. Fonts
 
 - [ ] **Disconnect the network**, relaunch, and confirm Inter and JetBrains Mono still load (they're bundled via `@fontsource-variable`, not fetched).
 - [ ] Confirm the mono micro-labels aren't falling back to a system mono — the whole design reads through them.
@@ -106,3 +130,4 @@ The highest-risk area. Start a service with **≥4 items and ≥30 slides**.
 - Home's hero uses `<Panel>` (a `div`), losing a `<section>` landmark.
 - The `rounded\b` gate pattern also matches the sanctioned `rounded-full` and comment prose; a CI consumer would need to filter those.
 - Pre-existing, untouched: `Home.tsx` clones `setlists[0]` rather than the hero setlist, and `REHEARSE` links to the same route as `START SERVICE`.
+- **`CanvaPicker.tsx` and the deck/pptx editor bodies inside `SetlistItemCard` still carry shadcn-era classes** (`rounded-md`, `bg-brand/15`, `hover:border-brand/50`). They *render* correctly — `tailwind.config.js` maps every radius key including `DEFAULT` to `var(--radius: 0)`, so they are square — but they were written against the old design language and were not converted, because they arrived from `main` after the redesign's per-screen passes were done. Converting them is a separate, scoped piece of work on a feature this branch does not own.
