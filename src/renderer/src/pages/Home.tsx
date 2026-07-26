@@ -41,7 +41,7 @@ import { StatusDot } from '../components/ui/StatusDot'
 import { TitleDot } from '../components/ui/TitleDot'
 import { HairlineGrid } from '../components/ui/HairlineGrid'
 import { PreflightBanner, PreflightPanel } from '../components/PreflightPanel'
-import { itemKindLabel } from '../components/ItemKindIcon'
+import { itemKindCode, itemKindLabel } from '../components/ItemKindIcon'
 
 export function Home(): JSX.Element {
   const navigate = useNavigate()
@@ -472,24 +472,4 @@ function previewLabel(item: SetlistItem, songsById: Map<string, Song>): string {
  */
 function itemKindTone(kind: SetlistItem['kind']): 'signal' | 'neutral' {
   return kind === 'section-divider' ? 'neutral' : 'signal'
-}
-
-/** Short mono code for an item kind's Badge — SNG, SCR, IMG, VID, PDF, CNT, DIV. */
-function itemKindCode(kind: SetlistItem['kind']): string {
-  switch (kind) {
-    case 'song':
-      return 'SNG'
-    case 'scripture':
-      return 'SCR'
-    case 'image':
-      return 'IMG'
-    case 'video':
-      return 'VID'
-    case 'deck':
-      return 'PDF'
-    case 'countdown':
-      return 'CNT'
-    case 'section-divider':
-      return 'DIV'
-  }
 }
