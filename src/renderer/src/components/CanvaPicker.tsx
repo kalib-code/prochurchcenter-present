@@ -22,7 +22,6 @@ import type { CanvaDesign, CanvaImportResult } from '@shared/canva'
 
 interface Props {
   onImported: (result: CanvaImportResult, designId: string) => void
-  onClose: () => void
 }
 
 export function CanvaPicker({ onImported }: Props): JSX.Element {
@@ -51,7 +50,6 @@ export function CanvaPicker({ onImported }: Props): JSX.Element {
   // something else. Seeding preserves their previous search rather than
   // silently discarding it, and costs no network call.
   const [input, setInput] = useState(() => useCanvaStore.getState().query)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void loadState()
@@ -150,7 +148,6 @@ export function CanvaPicker({ onImported }: Props): JSX.Element {
   return (
     <div className="flex flex-col gap-2">
       <input
-        ref={inputRef}
         autoFocus
         value={input}
         onChange={(e) => setInput(e.target.value)}

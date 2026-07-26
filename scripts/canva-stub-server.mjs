@@ -28,6 +28,15 @@ const CLIENT_SECRET = process.env.CANVA_CLIENT_SECRET
 // reuse across deployments and ensures the stub cannot be used as a reference
 // implementation if copied into a production environment without explicit
 // key configuration.
+//
+// PRODUCTION: this is correct for a single, disposable dev process and
+// WRONG for any restartable or multi-replica deployment — a restart
+// invalidates every in-flight authorization flow, and two replicas behind
+// a load balancer will never agree on a key, so a callback landing on the
+// "wrong" replica fails verifyState() outright. The real backend must read
+// its signing key from configuration (a secret store / env var provisioned
+// at deploy time) and refuse to start if it is missing, rather than
+// falling back to a per-process random value like this stub does.
 const SIGNING_KEY = randomBytes(32)
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
@@ -65,7 +74,13 @@ function readJsonBody(req) {
     let raw = ''
     req.on('data', (c) => {
       raw += c
-      if (raw.length > 1e6) reject(new Error('body too large'))
+      if (raw.length > 1e6) {
+        // Stop the socket from buffering further chunks past the limit —
+        // rejecting the promise alone doesn't stop `data` events from
+        // continuing to arrive and accumulate in `raw`.
+        req.destroy()
+        reject(new Error('body too large'))
+      }
     })
     req.on('end', () => {
       try {

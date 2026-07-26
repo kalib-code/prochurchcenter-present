@@ -22,6 +22,15 @@ describe('unixSecondsToIso', () => {
     expect(() => unixSecondsToIso(Number.NaN)).toThrow()
     expect(() => unixSecondsToIso(Number.POSITIVE_INFINITY)).toThrow()
   })
+
+  it('throws on a finite value outside the range JS Date can represent', () => {
+    // 1e15 seconds is finite (passes Number.isFinite) but multiplies out
+    // to 1e18 ms, far past Date's representable range. Without an
+    // explicit range check this reaches `new Date(...).toISOString()`
+    // and throws an untyped `RangeError: Invalid time value` instead of
+    // the same `TypeError` every other bad input here produces.
+    expect(() => unixSecondsToIso(1e15)).toThrow(TypeError)
+  })
 })
 
 describe('isDesignStale', () => {
@@ -114,6 +123,18 @@ describe('nextPollDelayMs', () => {
 
   it('returns null once the cumulative budget is exhausted', () => {
     expect(nextPollDelayMs(999)).toBeNull()
+  })
+
+  it('allows the last attempt whose cumulative delay still fits the 90s budget, and cuts off the very next one', () => {
+    // With delays [1000, 1000, 2000, 3000, 5000] then a steady 5000ms
+    // cadence, attempt 19 is the last one whose cumulative delay (87s)
+    // stays within EXPORT_POLL_TIMEOUT_MS (90s); attempt 20 would push
+    // cumulative elapsed to 92s and must be refused. This pins the real
+    // cutoff boundary, not just an arbitrarily-large attempt number like
+    // 999 above — a regression that moved the cutoff by one attempt
+    // would pass the 999 check but fail here.
+    expect(nextPollDelayMs(19)).toBe(5000)
+    expect(nextPollDelayMs(20)).toBeNull()
   })
 
   it('never returns a zero or negative delay, which would busy-loop', () => {

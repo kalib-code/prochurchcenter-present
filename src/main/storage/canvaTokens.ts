@@ -48,7 +48,14 @@ export async function loadTokens(): Promise<CanvaTokens | null> {
     const buf = await readFile(path)
     return JSON.parse(safeStorage.decryptString(buf)) as CanvaTokens
   } catch (err) {
-    console.error('[canva] could not read stored tokens', err)
+    // Never log the raw error: modern V8 JSON.parse messages echo a
+    // leading slice of the offending input, so a corrupt-decrypt path
+    // (garbled plaintext fed into JSON.parse) could print a few bytes of
+    // what used to be token material. Log only the error's name/shape.
+    console.error(
+      '[canva] could not read stored tokens',
+      err instanceof Error ? err.name : 'unknown'
+    )
     return null
   }
 }

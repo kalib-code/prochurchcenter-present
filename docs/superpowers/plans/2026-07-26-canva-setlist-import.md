@@ -632,14 +632,24 @@ This stub talks to the *real* Canva using dev credentials from the environment. 
  */
 
 import { createServer } from 'node:http'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto'
 
 const PORT = 8787
 const BASE = `http://127.0.0.1:${PORT}`
 const CLIENT_ID = process.env.CANVA_CLIENT_ID
 const CLIENT_SECRET = process.env.CANVA_CLIENT_SECRET
-// Ephemeral: restarting the stub invalidates in-flight flows, which is fine.
-const SIGNING_KEY = process.env.CANVA_STUB_SIGNING_KEY ?? 'dev-only-signing-key'
+// UPDATED from the original `process.env.CANVA_STUB_SIGNING_KEY ??
+// 'dev-only-signing-key'` shown in an earlier draft of this plan: a
+// hardcoded fallback secret is exactly the kind of thing that ends up
+// running in production by accident. The shipped stub generates a fresh
+// random key per process instead — correct for this single, disposable
+// dev server, but NOT something the real backend should copy: a
+// restartable or multi-replica deployment needs its signing key read from
+// configuration (a secret store / env var provisioned at deploy time),
+// with the process refusing to start if it's missing. See the
+// `PRODUCTION:` note above `SIGNING_KEY` in the shipped
+// scripts/canva-stub-server.mjs for the full rationale.
+const SIGNING_KEY = randomBytes(32)
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
   console.error('Set CANVA_CLIENT_ID and CANVA_CLIENT_SECRET.')

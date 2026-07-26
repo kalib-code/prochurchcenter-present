@@ -221,7 +221,7 @@ export function AddItemPicker(props: Props): JSX.Element {
             Import from Canva
           </span>
         </div>
-        <CanvaPicker onImported={onImportCanva} onClose={onClose} />
+        <CanvaPicker onImported={onImportCanva} />
       </div>
     ) : (
       <div>

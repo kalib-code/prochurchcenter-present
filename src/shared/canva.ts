@@ -76,6 +76,9 @@ export interface CanvaImportResult {
 // Timestamps
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** JS Date's documented representable range is ±8,640,000,000,000 ms from the epoch. */
+const MAX_VALID_DATE_MS = 8.64e12
+
 /**
  * Canva sends Unix seconds; every timestamp in this codebase is ISO 8601.
  * Convert at the boundary so nothing downstream has to remember which
@@ -85,7 +88,16 @@ export function unixSecondsToIso(seconds: number): string {
   if (!Number.isFinite(seconds)) {
     throw new TypeError(`Expected finite Unix seconds, got ${seconds}`)
   }
-  return new Date(seconds * 1000).toISOString()
+  const ms = seconds * 1000
+  // Number.isFinite alone lets through in-range-but-absurd values like
+  // 1e15, which multiplies out to a millisecond value past what `Date`
+  // can represent — `new Date(ms).toISOString()` would then throw a
+  // RangeError ("Invalid time value") from deep inside `Date`, instead of
+  // the same clear, typed rejection every other bad input here produces.
+  if (Math.abs(ms) > MAX_VALID_DATE_MS) {
+    throw new TypeError(`Expected Unix seconds within the representable Date range, got ${seconds}`)
+  }
+  return new Date(ms).toISOString()
 }
 
 /**
@@ -103,6 +115,39 @@ export function isDesignStale(
   if (Number.isNaN(importedMs)) return false
   if (!Number.isFinite(canvaUpdatedAtUnix)) return false
   return canvaUpdatedAtUnix * 1000 > importedMs
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Operator-facing text sanitisation
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OPERATOR_TEXT_MAX_LEN = 200
+
+/**
+ * Bound and strip control characters from externally-controlled text
+ * before it reaches operator-facing UI (or logs).
+ *
+ * Two call sites feed this: api.ts's export-failure `job.error.message`
+ * (Canva's own explanation, e.g. "premium elements on a free account") and
+ * auth.ts's OAuth redirect `error` query param (attacker/API-controlled,
+ * since it arrives over an unauthenticated loopback HTTP request). Both
+ * are attacker/API-controlled strings that are useful to show verbatim-ish
+ * but must never be trusted to be short, printable, or free of control
+ * characters. Shared here — rather than duplicated per call site — so a
+ * fix to the bounding/stripping logic never drifts between them. Returns
+ * `null` (rather than a generic fallback directly) so each caller applies
+ * its own fallback message.
+ */
+export function sanitizeCanvaOperatorText(raw: string | undefined | null): string | null {
+  if (!raw) return null
+  const cleaned = raw
+    .replace(/[\x00-\x1f\x7f]+/g, ' ') // strip control chars / newlines
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return null
+  return cleaned.length > OPERATOR_TEXT_MAX_LEN
+    ? `${cleaned.slice(0, OPERATOR_TEXT_MAX_LEN)}…`
+    : cleaned
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

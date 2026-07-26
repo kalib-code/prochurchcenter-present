@@ -13,11 +13,12 @@
  */
 
 import { createServer, type Server } from 'node:http'
-import { shell, net } from 'electron'
+import { app, shell, net } from 'electron'
 import {
   generateCodeVerifier,
   deriveCodeChallenge,
   generateState,
+  sanitizeCanvaOperatorText,
   type CanvaTokens
 } from '@shared/canva'
 import {
@@ -31,6 +32,41 @@ const BACKEND_BASE = process.env.CANVA_BACKEND_BASE ?? 'http://127.0.0.1:8787'
 const CONNECT_TIMEOUT_MS = 5 * 60 * 1000
 /** Refresh this long before actual expiry so a request never races the clock. */
 const EXPIRY_SKEW_MS = 60_000
+
+/** True for loopback hosts — the address the local dev stub binds to. */
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1'
+}
+
+/**
+ * False when a packaged build would be talking to the local dev stub —
+ * i.e. no production backend has been configured.
+ *
+ * TEMPORARY GATE: Canva's token exchange needs a `client_secret`, which is
+ * proxied through `scripts/canva-stub-server.mjs` in dev. That backend has
+ * not been built or deployed yet, so a packaged app has no real
+ * `CANVA_BACKEND_BASE` to point at — every connect attempt would hit
+ * 127.0.0.1:8787, find nothing listening, and blame the operator's
+ * internet connection for a service that doesn't exist. Rather than
+ * invent a URL, `ipc/canva.ts`'s `currentState()` uses this predicate to
+ * report Canva import as `unavailable` in that specific situation.
+ *
+ * WHEN THE BACKEND SHIPS: point `CANVA_BACKEND_BASE` at the deployed
+ * proxy (env var, build-time define, or electron-builder config — pick
+ * one), and delete this function along with its call site in
+ * `ipc/canva.ts`. Dev builds are unaffected either way: `app.isPackaged`
+ * is false under `pnpm dev`, so this always returns true there and the
+ * stub keeps working exactly as it does today.
+ */
+export function isBackendConfigured(): boolean {
+  if (!app.isPackaged) return true
+  try {
+    return !isLoopbackHost(new URL(BACKEND_BASE).hostname)
+  } catch {
+    // An unparseable BACKEND_BASE can't possibly be a working backend.
+    return false
+  }
+}
 
 interface RedirectResult {
   code: string
@@ -112,7 +148,15 @@ function awaitRedirect(
       : 'Canva connected. You can close this tab and return to Present.'
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end(body)
 
-    if (error) return fail(new Error(`Canva returned: ${error}`))
+    if (error) {
+      // `error` is an unauthenticated redirect query param — as
+      // attacker/API-controlled as api.ts's export-failure message, so it
+      // goes through the same shared sanitizer before landing in
+      // operator-facing copy (see sanitizeCanvaOperatorText's doc comment
+      // in shared/canva.ts).
+      const cleaned = sanitizeCanvaOperatorText(error) ?? 'unknown error'
+      return fail(new Error(`Canva returned: ${cleaned}`))
+    }
     if (state !== expectedState) {
       return fail(new Error('State mismatch — sign-in was not completed safely'))
     }
@@ -162,7 +206,11 @@ class CanvaHttpError extends Error {
  */
 export class CanvaReauthRequiredError extends Error {
   constructor() {
-    super('Canva sign-in expired. Please connect Canva again.')
+    // States the action, not a diagnosis: this fires on 400/401 (refresh
+    // genuinely rejected) but also on a live-call 401/403, which can mean
+    // insufficient scope rather than an expired sign-in. "Expired" would
+    // be a wrong claim in that second case.
+    super('Present needs you to connect Canva again.')
     this.name = 'CanvaReauthRequiredError'
   }
 }

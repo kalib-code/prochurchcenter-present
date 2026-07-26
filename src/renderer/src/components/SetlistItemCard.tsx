@@ -352,8 +352,15 @@ function DeckEditor({
     if (!picked) return
     try {
       const pageCount = await probePdfPageCount(picked)
+      // Drop `canva`: a hand-picked PDF has no Canva provenance. Keeping
+      // the old key here would lie about where this file came from — the
+      // card would keep showing "From Canva", the background staleness
+      // check would keep polling a design this deck no longer contains,
+      // and Refresh would silently overwrite the operator's deliberate
+      // manual choice with a re-pull from Canva.
+      const { canva: _discard, ...rest } = item
       onChange({
-        ...item,
+        ...rest,
         pdfPath: picked,
         pageCount,
         title: item.title || defaultDeckTitle(picked)

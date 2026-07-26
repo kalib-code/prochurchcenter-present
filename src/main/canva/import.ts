@@ -10,7 +10,7 @@
  * one path would serve the stale render until eviction.
  */
 
-import { readdir, rm } from 'fs/promises'
+import { mkdir, readdir, rm } from 'fs/promises'
 import { join, basename, resolve, sep } from 'path'
 import { net } from 'electron'
 import { unixSecondsToIso, type CanvaImportProgress, type CanvaImportResult } from '@shared/canva'
@@ -41,14 +41,42 @@ export async function importDesign(
   const bytes = new Uint8Array(await res.arrayBuffer())
 
   const filename = `${safeSegment(designId)}-${Date.now()}.pdf`
-  const pdfPath = join(getCanvaMediaDir(), filename)
+  const dir = getCanvaMediaDir()
+  // A `replace`-mode backup restore clears media/ (and therefore
+  // media/canva/) via clearDir(), and ensureDirectories() only re-creates
+  // it at the next app launch. Without this, an import attempted before
+  // that next launch fails atomicWriteFile with a raw ENOENT.
+  await mkdir(dir, { recursive: true })
+  const pdfPath = join(dir, filename)
   await atomicWriteFile(pdfPath, bytes)
 
   // Read updated_at AFTER exporting: an edit made mid-export should show
   // as stale next time rather than being silently recorded as current.
-  const updatedAt = await getDesignUpdatedAt(designId)
+  //
+  // Best-effort, not part of the import's success criteria: the PDF
+  // write above is the expensive, unrecoverable step (up to 90s of
+  // export+poll can precede it), so a network hiccup on this trailing
+  // metadata GET must not throw away a completed import and orphan the
+  // file just written. Worse, a 401/403 here routes through
+  // requireReauth() and clears the operator's connection as a side
+  // effect of a bookkeeping read — after the real work already
+  // succeeded. Falling back to import time is the conservative choice:
+  // "now" is later than any edit that could have landed before this
+  // point, so any edit from here on still correctly reads as stale on
+  // the next check. The one edge this doesn't cover — a network failure
+  // on this exact call coinciding with an edit that happened mid-export
+  // and is never followed by another edit — trades a rare, narrow miss
+  // for never discarding a completed import or logging the operator out
+  // over a bookkeeping read.
+  let designUpdatedAt: string
+  try {
+    const updatedAt = await getDesignUpdatedAt(designId)
+    designUpdatedAt = unixSecondsToIso(updatedAt)
+  } catch {
+    designUpdatedAt = new Date().toISOString()
+  }
 
-  return { pdfPath, title, designUpdatedAt: unixSecondsToIso(updatedAt) }
+  return { pdfPath, title, designUpdatedAt }
 }
 
 /**
