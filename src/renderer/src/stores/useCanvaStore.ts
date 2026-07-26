@@ -38,6 +38,16 @@ interface CanvaState {
    * the caller reads `error` (or `getState().error`) for what to show.
    */
   importDesign: (designId: string, title: string) => Promise<CanvaImportResult | null>
+  /**
+   * Delete a PDF this app owns (used by SetlistItemCard's refresh flow to
+   * remove the file a refresh just superseded). Routed through
+   * `wrapCanvaCall` like every other Canva call for the same reason as
+   * `importDesign` — see that doc comment. Returns `false` on failure;
+   * callers should treat that as "the old file is orphaned, not
+   * catastrophic" since nothing about the operator's setlist depends on
+   * this call succeeding.
+   */
+  deletePdf: (absPath: string) => Promise<boolean>
   setImporting: (importing: boolean) => void
   setProgress: (progress: CanvaImportProgress | null) => void
 }
@@ -211,6 +221,15 @@ export const useCanvaStore = create<CanvaState>((set, get) => ({
     )
     set({ importing: false, progress: null })
     return result.ok ? result.value : null
+  },
+
+  deletePdf: async (absPath: string) => {
+    const result = await wrapCanvaCall(
+      set,
+      () => window.api.canva.deletePdf(absPath),
+      'Could not delete the superseded PDF'
+    )
+    return result.ok
   },
 
   setImporting: (importing) => set({ importing }),
