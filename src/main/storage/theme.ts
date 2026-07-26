@@ -10,6 +10,7 @@ import { readFile, readdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import type { Theme } from '@shared/types'
+import type { UpdateThemePatch } from '@shared/ipc-contract'
 import { getThemesDir } from './paths'
 import { atomicWriteJson } from './atomic'
 
@@ -88,8 +89,6 @@ export async function getTheme(id: string): Promise<Theme | null> {
     return null
   }
 }
-
-export type UpdateThemePatch = Partial<Omit<Theme, 'id'>>
 
 export async function updateTheme(id: string, patch: UpdateThemePatch): Promise<Theme> {
   const existing = await getTheme(id)
