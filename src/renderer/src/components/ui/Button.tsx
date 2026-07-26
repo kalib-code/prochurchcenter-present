@@ -9,15 +9,12 @@
  *
  * Labels are mono uppercase with .1em tracking, matching every button
  * in the design file. Heights are 30/38/46 for sm/md/lg.
- *
- * `secondary` is a deprecated alias of `outline` so screens that have
- * not yet been converted keep compiling. Removed once Settings lands.
  */
 
 import { cloneElement, forwardRef, type ButtonHTMLAttributes, type ReactElement } from 'react'
 import { cn } from '../../lib/utils'
 
-type Variant = 'signal' | 'outline' | 'ghost' | 'danger' | 'secondary'
+type Variant = 'signal' | 'outline' | 'ghost' | 'danger'
 type Size = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -36,8 +33,6 @@ const BASE =
 const VARIANTS: Record<Variant, string> = {
   signal: 'border-0 bg-signal text-white hover:bg-signal-deep',
   outline:
-    'border border-dim bg-transparent text-bone hover:border-white hover:text-white',
-  secondary:
     'border border-dim bg-transparent text-bone hover:border-white hover:text-white',
   ghost: 'border-0 bg-transparent text-soft hover:text-white',
   danger:

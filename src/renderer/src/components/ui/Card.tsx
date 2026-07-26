@@ -5,9 +5,6 @@
  * a hairline-separated strip, with an optional right-aligned `action`.
  * That header/body split appears on nearly every panel in the design,
  * so it lives here rather than being rebuilt per screen.
- *
- * `Card` is exported as a deprecated alias so screens that have not yet
- * been converted keep compiling. It is removed in the Settings phase.
  */
 
 import type { HTMLAttributes, ReactNode } from 'react'
@@ -49,6 +46,3 @@ export function Panel({
     </div>
   )
 }
-
-/** @deprecated Use `Panel`. Removed once every screen is converted. */
-export const Card = Panel

@@ -55,7 +55,7 @@ export function MediaPreview({
   return (
     <div
       className={cn(
-        'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/50 bg-black',
+        'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden border border-border/50 bg-black',
         className
       )}
     >

@@ -195,7 +195,7 @@ export function ServiceMode(): JSX.Element {
               exit()
               navigate('/')
             }}
-            className="rounded-md bg-white px-4 py-2 text-sm font-medium text-black hover:opacity-90"
+            className="bg-white px-4 py-2 text-sm font-medium text-black hover:opacity-90"
           >
             Back to Home
           </button>
