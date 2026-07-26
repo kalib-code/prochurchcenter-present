@@ -19,8 +19,8 @@
  * below is deliberately DARK; a `.light` class (if we add a toggle
  * later) would override back to light values.
  *
- * --brand is a warm amber/gold — sacred, readable, not corporate. Used
- * for primary actions only. Everything else is neutral slate.
+ * --brand is signal orange (#E23C0F) — sacred, readable, not corporate.
+ * Used for primary actions only. Everything else is neutral slate.
  */
 
 @layer base {
@@ -38,14 +38,19 @@
     --popover: 0 0% 7%;
     --popover-foreground: 0 0% 100%;
 
-    /* Legacy semantic names, remapped so screens not yet converted
-       still render coherently mid-migration rather than breaking. */
+    /* Legacy semantic names from the pre-KLB palette. Every screen is
+       now converted (redesign complete), but these are NOT all dead:
+       `text-muted-foreground` in particular is still a real, actively
+       used secondary-text token across every converted screen (~65
+       call sites), not migration debt. `--accent` / `--accent-foreground`
+       have zero remaining call sites and could be dropped; `--secondary`
+       is likewise unused directly but shares its value with
+       `--panel-hi`, which IS live, so removing it buys nothing. */
     --muted: 60 4% 11%;             /* #1C1C1A */
     --muted-foreground: 60 1% 41%;  /* #6B6B68 */
     --accent: 60 4% 9%;             /* #181816 */
     --accent-foreground: 0 0% 100%;
-    --secondary: 60 5% 8%;          /* #161614 — same value as --panel-hi;
-                                       kept alive for unconverted callers */
+    --secondary: 60 5% 8%;          /* #161614 — same value as --panel-hi */
     --secondary-foreground: 0 0% 100%;
 
     --border: 60 2% 16%;            /* #2A2A28 */
@@ -76,12 +81,26 @@
     --panel-hi: 60 5% 8%;           /* #161614 hover, inactive card header */
 
     /* Squares every rounded-* utility in the codebase in one line,
-       because tailwind.config.js derives all five radii from this. */
+       because tailwind.config.js derives all seven radii — DEFAULT,
+       sm, md, lg, xl, 2xl, 3xl — from this. (Not five: DEFAULT and 3xl
+       are outside the sm–2xl scale and must be derived too, or a bare
+       `rounded` / `rounded-3xl` utility keeps Tailwind's stock radius
+       even at --radius: 0.) */
     --radius: 0;
   }
 
-  /* Light-mode override — not active by default but preserved so we
-     could add a toggle later without re-computing the palette. */
+  /* Light-mode override — unmaintained and unreachable. Nothing in the
+     app ever applies the `.light` class (no toggle UI exists), and this
+     block was never updated for the KLB redesign: it still carries the
+     pre-redesign palette (the old gold `--brand`, none of the new
+     `--rule` / `--dim` / `--soft-fg` / `--quiet-fg` / `--bone` / `--ok` /
+     `--ember` / `--panel-hi` roles the KLB screens actually render
+     with). Applying `.light` today would leave every KLB-specific
+     utility — `text-soft`, `text-bone`, `bg-panel-hi`, `border-rule`,
+     etc. — resolving to their DARK-palette values on a light background,
+     which is actively illegible (e.g. `--bone`'s near-white text would
+     vanish against white). Do not wire up a light-mode toggle against
+     this block without recomputing every KLB role first. */
   .light {
     --background: 0 0% 100%;
     --foreground: 240 10% 6%;

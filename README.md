@@ -54,7 +54,7 @@ This runs `node node_modules/electron/install.js` directly and downloads the Ele
 
 ## Stack
 
-Electron 34 · electron-vite · React 18 · TypeScript · Tailwind v3 · shadcn/ui · Zustand · react-router
+Electron 34 · electron-vite · React 18 · TypeScript · Tailwind v3 · in-house KLB design system · Zustand · react-router
 
 ## License
 
