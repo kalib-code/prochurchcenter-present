@@ -6,6 +6,8 @@ import { screen } from 'electron'
 import { ensureDirectories } from './storage/paths'
 import { ensureDefaultTheme } from './storage/theme'
 import { getSettings } from './storage/settings'
+import { listSetlists } from './storage/setlists'
+import { sweepOrphanPdfs } from './canva/import'
 import { registerAllIpcHandlers } from './ipc'
 import { attachOutputReplay } from './ipc/output'
 import { setOperatorWindow, setOutputWindow } from './windows'
@@ -301,6 +303,26 @@ app.whenReady().then(async () => {
 
   // Register every IPC handler the renderer can call.
   registerAllIpcHandlers()
+
+  // Housekeeping: drop Canva PDFs no setlist references any more.
+  // Refresh deletes the file it supersedes, but deleting a setlist item
+  // does not — without this, media/canva/ grows without bound.
+  //
+  // Fire-and-forget: startup must never block or fail on housekeeping.
+  void (async () => {
+    try {
+      const setlists = await listSetlists()
+      const referenced = setlists.flatMap((s) =>
+        s.items.flatMap((item) =>
+          item.kind === 'deck' && item.canva ? [item.pdfPath] : []
+        )
+      )
+      const removed = await sweepOrphanPdfs(referenced)
+      if (removed > 0) console.log(`[canva] removed ${removed} orphaned PDF(s)`)
+    } catch (err) {
+      console.error('[canva] orphan sweep failed', err)
+    }
+  })()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

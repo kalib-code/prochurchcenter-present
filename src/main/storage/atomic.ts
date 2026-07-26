@@ -32,11 +32,12 @@ export async function atomicWriteFile(path: string, data: Uint8Array): Promise<v
     // rename() can fail after the tmp file was written successfully
     // (disk full, an AV/indexer holding a lock on Windows, a permissions
     // error, the process dying between the two calls). Without this,
-    // the tmp file is orphaned forever — sweepOrphanPdfs only matches
-    // `*.pdf`, so a `*.pdf.tmp` file would never be cleaned up by
-    // anything in the codebase. Best-effort only: if the unlink also
-    // fails there is nothing further to do, and surfacing that failure
-    // instead of the original error would hide the real cause.
+    // the tmp file could be orphaned. If even the process death itself
+    // strands a `.tmp` (no catch block runs at all), the startup sweep
+    // in sweepOrphanPdfs() removes it — see that function's doc comment.
+    // Best-effort only: if the unlink also fails there is nothing
+    // further to do, and surfacing that failure instead of the original
+    // error would hide the real cause.
     await unlink(tmp).catch(() => {})
     throw err
   }

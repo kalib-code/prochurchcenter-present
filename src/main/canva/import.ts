@@ -83,6 +83,18 @@ export async function deleteCanvaPdf(absPath: string): Promise<void> {
  * this module generates is unique (design id + millisecond timestamp),
  * so a basename collision between an unrelated referenced path and a
  * genuine orphan here is not a realistic occurrence.
+ *
+ * Also removes stray `*.pdf.tmp` files. `atomicWriteFile` writes to
+ * `<path>.tmp` then renames into place; its own catch block only cleans
+ * up a `.tmp` after a *failed* rename. If the process dies between the
+ * write and the rename (power loss, force quit, an OS update reboot),
+ * that cleanup never runs and the `.tmp` is stranded forever — nothing
+ * else in the codebase ever looks at it again. A `.tmp` file is never
+ * referenced by a setlist item (only the final `.pdf` path is stored),
+ * so unlike real `.pdf` files it needs no `referenced` comparison: once
+ * this function runs, any `.tmp` present is garbage by definition. This
+ * is only true because the caller guarantees no import can be mid-write
+ * when the sweep runs — see the call site in `src/main/index.ts`.
  */
 export async function sweepOrphanPdfs(referenced: string[]): Promise<number> {
   const dir = getCanvaMediaDir()
@@ -90,7 +102,9 @@ export async function sweepOrphanPdfs(referenced: string[]): Promise<number> {
   let removed = 0
   try {
     for (const name of await readdir(dir)) {
-      if (!name.endsWith('.pdf') || keep.has(name)) continue
+      const isOrphanPdf = name.endsWith('.pdf') && !keep.has(name)
+      const isStrayTmp = name.endsWith('.pdf.tmp')
+      if (!isOrphanPdf && !isStrayTmp) continue
       await rm(join(dir, name), { force: true })
       removed++
     }
