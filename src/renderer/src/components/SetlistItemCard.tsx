@@ -36,6 +36,7 @@ import { probePdfPageCount } from '../lib/pdfLoader'
 import { MediaPreview } from './MediaPreview'
 import { useBibleStore } from '../stores/useBibleStore'
 import { itemKindCode } from './ItemKindIcon'
+import { cn } from '../lib/utils'
 import { Badge } from './ui/Badge'
 import { MonoLabel } from './ui/MonoLabel'
 import { Button } from './ui/Button'
@@ -153,15 +154,33 @@ export function SetlistItemCard({
   const sourceLine = sourceLineFor(item, songsById)
   const slideCount = slideCountLabel(item, songsById)
   const detail = density === 'detail'
+  // COMPACT rows have no room for the full MEDIA MISSING banner (that's
+  // the whole point of COMPACT density), but the count in the meta strip
+  // is unactionable on its own — there's no RELINK and no per-row marker
+  // to tell WHICH row it's talking about. A signal left border + a small
+  // Badge keeps the affected row findable without spending the vertical
+  // space a full banner needs.
+  const compactMissing = !detail && missing && Boolean(relinkKind)
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={
-        'flex items-center gap-4 border border-border bg-card transition-colors hover:border-dim ' +
-        (detail ? 'p-3.5' : 'py-2.5 px-3.5')
-      }
+      className={cn(
+        'flex items-center gap-4 border bg-card transition-colors',
+        detail ? 'p-3.5' : 'py-2.5 px-3.5',
+        compactMissing
+          ? // Side-specific border colors on every edge (not the general
+            // `border-border` utility) — mixing an all-sides border-color
+            // class with a side-specific `border-l-*` override on the same
+            // element is a genuine Tailwind cascade hazard (see
+            // ServiceMode.tsx's group-header comment for the full
+            // explanation): both compile to same-specificity rules, so
+            // whichever Tailwind emits LATER in the stylesheet wins,
+            // regardless of class order in this string.
+            'border-t-border border-r-border border-b-border border-l-2 border-l-signal hover:border-t-dim hover:border-r-dim hover:border-b-dim'
+          : 'border-border hover:border-dim'
+      )}
     >
       {/* Leading rail: computed clock time above the drag handle. */}
       <div className="flex w-[52px] flex-none flex-col items-center justify-center gap-[5px]">
@@ -202,6 +221,11 @@ export function SetlistItemCard({
               <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
                 {title}
               </span>
+              {compactMissing && (
+                <Badge tone="signal" className="flex-none">
+                  MISSING
+                </Badge>
+              )}
               {slideCount && (
                 <span className="flex-none font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
                   {slideCount}
