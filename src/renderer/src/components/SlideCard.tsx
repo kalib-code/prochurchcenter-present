@@ -133,7 +133,7 @@ export function SlideCard({
         )}
 
         {preview ? (
-          <MediaPreview source={preview} className="h-full w-full border-0" />
+          <MediaPreview source={preview} className="h-full w-full rounded-none border-0" />
         ) : lines.length === 0 ? (
           <span className="relative text-[9px] italic text-dim">(empty)</span>
         ) : (
