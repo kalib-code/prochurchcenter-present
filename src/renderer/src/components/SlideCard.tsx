@@ -73,6 +73,13 @@ interface SlideCardProps {
   active?: boolean
   /** Click handler — Service Mode always supplies one (jumpTo). */
   onClick?: () => void
+  /**
+   * Inline style passthrough — Service Mode uses this to set
+   * `scrollMarginTop` on the active card so `scrollIntoView({ block:
+   * 'nearest' })` doesn't park it underneath the grid's sticky toolbar
+   * (and, in GROUPED mode, the sticky per-item header on top of that).
+   */
+  style?: React.CSSProperties
 }
 
 export function SlideCard({
@@ -82,7 +89,8 @@ export function SlideCard({
   preview,
   theme,
   active = false,
-  onClick
+  onClick,
+  style
 }: SlideCardProps): JSX.Element {
   // Body/text style calculation lives in ../lib/slideTheming.ts, shared
   // with SongEditor.tsx's SlidePreviewCard so both grids can never
@@ -99,6 +107,7 @@ export function SlideCard({
       type="button"
       onClick={onClick}
       data-active={active ? 'true' : undefined}
+      style={style}
       className={`relative flex aspect-[16/9] w-full flex-col overflow-hidden border text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal ${
         active ? 'border-signal' : 'border-border hover:border-dim'
       }`}

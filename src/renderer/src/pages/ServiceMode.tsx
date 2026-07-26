@@ -40,6 +40,7 @@ import { Button } from '../components/ui/Button'
 import { MonoLabel } from '../components/ui/MonoLabel'
 import { Segmented, type SegmentedOption } from '../components/ui/Segmented'
 import { StatusDot } from '../components/ui/StatusDot'
+import { TitleDot } from '../components/ui/TitleDot'
 import { useKeyboard } from '../hooks/useKeyboard'
 import type { Song } from '@shared/types'
 import type {
@@ -55,6 +56,24 @@ import type {
  * drift apart — see the module doc's ASCII layout above.
  */
 export const GRID_TOOLBAR_H = 37
+
+/**
+ * Height of each GROUPED-mode sticky item header (the row showing the
+ * item number, label, kind, and estimated runtime). Pinned under
+ * GRID_TOOLBAR_H via its own `style={{ top: GRID_TOOLBAR_H }}` below —
+ * see that element for the matching comment on why its border colors
+ * are side-specific.
+ *
+ * Exists as a named constant (not a bare Tailwind class) for the same
+ * reason GRID_TOOLBAR_H does: `scrollIntoView({ block: 'nearest' })`
+ * only respects a scrolled element's OWN `scroll-margin-top`, not the
+ * height of whatever happens to be sticky above it. Without composing
+ * both constants into that margin, jumping backward mid-service parks
+ * the active card flush under ~72px of opaque sticky header — GROUPED
+ * mode's toolbar + item header both painted over it — with no way to
+ * tell where you are short of scrolling by hand.
+ */
+export const GRID_GROUP_HEADER_H = 35
 
 type GridMode = 'grouped' | 'flat'
 
@@ -159,47 +178,47 @@ export function ServiceMode(): JSX.Element {
   // ── LOADING ────────────────────────────────────────────────────────────
   if (state.mode === 'idle') {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-black text-white">
-        <div className="text-center">
-          <div className="text-lg">Preparing service…</div>
-          <div className="mt-2 text-xs text-white/50">
-            If this sticks, the setlist might be empty or missing songs.
-          </div>
-          <button
-            onClick={() => navigate('/')}
-            className="mt-6 text-xs underline opacity-70 hover:opacity-100"
-          >
-            Cancel → Home
-          </button>
-        </div>
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+        <StatusDot tone="signal" pulse />
+        <MonoLabel tone="signal">PREPARING SERVICE</MonoLabel>
+        <p className="max-w-sm text-center text-[12.5px] text-soft">
+          If this sticks, the setlist might be empty or missing songs.
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={() => navigate('/')}>
+          CANCEL → HOME
+        </Button>
       </div>
     )
   }
 
   // ── ENDED ──────────────────────────────────────────────────────────────
+  // The last thing an operator sees every Sunday — worth landing on the
+  // same KLB language as the rest of the app rather than a bare white
+  // button on black.
   if (state.mode === 'ended') {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center gap-6 bg-black text-white">
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-6 bg-background text-foreground">
         <div className="text-center">
-          <div className="text-sm uppercase tracking-widest text-white/50">
-            Service ended
-          </div>
-          <div className="mt-2 text-3xl font-semibold">{state.setlistName}</div>
-          <div className="mt-2 text-sm text-white/70">
+          <MonoLabel tone="signal">SERVICE ENDED</MonoLabel>
+          <h1 className="mt-2 text-[36px] font-extrabold leading-none tracking-[-0.03em] text-foreground">
+            {state.setlistName}
+            <TitleDot />
+          </h1>
+          <p className="mt-2 text-[13px] text-soft">
             Started {new Date(state.startedAt).toLocaleTimeString()}
-          </div>
+          </p>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => {
-              exit()
-              navigate('/')
-            }}
-            className="bg-white px-4 py-2 text-sm font-medium text-black hover:opacity-90"
-          >
-            Back to Home
-          </button>
-        </div>
+        <Button
+          type="button"
+          variant="signal"
+          size="md"
+          onClick={() => {
+            exit()
+            navigate('/')
+          }}
+        >
+          BACK TO HOME
+        </Button>
       </div>
     )
   }
@@ -439,6 +458,14 @@ function RunningView({
       title: '',
       subtitle: ''
     })
+  // Tracks whether the OPERATOR has overridden auto-follow's content for
+  // the current slide (typed over title/subtitle, or manually hit
+  // SHOW/HIDE) — as opposed to the content on screen being whatever
+  // auto-follow last computed. Feeds the three-state status readout
+  // below (spec §5.5): reset to false at the top of the auto-follow
+  // effect (which reruns on every slide change), so it always "resets
+  // on advance" per that same design.
+  const [ltEdited, setLtEdited] = useState(false)
   // pushLowerThirds takes whatever the caller provides and stamps
   // the current theme onto it. Callers don't need to know about
   // theme — the helper handles it. This means typing in the bottom
@@ -461,6 +488,24 @@ function RunningView({
     },
     [ltFontSize, ltTextColor, ltBoxColor, ltBoxOpacity, ltTextEffect]
   )
+  // Same as pushLowerThirds, but for content changes the OPERATOR
+  // initiated (typing in the bottom-strip inputs, clicking SHOW/HIDE) —
+  // as opposed to auto-follow's own pushes. Marks ltEdited so the status
+  // readout can tell the two apart.
+  const pushLowerThirdsManual = useCallback(
+    (next: LowerThirdsContent) => {
+      setLtEdited(true)
+      pushLowerThirds(next)
+    },
+    [pushLowerThirds]
+  )
+  // What lyrics (if any) the CURRENT slide would auto-populate — shared
+  // between the auto-follow effect below and the status readout, so the
+  // two can never disagree about what "auto-following" means.
+  const autoFollowLyrics =
+    currentItem?.kind === 'song' && currentSlide?.kind === 'text'
+      ? currentSlide.lines.join('\n').trim()
+      : ''
   // Auto-follow effect — runs on every slide change. For song
   // slides, the lower thirds shows the CURRENT LYRIC LINES being
   // sung, with the song title + author as a small subtitle for
@@ -479,25 +524,33 @@ function RunningView({
   // operator advances between items.
   useEffect(() => {
     if (!lowerThirdsEnabled) return
-    if (currentItem?.kind === 'song' && currentSlide?.kind === 'text') {
-      const lyrics = currentSlide.lines.join('\n').trim()
-      if (lyrics) {
-        // Lyrics-only mode: just the verse text, no song-title or
-        // author subtitle. The operator can still type a subtitle
-        // manually if they want one for a particular song.
-        pushLowerThirds({
-          visible: true,
-          title: lyrics,
-          subtitle: ''
-        })
-        return
-      }
+    // Advancing to a new slide always re-asserts auto-follow's default,
+    // so any prior manual override no longer applies.
+    setLtEdited(false)
+    if (autoFollowLyrics) {
+      // Lyrics-only mode: just the verse text, no song-title or
+      // author subtitle. The operator can still type a subtitle
+      // manually if they want one for a particular song.
+      pushLowerThirds({
+        visible: true,
+        title: autoFollowLyrics,
+        subtitle: ''
+      })
+      return
     }
     // Everything else: hide. Includes non-song items, blank/empty
     // song slides, and any slide kind we don't have a good
     // auto-population strategy for.
     pushLowerThirds({ visible: false, title: '', subtitle: '' })
-  }, [currentItem, currentSlide, lowerThirdsEnabled, pushLowerThirds])
+  }, [currentItem, currentSlide, lowerThirdsEnabled, pushLowerThirds, autoFollowLyrics])
+  // Three-state readout for the bottom strip (spec §5.5), replacing the
+  // old two-state LIVE/HIDDEN that couldn't tell the operator WHY it was
+  // showing or hiding.
+  const lowerThirdsStatusLabel = ltEdited
+    ? 'EDITED · RESETS ON ADVANCE'
+    : autoFollowLyrics
+      ? 'AUTO-FOLLOWING SONG'
+      : 'AUTO-HIDDEN · NOT A SONG'
 
   // ── Live notes (operator-editable, broadcast to stage monitor) ────
   // The notes shown on the stage monitor and in the operator's own
@@ -643,6 +696,15 @@ function RunningView({
     }
   }, [state.itemIndex, state.slideIndex])
 
+  // scrollIntoView({ block: 'nearest' }) below only ever respects the
+  // ACTIVE card's own scroll-margin-top — it has no idea two sticky
+  // layers (toolbar +, in GROUPED mode, the per-item header) paint over
+  // the top of the scroll container. Composing both constants here
+  // (rather than a second hardcoded number) is what keeps this in sync
+  // if either sticky layer's height ever changes.
+  const activeCardScrollMargin =
+    gridMode === 'grouped' ? GRID_TOOLBAR_H + GRID_GROUP_HEADER_H : GRID_TOOLBAR_H
+
   const renderCard = (entry: GridEntry): JSX.Element => {
     const active =
       entry.itemIndex === state.itemIndex && entry.slideIndex === state.slideIndex
@@ -664,6 +726,7 @@ function RunningView({
         preview={entry.preview}
         theme={cardTheme}
         active={active}
+        style={active ? { scrollMarginTop: activeCardScrollMargin } : undefined}
         onClick={() => jumpTo(entry.itemIndex, entry.slideIndex)}
       />
     )
@@ -874,10 +937,10 @@ function RunningView({
                         // wins, regardless of class order in this string.
                         // Keeping both colors side-specific (border-b-* vs
                         // border-l-*) sidesteps that entirely.
-                        className={`sticky z-[1] flex items-center gap-3 border-b border-b-border border-l-2 bg-card px-4 py-[9px] ${
+                        className={`sticky z-[1] flex items-center gap-3 border-b border-b-border border-l-2 bg-card px-4 ${
                           isActiveGroup ? 'border-l-signal' : 'border-l-transparent'
                         }`}
-                        style={{ top: GRID_TOOLBAR_H }}
+                        style={{ top: GRID_TOOLBAR_H, height: GRID_GROUP_HEADER_H }}
                       >
                         <span className="font-mono text-[9.5px] font-medium text-dim">
                           {itemIndex + 1}
@@ -1030,7 +1093,9 @@ function RunningView({
           <input
             type="text"
             value={lowerThirdsContent.title}
-            onChange={(e) => pushLowerThirds({ ...lowerThirdsContent, title: e.target.value })}
+            onChange={(e) =>
+              pushLowerThirdsManual({ ...lowerThirdsContent, title: e.target.value })
+            }
             placeholder="Title (auto-fills from songs)"
             className="min-w-0 flex-1 border border-border bg-background px-3 py-[9px] text-[12.5px] font-medium text-foreground outline-none placeholder:text-muted-foreground focus:border-signal"
           />
@@ -1038,7 +1103,7 @@ function RunningView({
             type="text"
             value={lowerThirdsContent.subtitle}
             onChange={(e) =>
-              pushLowerThirds({ ...lowerThirdsContent, subtitle: e.target.value })
+              pushLowerThirdsManual({ ...lowerThirdsContent, subtitle: e.target.value })
             }
             placeholder="Subtitle (author, role, reference)"
             className="w-[260px] shrink-0 border border-border bg-background px-3 py-[9px] text-[12.5px] text-bone outline-none placeholder:text-muted-foreground focus:border-signal"
@@ -1048,7 +1113,7 @@ function RunningView({
             variant="outline"
             size="sm"
             onClick={() =>
-              pushLowerThirds({ ...lowerThirdsContent, visible: !lowerThirdsContent.visible })
+              pushLowerThirdsManual({ ...lowerThirdsContent, visible: !lowerThirdsContent.visible })
             }
             disabled={
               !lowerThirdsContent.visible && lowerThirdsContent.title.trim().length === 0
@@ -1069,7 +1134,7 @@ function RunningView({
             {lowerThirdsContent.visible ? 'HIDE' : 'SHOW'}
           </Button>
           <span className="shrink-0 font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
-            {lowerThirdsContent.visible ? 'LIVE' : 'HIDDEN'}
+            {lowerThirdsStatusLabel}
           </span>
         </div>
       )}
