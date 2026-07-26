@@ -141,7 +141,13 @@ export function AddItemPicker(props: Props): JSX.Element {
   }
 
   return (
-    <HairlineGrid cols={4}>
+    // border-l-0/border-t-0 cancel HairlineGrid's own container seams:
+    // this grid always renders inside SetlistEditor's bordered
+    // `Panel emphasis`, whose header already draws a border-b, so the
+    // grid's left/top hairlines would double up into a 2px rule against
+    // the Panel's 1px border. Same fix as PreflightPanel.tsx's own
+    // HairlineGrid.
+    <HairlineGrid cols={4} className="border-l-0 border-t-0">
       {KIND_CARDS.map((c) => (
         <button
           key={c.kind}
