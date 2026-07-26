@@ -343,7 +343,14 @@ function PptxThumb({
 
   const handleError = useCallback(
     (reason: string, kind: PptxSlideErrorKind) => {
-      setErrored(true)
+      // A partial render is NOT a failed thumbnail. renderSlide catches
+      // per-node errors internally and appends a placeholder, so the slide
+      // still drew — just with a hole where one shape or image should be.
+      // Falling back to the grey "pptx" box here would replace a mostly
+      // correct thumbnail with nothing, which is exactly backwards: the
+      // operator needs to SEE the slide to judge whether the hole matters.
+      // Still report it upward so the warning banner mentions it.
+      if (kind !== 'partial-render') setErrored(true)
       onError?.({ pptxPath, slideOrdinal, reason, kind })
     },
     [pptxPath, slideOrdinal, onError]

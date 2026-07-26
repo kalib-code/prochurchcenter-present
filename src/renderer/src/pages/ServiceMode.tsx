@@ -577,13 +577,20 @@ function RunningView({
       ordinals.add(slideOrdinal)
       const fileName = pptxPath.split(/[/\\]/).pop() ?? pptxPath
       const n = ordinals.size
+      const slides = `${n} slide${n === 1 ? '' : 's'}`
+      // A partial render must not be reported as a failure. The slide DID
+      // draw; some shape or image inside it did not. Telling a volunteer
+      // "4 slides failed to render" minutes before a service, when the
+      // slides are fine apart from one missing image each, reads as "this
+      // deck is broken, pull it" — a false alarm that costs more than the
+      // missing image does.
+      const message =
+        kind === 'partial-render'
+          ? `${fileName} — ${slides} may be missing part of their content.`
+          : `${fileName} — ${slides} failed to render.`
       return {
         ...prev,
-        [key]: {
-          kind: 'render',
-          message: `${fileName} — ${n} slide${n === 1 ? '' : 's'} failed to render.`,
-          ordinals
-        }
+        [key]: { kind: 'render', message, ordinals }
       }
     })
   }, [])
