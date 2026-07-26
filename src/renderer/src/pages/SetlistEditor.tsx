@@ -53,7 +53,6 @@ import {
 } from '@dnd-kit/sortable'
 import type { Setlist, SetlistItem } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
-import type { AutosaveStatus } from '../hooks/useAutosave'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useAutosave } from '../hooks/useAutosave'
@@ -65,7 +64,7 @@ import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { MonoLabel } from '../components/ui/MonoLabel'
-import { StatusDot } from '../components/ui/StatusDot'
+import { SaveStatePill } from '../components/ui/SaveStatePill'
 import { Segmented } from '../components/ui/Segmented'
 import { GapInsert } from '../components/ui/GapInsert'
 import { formatServiceDate } from '../lib/setlist-helpers'
@@ -103,26 +102,6 @@ function genItemId(): string {
  *   - null means the picker is closed
  */
 type InsertAt = number | null
-
-const STATUS_LABEL: Record<AutosaveStatus, string> = {
-  idle: '',
-  pending: 'UNSAVED CHANGES…',
-  saving: 'SAVING…',
-  saved: 'SAVED',
-  error: 'ERROR SAVING'
-}
-
-function statusDotTone(status: AutosaveStatus): 'signal' | 'ok' | 'dim' {
-  if (status === 'saved') return 'ok'
-  if (status === 'idle') return 'dim'
-  return 'signal'
-}
-
-function statusDotPulse(status: AutosaveStatus): boolean | 'fast' {
-  if (status === 'saving') return 'fast'
-  if (status === 'pending') return true
-  return false
-}
 
 export function SetlistEditor(): JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -369,12 +348,7 @@ export function SetlistEditor(): JSX.Element {
           >
             ← HOME
           </Link>
-          <span className="flex items-center gap-2">
-            <StatusDot tone={statusDotTone(status)} pulse={statusDotPulse(status)} />
-            <MonoLabel size="xs" tone="dim">
-              {status === 'error' ? `${STATUS_LABEL.error}: ${error ?? 'unknown'}` : STATUS_LABEL[status]}
-            </MonoLabel>
-          </span>
+          <SaveStatePill status={status} error={error} />
         </div>
         <div className="flex items-center gap-3">
           <Button variant="signal" size="md" asChild>

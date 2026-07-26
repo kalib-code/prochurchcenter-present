@@ -55,7 +55,7 @@ import type { SlidePayload, UpdateSongPatch } from '@shared/ipc-contract'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
-import { useAutosave, type AutosaveStatus as AutosaveStatusKind } from '../hooks/useAutosave'
+import { useAutosave } from '../hooks/useAutosave'
 import { previewSongSlides, type SongPreviewSlide } from '../lib/slideify'
 import { mergeThemeOverride } from '../lib/themeOverride'
 import { themedBodyStyle, themedTextStyle } from '../lib/slideTheming'
@@ -64,7 +64,7 @@ import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { MonoLabel } from '../components/ui/MonoLabel'
-import { StatusDot } from '../components/ui/StatusDot'
+import { SaveStatePill } from '../components/ui/SaveStatePill'
 import { HairlineGrid } from '../components/ui/HairlineGrid'
 import { cn } from '../lib/utils'
 
@@ -245,7 +245,7 @@ export function SongEditor(): JSX.Element {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3.5">
-          <AutosaveStatus status={status} error={error} />
+          <SaveStatePill status={status} error={error} />
           <Button type="button" variant="danger" size="md" onClick={handleDelete}>
             DELETE
           </Button>
@@ -440,35 +440,6 @@ function Select({
         className
       )}
     />
-  )
-}
-
-function AutosaveStatus({
-  status,
-  error
-}: {
-  status: AutosaveStatusKind
-  error: string | null
-}): JSX.Element | null {
-  if (status === 'idle') return null
-
-  const dotTone = status === 'pending' ? 'dim' : 'signal'
-  const label =
-    status === 'pending'
-      ? 'UNSAVED'
-      : status === 'saving'
-        ? 'SAVING…'
-        : status === 'saved'
-          ? 'SAVED'
-          : `ERROR${error ? `: ${error}` : ''}`
-
-  return (
-    <span className="inline-flex items-center gap-2 border border-border px-3 py-2">
-      <StatusDot tone={dotTone} pulse={status === 'saving'} />
-      <MonoLabel size="sm" tone={status === 'error' ? 'signal' : 'muted'}>
-        {label}
-      </MonoLabel>
-    </span>
   )
 }
 
