@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:canva-stub": "node scripts/canva-stub-server.mjs",
     "build": "pnpm run typecheck && pnpm run test && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "setup:electron": "node node_modules/electron/install.js",

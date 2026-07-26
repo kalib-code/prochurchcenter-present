@@ -6,15 +6,51 @@ import { screen } from 'electron'
 import { ensureDirectories } from './storage/paths'
 import { ensureDefaultTheme } from './storage/theme'
 import { getSettings } from './storage/settings'
+import { listSetlists } from './storage/setlists'
+import { sweepOrphanPdfs } from './canva/import'
 import { registerAllIpcHandlers } from './ipc'
 import { attachOutputReplay } from './ipc/output'
-import { setOperatorWindow, setOutputWindow } from './windows'
+import { getOperatorWindow, setOperatorWindow, setOutputWindow } from './windows'
 import {
   createStageMonitorWindow,
   createLowerThirdsWindow
 } from './projectorWindows'
 import { initAutoUpdater } from './updater'
 import { runAutoBackupOnLaunch } from './storage/autoBackup'
+
+/**
+ * Single-instance lock.
+ *
+ * Two running instances would both write the same canva-tokens.enc.
+ * Canva rotates refresh tokens on every use, so instance A refreshing
+ * invalidates B's stored token; B's next refresh then gets rejected and
+ * (via requireReauth() in canva/auth.ts) clears the *valid* tokens A just
+ * wrote — both end up disconnected with no explanation. A second
+ * instance's startup orphan-PDF sweep (below) can also delete a
+ * `.pdf.tmp` file the first instance is mid-rename() on — the exact
+ * hazard sweepOrphanPdfs's own doc comment says startup-only timing
+ * depends on.
+ *
+ * This is a pre-existing app-wide gap (not Canva-specific), but Canva
+ * import is the first thing that makes a second instance destructive
+ * rather than merely confusing, so it is closed here.
+ *
+ * MUST run before app.whenReady() — this is Electron's documented
+ * pattern: requestSingleInstanceLock() must be called as early as
+ * possible so a second instance can quit before doing any work at all.
+ */
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = getOperatorWindow()
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
+}
 
 /**
  * Chromium's autoplay policy blocks HTMLMediaElement.play() with audio
@@ -263,6 +299,14 @@ function createWindows(): void {
 }
 
 app.whenReady().then(async () => {
+  // A second instance already called app.quit() above, before this
+  // callback could ever run. app.quit() does not synchronously halt
+  // remaining module execution, so without this guard a second instance
+  // would still create windows and run the orphan-PDF sweep below —
+  // exactly the concurrent-startup hazard the single-instance lock exists
+  // to prevent — in the brief window before quit takes effect.
+  if (!gotSingleInstanceLock) return
+
   electronApp.setAppUserModelId('com.prochurchcenter.present')
 
   // Prepare persistent storage before anything else touches disk.
@@ -301,6 +345,31 @@ app.whenReady().then(async () => {
 
   // Register every IPC handler the renderer can call.
   registerAllIpcHandlers()
+
+  // Housekeeping: drop Canva PDFs no setlist references any more.
+  // Refresh deletes the file it supersedes, but deleting a setlist item
+  // does not — without this, media/canva/ grows without bound.
+  //
+  // Fire-and-forget: startup must never block or fail on housekeeping.
+  void (async () => {
+    try {
+      const setlists = await listSetlists()
+      // Every deck's pdfPath counts as referenced, not just ones with a
+      // `canva` key. A deck can point into media/canva/ without that key
+      // (a hand-picked PDF that happens to live there, or one that lost
+      // its `canva` key via the "Change PDF…" fix in SetlistItemCard.tsx)
+      // — narrowing to `item.canva` here would let this sweep delete a
+      // file a setlist still uses. Widening costs nothing: sweeping is
+      // strictly about removing files nothing references any more.
+      const referenced = setlists.flatMap((s) =>
+        s.items.flatMap((item) => (item.kind === 'deck' ? [item.pdfPath] : []))
+      )
+      const removed = await sweepOrphanPdfs(referenced)
+      if (removed > 0) console.log(`[canva] removed ${removed} orphaned PDF(s)`)
+    } catch (err) {
+      console.error('[canva] orphan sweep failed', err)
+    }
+  })()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

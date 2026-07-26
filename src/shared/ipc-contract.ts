@@ -24,6 +24,12 @@ import type {
   BibleTranslationMeta,
   BibleVerse
 } from './types'
+import type {
+  CanvaConnectionState,
+  CanvaDesignPage,
+  CanvaImportProgress,
+  CanvaImportResult
+} from './canva'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output slide payload — what the output window renders at any given moment
@@ -459,6 +465,45 @@ export interface PresentApi {
     ): Promise<BibleLookupResult>
   }
 
+  /**
+   * Canva integration. Browse designs in a connected Canva account and
+   * pull them in as `deck` items. Every call reaches Canva from the main
+   * process; the renderer never holds a token.
+   *
+   * Error identity note: a rejected `invoke()` crosses the IPC boundary
+   * as a plain `Error` with only a `message` string — Electron does not
+   * preserve the thrown class. That matters here because main's
+   * `CanvaReauthRequiredError` exists precisely so callers can tell
+   * "the stored connection is gone, reconnect" apart from "transient
+   * failure, just retry" (offline, DNS, Canva 5xx/429) — and the second
+   * case must NOT prompt a reconnect. Rather than encode that
+   * distinction in error text (which is operator-facing copy and will
+   * change), `getState()` is the source of truth: main clears the
+   * stored connection whenever it detects a genuine rejection (a
+   * refresh token Canva rejects outright, or a 401/403 on a live API
+   * call), so a `getState()` call after ANY failed `canva.*` call
+   * truthfully reports `disconnected` if-and-only-if reconnecting is
+   * actually required. Callers that need to branch on this should
+   * catch the rejection, then call `getState()` and check
+   * `status === 'disconnected'` rather than inspect the error.
+   */
+  canva: {
+    getState(): Promise<CanvaConnectionState>
+    /** Opens the system browser. Resolves once the flow completes or fails. */
+    connect(): Promise<CanvaConnectionState>
+    disconnect(): Promise<CanvaConnectionState>
+    listDesigns(
+      query: string | null,
+      continuation: string | null
+    ): Promise<CanvaDesignPage>
+    importDesign(designId: string, title: string): Promise<CanvaImportResult>
+    /** Design ids whose Canva `updated_at` is newer than the given ISO stamp. */
+    checkStale(items: { designId: string; designUpdatedAt: string }[]): Promise<string[]>
+    deletePdf(absPath: string): Promise<void>
+    /** Import progress. Returns an unsubscribe function. */
+    onImportProgress(callback: (p: CanvaImportProgress) => void): () => void
+  }
+
   output: {
     /** Send a new slide to the output window. Fire-and-forget. */
     setSlide(payload: SlidePayload): Promise<void>
@@ -670,6 +715,17 @@ export const CHANNELS = {
     listBooks: 'bible:listBooks',
     getChapter: 'bible:getChapter',
     lookup: 'bible:lookup'
+  },
+  canva: {
+    getState: 'canva:getState',
+    connect: 'canva:connect',
+    disconnect: 'canva:disconnect',
+    listDesigns: 'canva:listDesigns',
+    importDesign: 'canva:importDesign',
+    checkStale: 'canva:checkStale',
+    deletePdf: 'canva:deletePdf',
+    // Broadcast main -> operator window during an import
+    eventImportProgress: 'canva:event:importProgress'
   },
   output: {
     setSlide: 'output:setSlide',
