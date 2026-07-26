@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Setlist, SetlistItem, Song } from '@shared/types'
+import type { CanvaOrigin, Setlist, SetlistItem, Song } from '@shared/types'
 import { evictPdfDocument, probePdfPageCount } from '../lib/pdfLoader'
 import { MediaPreview } from './MediaPreview'
 import { useBibleStore } from '../stores/useBibleStore'
@@ -291,39 +291,108 @@ function ItemBody({
   }
 
   if (item.kind === 'deck') {
-    const handlePick = async (): Promise<void> => {
-      const picked = await window.api.dialog.pickFile('pdf')
-      if (!picked) return
-      try {
-        const pageCount = await probePdfPageCount(picked)
-        onChange({
-          ...item,
-          pdfPath: picked,
-          pageCount,
-          title: item.title || defaultDeckTitle(picked)
-        })
-      } catch (err) {
-        console.error('[deck] failed to probe PDF', picked, err)
-        window.alert(
-          `Could not open that PDF. Try re-exporting from PowerPoint (File → Export → Create PDF/XPS).`
-        )
-      }
+    // Pulled out into its own component (same reason as ScriptureEditor
+    // below) — the in-flight `refreshing` guard needs a `useState`, and
+    // ItemBody's if/else switch cannot host a hook that only some
+    // branches would call.
+    return <DeckEditor item={item} onChange={onChange} staleDesignIds={staleDesignIds} />
+  }
+
+  if (item.kind === 'countdown') {
+    // HTML datetime-local wants "YYYY-MM-DDTHH:mm" — slice the ISO.
+    const localValue = item.targetTime ? item.targetTime.slice(0, 16) : ''
+    return (
+      <div className="flex flex-col gap-1">
+        <input
+          type="text"
+          value={item.label}
+          onChange={(e) => onChange({ ...item, label: e.target.value })}
+          placeholder="Service starts in…"
+          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
+        />
+        <input
+          type="datetime-local"
+          value={localValue}
+          onChange={(e) =>
+            onChange({ ...item, targetTime: new Date(e.target.value).toISOString() })
+          }
+          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
+        />
+      </div>
+    )
+  }
+
+  // Exhaustiveness check — if you add a new SetlistItem kind and forget
+  // to add a branch above, TypeScript complains here.
+  const _exhaustive: never = item
+  return <div>{_exhaustive}</div>
+}
+
+// ─── Deck editor ─────────────────────────────────────────────────────
+//
+// Pulled out of ItemBody's if/else switch for the same reason as
+// ScriptureEditor further down: it needs a `useState` (the in-flight
+// `refreshing` guard below), and a hook can only live in a component
+// that calls it on every render — not in one branch of a switch that
+// other item kinds skip.
+
+type DeckItem = Extract<SetlistItem, { kind: 'deck' }>
+
+function DeckEditor({
+  item,
+  onChange,
+  staleDesignIds
+}: {
+  item: DeckItem
+  onChange: (next: DeckItem) => void
+  staleDesignIds?: string[]
+}): JSX.Element {
+  const handlePick = async (): Promise<void> => {
+    const picked = await window.api.dialog.pickFile('pdf')
+    if (!picked) return
+    try {
+      const pageCount = await probePdfPageCount(picked)
+      onChange({
+        ...item,
+        pdfPath: picked,
+        pageCount,
+        title: item.title || defaultDeckTitle(picked)
+      })
+    } catch (err) {
+      console.error('[deck] failed to probe PDF', picked, err)
+      window.alert(
+        `Could not open that PDF. Try re-exporting from PowerPoint (File → Export → Create PDF/XPS).`
+      )
     }
+  }
 
-    // `item.canva`'s presence is the sole trigger for any Canva UI on
-    // this card — a hand-picked PDF deck has no `canva` key and must
-    // show no badge and no Refresh button.
-    const origin = item.canva
-    const isStale = origin ? (staleDesignIds ?? []).includes(origin.designId) : false
+  // `item.canva`'s presence is the sole trigger for any Canva UI on
+  // this card — a hand-picked PDF deck has no `canva` key and must
+  // show no badge and no Refresh button.
+  const origin: CanvaOrigin | undefined = item.canva
+  const isStale = origin ? (staleDesignIds ?? []).includes(origin.designId) : false
 
-    // Every Canva call here goes through useCanvaStore, never
-    // window.api.canva directly — same reason as CanvaPicker: a revoked
-    // grant must flip connection state via the store's wrapCanvaCall, or
-    // this button would keep offering a retry that can never succeed.
-    // getState() is used (not the `useCanvaStore()` hook) because this
-    // only runs inside an event handler, not during render.
-    const handleRefresh = async (): Promise<void> => {
-      if (!origin) return
+  // In-flight guard: a refresh is a full network round trip (export job
+  // + poll + download), seconds wide, not a native dialog like
+  // handlePick. Without this, an operator who thinks a click didn't
+  // register can double-click, and two overlapping refreshes both
+  // capture the same `previousPath` — the loser's freshly downloaded
+  // PDF is then referenced by nothing (never evicted, never deleted): a
+  // leaked cache entry plus a leaked file per double-click. This is
+  // per-card local state (not store state) so multiple Canva decks in
+  // one setlist stay independently refreshable.
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Every Canva call here goes through useCanvaStore, never
+  // window.api.canva directly — same reason as CanvaPicker: a revoked
+  // grant must flip connection state via the store's wrapCanvaCall, or
+  // this button would keep offering a retry that can never succeed.
+  // getState() is used (not the `useCanvaStore()` hook) because this
+  // only runs inside an event handler, not during render.
+  const handleRefresh = async (): Promise<void> => {
+    if (!origin || refreshing) return
+    setRefreshing(true)
+    try {
       const previousPath = item.pdfPath
 
       // importDesign() never throws — wrapCanvaCall catches internally
@@ -371,100 +440,81 @@ function ItemBody({
 
       // Release pdf.js's cached handle on the superseded file BEFORE
       // asking main to delete it: on Windows an open file cannot be
-      // removed, so skipping this leaks one PDF per refresh. A failure
-      // to delete afterward just leaves an orphan for the startup sweep
-      // to clean up later — it does not affect the deck that is now
-      // live, so it is not surfaced to the operator.
+      // removed, so skipping this leaks one PDF per refresh.
       evictPdfDocument(previousPath)
-      void useCanvaStore.getState().deletePdf(previousPath)
+      const deleted = await useCanvaStore.getState().deletePdf(previousPath)
+      if (!deleted) {
+        // The live deck is already correct at this point — this is not
+        // surfaced to the operator, just left as a trace for whoever
+        // debugs disk growth before the startup sweep cleans it up.
+        console.warn('[deck] failed to delete superseded PDF (will be swept later):', previousPath)
+      }
+    } finally {
+      // Cleared on every exit path — null-import abort, probe-failure
+      // abort, and success alike — via `finally` rather than duplicating
+      // the reset at each `return`, so the button can never stay
+      // permanently disabled.
+      setRefreshing(false)
     }
+  }
 
-    return (
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handlePick}
-            className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
-          >
-            {item.pdfPath ? 'Change PDF…' : 'Choose PDF…'}
-          </button>
-          {item.pdfPath && (
-            <>
-              <span
-                className="truncate text-[11px] text-muted-foreground"
-                title={item.pdfPath}
-              >
-                {displayFileName(item.pdfPath)}
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handlePick}
+          className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
+        >
+          {item.pdfPath ? 'Change PDF…' : 'Choose PDF…'}
+        </button>
+        {item.pdfPath && (
+          <>
+            <span
+              className="truncate text-[11px] text-muted-foreground"
+              title={item.pdfPath}
+            >
+              {displayFileName(item.pdfPath)}
+            </span>
+            <span className="text-[11px] text-muted-foreground/70">
+              · {item.pageCount} page{item.pageCount === 1 ? '' : 's'}
+            </span>
+          </>
+        )}
+        {origin && (
+          <>
+            <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              From Canva
+            </span>
+            {isStale && (
+              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] text-brand">
+                Updated in Canva
               </span>
-              <span className="text-[11px] text-muted-foreground/70">
-                · {item.pageCount} page{item.pageCount === 1 ? '' : 's'}
-              </span>
-            </>
-          )}
-          {origin && (
-            <>
-              <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                From Canva
-              </span>
-              {isStale && (
-                <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] text-brand">
-                  Updated in Canva
-                </span>
-              )}
-              <button
-                onClick={() => void handleRefresh()}
-                className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
-              >
-                Refresh
-              </button>
-            </>
-          )}
-        </div>
-        <input
-          type="text"
-          value={item.title ?? ''}
-          onChange={(e) => onChange({ ...item, title: e.target.value })}
-          placeholder="Deck title (e.g. Sermon — Romans 12)"
-          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
-        />
-        {!item.pdfPath && (
-          <p className="text-[11px] text-muted-foreground/80">
-            Export your PowerPoint, Keynote, or Google Slides to PDF first,
-            then pick it here. Each PDF page becomes one slide.
-          </p>
+            )}
+            <button
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border disabled:opacity-60"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </>
         )}
       </div>
-    )
-  }
-
-  if (item.kind === 'countdown') {
-    // HTML datetime-local wants "YYYY-MM-DDTHH:mm" — slice the ISO.
-    const localValue = item.targetTime ? item.targetTime.slice(0, 16) : ''
-    return (
-      <div className="flex flex-col gap-1">
-        <input
-          type="text"
-          value={item.label}
-          onChange={(e) => onChange({ ...item, label: e.target.value })}
-          placeholder="Service starts in…"
-          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
-        />
-        <input
-          type="datetime-local"
-          value={localValue}
-          onChange={(e) =>
-            onChange({ ...item, targetTime: new Date(e.target.value).toISOString() })
-          }
-          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
-        />
-      </div>
-    )
-  }
-
-  // Exhaustiveness check — if you add a new SetlistItem kind and forget
-  // to add a branch above, TypeScript complains here.
-  const _exhaustive: never = item
-  return <div>{_exhaustive}</div>
+      <input
+        type="text"
+        value={item.title ?? ''}
+        onChange={(e) => onChange({ ...item, title: e.target.value })}
+        placeholder="Deck title (e.g. Sermon — Romans 12)"
+        className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
+      />
+      {!item.pdfPath && (
+        <p className="text-[11px] text-muted-foreground/80">
+          Export your PowerPoint, Keynote, or Google Slides to PDF first,
+          then pick it here. Each PDF page becomes one slide.
+        </p>
+      )}
+    </div>
+  )
 }
 
 function displayFileName(path: string): string {
