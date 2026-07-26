@@ -104,17 +104,19 @@ export interface StageContext {
 
 /**
  * Authoritative video position update sent from the OUTPUT window to
- * the operator confidence monitor so two independent <video> elements
- * playing the same source stay in sync.
+ * the operator's Service Mode. There is no independent <video> on the
+ * operator side to keep in sync — the confidence monitor is a literal
+ * pixel mirror of the output window via `desktopCapturer` (see
+ * OutputMirror.tsx / VideoSlideOperator in SlideRenderer.tsx), so
+ * there's nothing on the operator side that could drift from it.
  *
- * The pattern (matching FreeShow's BackgroundMedia.svelte 220ms / 0.5s
- * snap parameters): output's <video> emits `timeupdate` events ~4x/sec,
- * each one becomes a VideoTimeUpdate broadcast. The operator subscribes
- * and only nudges its local video when |local - remote| > 0.5s — below
- * that the drift is invisible at thumbnail size and snapping every
- * frame would cause visible micro-stutters.
+ * What this actually feeds: the operator's `<VideoRunway>` progress bar
+ * and time readout under the mirror, and the pause/mute button state.
+ * Output's <video> emits `timeupdate` events ~4x/sec, each one becomes
+ * a VideoTimeUpdate broadcast; ServiceMode only re-renders the runway's
+ * text/percentage from it — no local playback element to nudge.
  *
- * `paused` is included so the operator can also re-align after a
+ * `paused` is included so the runway can also re-render after a
  * pause/play state change (timeupdate doesn't fire while paused).
  */
 export interface VideoTimeUpdate {
@@ -552,10 +554,12 @@ export interface PresentApi {
     setStageContext(context: StageContext): Promise<void>
     /**
      * Push the OUTPUT window's authoritative video playback position
-     * to the operator confidence monitor. Called from the output
+     * to the operator's Service Mode. Called from the output
      * renderer's <video> element on `timeupdate` / `seeked` /
-     * `play` / `pause` events. Operator subscribes via
-     * onVideoTimeUpdate and snaps its local video when drift > 500ms.
+     * `play` / `pause` events. The operator subscribes via
+     * onVideoTimeUpdate and feeds it straight into `<VideoRunway>`'s
+     * progress bar / time readout — there is no local video to snap,
+     * the confidence monitor mirrors the output's actual pixels.
      */
     setVideoTimeUpdate(update: VideoTimeUpdate): Promise<void>
     /**
@@ -644,9 +648,10 @@ export interface PresentApi {
     onVideoControl(callback: (control: VideoControl) => void): () => void
     /**
      * Subscribe to authoritative video time updates from the OUTPUT
-     * window. Operator confidence monitor only. The operator's
-     * VideoSlide nudges its local <video> currentTime when drift
-     * exceeds the snap threshold (~500ms).
+     * window. Service Mode only. Feeds ServiceMode's `<VideoRunway>`
+     * progress bar and time readout directly — there's no local video
+     * element on the operator side to nudge; the confidence monitor is
+     * a pixel mirror of the output window, not an independent decoder.
      */
     onVideoTimeUpdate(
       callback: (update: VideoTimeUpdate) => void

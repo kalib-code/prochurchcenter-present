@@ -58,9 +58,11 @@ async function checkDisplay(): Promise<PreflightCheck> {
 }
 
 /**
- * macOS only. The confidence monitor mirrors the output window through
- * desktopCapturer (see VideoSlideOperator in SlideRenderer.tsx), so
- * without this permission it genuinely renders black mid-service.
+ * macOS only. Service Mode's confidence monitor mirrors the output
+ * window through desktopCapturer (see OutputMirror.tsx; the stage
+ * monitor and Settings' live preview use the same mechanism via
+ * VideoSlideOperator in SlideRenderer.tsx), so without this permission
+ * they genuinely render black mid-service.
  *
  * Returns null on every other platform so the caller can omit the check
  * rather than show a meaningless disabled row.
@@ -206,6 +208,33 @@ export function registerSystemHandlers(): void {
 
   ipcMain.handle(CHANNELS.system.openExternal, async (_, url: string): Promise<void> => {
     if (typeof url !== 'string') return
+    if (!isAllowedExternalUrl(url)) {
+      console.warn('[system] Blocked openExternal for disallowed scheme:', url)
+      return
+    }
     await shell.openExternal(url)
   })
+}
+
+/**
+ * Every scheme `openExternal` is allowed to hand to the OS shell.
+ * Callers today are all main-process constants (the "SHOW ME HOW"
+ * pre-flight remedy, the update-check page), but the IPC channel itself
+ * accepts any string the renderer sends — `shell.openExternal` on an
+ * unvalidated string can launch arbitrary apps/URIs, so this allowlist
+ * is the actual boundary, not just belt-and-suspenders.
+ *   - `https:` — the only web scheme we ever launch
+ *   - `x-apple.systempreferences:` — macOS's deep link into System
+ *     Settings, used by the Screen Recording permission remedy above
+ */
+const ALLOWED_EXTERNAL_SCHEMES = ['https:', 'x-apple.systempreferences:']
+
+function isAllowedExternalUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  return ALLOWED_EXTERNAL_SCHEMES.includes(parsed.protocol)
 }
