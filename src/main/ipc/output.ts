@@ -31,7 +31,6 @@ import {
   getOutputWindow,
   getOperatorWindow,
   getAllProjectorWindows,
-  getStageMonitorWindow,
   getLowerThirdsWindow
 } from '../windows'
 import {
@@ -297,13 +296,23 @@ export function registerOutputHandlers(): void {
   // slide change so the speaker-facing window always knows what the
   // current and next slide are without having to peek into the
   // operator's setlist store.
+  //
+  // Also delivered to the main output window (via sendToProjectors,
+  // same as every other handler in this file — this used to be the one
+  // handler that special-cased "stage monitor only"). The output window
+  // doesn't use this for anything it renders — it still renders purely
+  // from output:event:slide — but it DOES use the `nextSlide` field to
+  // warm a PowerPoint deck's parse (loadPptxDeck) one slide ahead of the
+  // operator actually advancing into it. Without this, the output
+  // window has zero lookahead (onSlide only ever tells it about the
+  // CURRENT slide, at the same moment it needs to render it), so the
+  // first advance into any pptx deck pays the full cold-parse cost live,
+  // in front of the congregation. See PptxSlideView.tsx / OutputView.tsx.
   ipcMain.handle(
     CHANNELS.output.setStageContext,
     async (_, context: StageContext) => {
       lastStageContext = context
-      const win = getStageMonitorWindow()
-      if (!win || win.isDestroyed()) return
-      win.webContents.send(CHANNELS.output.eventStageContext, context)
+      sendToProjectors(CHANNELS.output.eventStageContext, context)
     }
   )
 }
@@ -333,6 +342,12 @@ export function attachProjectorReplay(projectorWindow: BrowserWindow): void {
     // Replay video control (pause/mute) so a hot-reloaded projector
     // window re-enters the right playback state.
     send(CHANNELS.output.eventVideoControl, lastVideoControl)
+    // Replay the last stage context too, now that the output window also
+    // consumes it (for pptx deck warming — see the setStageContext
+    // handler above). A dev hot-reload or on-demand recreation of the
+    // output window would otherwise sit with no lookahead until the
+    // operator's next slide change.
+    send(CHANNELS.output.eventStageContext, lastStageContext)
   })
 }
 

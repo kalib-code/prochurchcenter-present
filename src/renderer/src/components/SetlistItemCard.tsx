@@ -20,7 +20,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Setlist, SetlistItem, Song } from '@shared/types'
 import { probePdfPageCount } from '../lib/pdfLoader'
-import { probeVisibleSlideCount } from '../lib/pptxLoader'
+import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
 import { MediaPreview } from './MediaPreview'
 import { useBibleStore } from '../stores/useBibleStore'
 
@@ -377,7 +377,21 @@ function ItemBody({
       const picked = await window.api.dialog.pickFile('pptx')
       if (!picked) return
       try {
+        // Evict before probing — re-picking the SAME path (fix a typo,
+        // re-import) must see the edited file, not a cached pre-edit
+        // parse. See the matching comment in SetlistEditor.tsx / the
+        // note in pptxLoader.ts for why this only clears the operator
+        // window's cache.
+        evictPptxDeck(picked)
         const slideCount = await probeVisibleSlideCount(picked)
+        if (slideCount === 0) {
+          // Never leave the item pointed at a deck that cannot render —
+          // see the matching check in SetlistEditor.tsx's addPptx.
+          window.alert(
+            'Every slide in that PowerPoint file is marked hidden, so there is nothing to project. Unhide at least one slide in PowerPoint and try again.'
+          )
+          return
+        }
         onChange({
           ...item,
           pptxPath: picked,

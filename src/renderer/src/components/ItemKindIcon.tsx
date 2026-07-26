@@ -96,9 +96,9 @@ export function ItemKindIcon({ kind, size = 20, className }: Props): JSX.Element
         </svg>
       )
     case 'pptx':
-      // Reuses the deck glyph until a dedicated PowerPoint icon is
-      // designed (Task 3 only adds the data model — icon design is a
-      // later task per the setlist-item visual vocabulary).
+      // Reuses the PDF deck glyph for now — a dedicated PowerPoint icon
+      // (distinct from the PDF deck icon above) is still wanted, but
+      // hasn't been designed yet.
       return (
         <svg {...common}>
           <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z" />

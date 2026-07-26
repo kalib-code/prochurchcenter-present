@@ -129,7 +129,32 @@ export async function probeVisibleSlideCount(absPath: string): Promise<number> {
   return visibleSlideCount(deck.slides)
 }
 
-/** Drop a path from the cache (e.g., when its item is deleted). */
+/**
+ * Drop a path from the cache (e.g., when its item is deleted, or before
+ * re-probing a freshly re-picked file at the same path — see
+ * SetlistEditor.tsx's addPptx and SetlistItemCard.tsx's re-pick handler).
+ * Without this, re-importing an edited .pptx at an unchanged path would
+ * silently keep serving the pre-edit parse forever: this feature's whole
+ * premise is "point at the file, no export step", which makes editing the
+ * source and re-picking it the expected workflow.
+ *
+ * Unlike pdfLoader's evictPdfDocument, this does not call any dispose/
+ * destroy method on the evicted entry — PresentationData (the parsed
+ * object @aiden0z/pptx-renderer hands back from buildPresentation) has no
+ * such API. It's a plain parsed object with no chart instances or blob
+ * URLs of its own; those only get created per-slide inside renderSlide(),
+ * and are owned/freed by that slide's SlideHandle, not by PresentationData.
+ * So dropping the cache entry is enough — nothing here needs disposing.
+ *
+ * Scope limitation: this only clears the CALLING window's cache (each
+ * BrowserWindow — operator, output, stage — has its own JS heap and thus
+ * its own module-level deckCache; see the module doc comment above). The
+ * projector windows' independent caches are not reachable from here and
+ * are only ever repopulated on next service start, so an operator who
+ * fixes a typo mid-service and re-picks the file will see the correction
+ * in their own preview immediately, but the projector keeps showing the
+ * stale version until the app restarts (or the service is re-started).
+ */
 export function evictPptxDeck(absPath: string): void {
   deckCache.delete(absPath)
 }

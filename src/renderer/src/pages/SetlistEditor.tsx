@@ -52,7 +52,7 @@ import { AddItemPicker } from '../components/AddItemPicker'
 import { Button } from '../components/ui/Button'
 import { formatServiceDate } from '../lib/setlist-helpers'
 import { probePdfPageCount } from '../lib/pdfLoader'
-import { probeVisibleSlideCount } from '../lib/pptxLoader'
+import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
 
 interface Draft {
   name: string
@@ -236,7 +236,27 @@ export function SetlistEditor(): JSX.Element {
       return
     }
     try {
+      // Evict any stale cached parse for this exact path BEFORE probing.
+      // Without this, re-picking the same file (the operator's expected
+      // "fix a typo, re-import" workflow — this feature has no export
+      // step) would silently serve the pre-edit parse forever: loadPptxDeck
+      // caches by absolute path, so an edited file at the same path would
+      // return the OLD slide count/content with no way to force a refresh
+      // short of quitting the app. See pptxLoader.ts for why eviction only
+      // clears this (operator) window's cache, not the projector's.
+      evictPptxDeck(picked)
       const slideCount = await probeVisibleSlideCount(picked)
+      if (slideCount === 0) {
+        // Never create an item that cannot render (see spec). A deck
+        // whose every slide is hidden would insert successfully here but
+        // then vanish from the running order when slideify drops it —
+        // silently, with no error, discovered only on Sunday.
+        window.alert(
+          'Every slide in that PowerPoint file is marked hidden, so there is nothing to project. Unhide at least one slide in PowerPoint and try again.'
+        )
+        closePicker()
+        return
+      }
       const title =
         picked.split(/[/\\]/).pop()?.replace(/\.pptx$/i, '') ?? 'PowerPoint'
       insertItem({

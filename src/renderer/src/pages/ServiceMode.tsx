@@ -444,10 +444,19 @@ function RunningView({
   // message per keystroke is negligible.
   useEffect(() => {
     const slides = currentItem?.slides ?? []
+    // Cross the item boundary rather than stopping at the current item's
+    // last slide: when the operator is sitting on the last slide of item
+    // N, "next" is the FIRST slide of item N+1, not null. This matters
+    // beyond the stage monitor's "Up Next" panel — it's also the one
+    // piece of lookahead the output/stage windows get for warming a
+    // PowerPoint deck's parse before the operator actually advances into
+    // it (see the warm effects in OutputView/StageView). Stopping at the
+    // item boundary would make that lookahead go null at exactly the
+    // moment it matters most: the transition ONTO a new pptx deck.
     const nextSlide =
       state.slideIndex + 1 < slides.length
         ? slides[state.slideIndex + 1]
-        : null
+        : (state.items[state.itemIndex + 1]?.slides[0] ?? null)
     void window.api.output.setStageContext({
       currentSlide: currentSlide ?? null,
       nextSlide,
@@ -456,7 +465,7 @@ function RunningView({
       totalSlides: slides.length,
       notes: liveNotes
     })
-  }, [currentItem, currentSlide, state.slideIndex, liveNotes])
+  }, [currentItem, currentSlide, state.items, state.itemIndex, state.slideIndex, liveNotes])
   // Pulled directly from the store rather than prop-drilled — the parent
   // baseTheme is still pulled because the slide grid cards below
   // need it to render per-card preview themes. The confidence

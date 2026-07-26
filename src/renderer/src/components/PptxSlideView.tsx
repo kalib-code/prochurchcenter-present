@@ -75,8 +75,21 @@ import { loadPptxDeck, type PptxDeck } from '../lib/pptxLoader'
  * site — where we already know exactly *why* it failed — avoids ever
  * having to reverse-engineer a bucket out of rendered text (a regex over
  * the message would silently break the next time the wording changes).
+ *
+ * 'partial-render' vs 'render-failed': renderSlide() catches per-node
+ * errors (bad image, unsupported shape) INTERNALLY and paints a
+ * placeholder instead of throwing — the slide finishes rendering
+ * successfully, just with holes in it. That's a materially different,
+ * and far more common, failure than 'render-failed' (renderSlide()
+ * itself throwing on malformed slide XML): the operator needs to know
+ * the slide drew but may be missing content, not that nothing drew at
+ * all. Routed from onNodeError below.
  */
-export type PptxSlideErrorKind = 'file-unreadable' | 'slide-out-of-range' | 'render-failed'
+export type PptxSlideErrorKind =
+  | 'file-unreadable'
+  | 'slide-out-of-range'
+  | 'render-failed'
+  | 'partial-render'
 
 /** Internal — carries a stable `kind` alongside the human-readable message. */
 class PptxSlideError extends Error {
@@ -119,21 +132,38 @@ export default function PptxSlideView({
   // observer can recompute the fit scale without re-rendering anything.
   const deckSizeRef = useRef<{ width: number; height: number } | null>(null)
 
-  // Scale the displayed slide element to contain-fit the host, centered.
+  // Scale a given slide element to contain-fit the host, centered.
   // Transforms don't change layout box size, so the flex-centered host still
   // centers the (unscaled) footprint — the visual scale just shrinks/grows
   // around that same center point.
-  const applyFit = (): void => {
+  //
+  // Takes the element/size explicitly rather than always reading from
+  // currentHandleRef: at the moment a new slide is swapped into the DOM,
+  // currentHandleRef.current still points at the PREVIOUS handle (it is
+  // deliberately committed only after the swap succeeds — see the
+  // disposal-lifecycle note atop this file). Scaling via the ref at that
+  // moment would transform a detached node and leave the newly-attached
+  // element completely unscaled — every slide would then project at raw
+  // deck pixel size. Callers that need to re-fit whatever is CURRENTLY
+  // committed and on screen (e.g. the resize observer below) go through
+  // `applyFit()`, which reads the ref; the initial swap goes through
+  // `applyFitTo()` directly with the just-created handle.
+  const applyFitTo = (element: HTMLElement, size: { width: number; height: number }): void => {
     const host = hostRef.current
-    const handle = currentHandleRef.current
-    const size = deckSizeRef.current
-    if (!host || !handle || !size) return
+    if (!host) return
     const scaleX = host.clientWidth / size.width
     const scaleY = host.clientHeight / size.height
     const scale = Math.min(scaleX, scaleY)
     if (!Number.isFinite(scale) || scale <= 0) return
-    handle.element.style.transform = `scale(${scale})`
-    handle.element.style.transformOrigin = 'center center'
+    element.style.transform = `scale(${scale})`
+    element.style.transformOrigin = 'center center'
+  }
+
+  const applyFit = (): void => {
+    const handle = currentHandleRef.current
+    const size = deckSizeRef.current
+    if (!handle || !size) return
+    applyFitTo(handle.element, size)
   }
 
   // Dispose whatever's on screen when this component is truly unmounted
@@ -203,11 +233,35 @@ export default function PptxSlideView({
           )
         }
 
+        // Reported at most once per render pass — renderSlide() can call
+        // this once per broken shape/image on the slide, and the operator
+        // needs one actionable line, not a flood of identical banners.
+        // The (pptxPath, kind) dedupe in ServiceMode's deckWarnings collapses
+        // repeats across renders/slides too, but that dedupe only sees what
+        // we actually send it, so we still gate here to avoid firing
+        // onError N times in a single pass.
+        let partialRenderReported = false
+
         // renderSlide() is synchronous, so `cancelled` cannot have flipped
         // between the check above and here — no gap for cleanup to run in.
         const handle = renderSlide(presentation, slideData, {
-          onNodeError: (nodeId, nodeErr) =>
+          onNodeError: (nodeId, nodeErr) => {
             console.error('[PptxSlideView] node render failed', pptxPath, nodeId, nodeErr)
+            // renderSlide() swallows this internally and paints a
+            // placeholder instead of throwing, so the slide still renders
+            // "successfully" — with a hole in it. Route it to onError so
+            // it's not silently invisible to the operator (see
+            // PptxSlideErrorKind's 'partial-render' doc comment). Wording
+            // is deliberately vague about *what* broke (no node id, no
+            // stack trace) — a volunteer can't act on either, but "parts
+            // may be missing" tells them to glance at the slide.
+            if (partialRenderReported) return
+            partialRenderReported = true
+            onError?.(
+              'This slide drew, but part of it may be missing (an image or shape failed to render).',
+              'partial-render'
+            )
+          }
         })
         inFlightHandle = handle
 
@@ -232,7 +286,8 @@ export default function PptxSlideView({
         }
 
         inFlightHandle = null
-        deckSizeRef.current = { width: deck.width, height: deck.height }
+        const deckSize = { width: deck.width, height: deck.height }
+        deckSizeRef.current = deckSize
 
         // Fade-in (if enabled) applies only to this NEW element, at the
         // moment it's inserted. The host is never hidden, so a later
@@ -242,7 +297,11 @@ export default function PptxSlideView({
           handle.element.style.opacity = '0'
         }
         host.replaceChildren(handle.element)
-        applyFit()
+        // Scale THIS element directly — currentHandleRef.current still
+        // points at the previous (or, on the first slide, no) handle at
+        // this point, so applyFit() would be a no-op or would transform
+        // the wrong node. See applyFitTo's doc comment above.
+        applyFitTo(handle.element, deckSize)
         if (useFade && animate) {
           // Force a style recalc so the browser commits the opacity:0
           // starting point as a distinct frame before we flip to 1 —
