@@ -27,7 +27,7 @@ import type {
 import { isDesignStale } from '@shared/canva'
 import { connect, disconnect } from '../canva/auth'
 import { listDesigns, getDesignUpdatedAt } from '../canva/api'
-import { importDesign, deleteCanvaPdf, sweepOrphanPdfs } from '../canva/import'
+import { importDesign, deleteCanvaPdf } from '../canva/import'
 import { loadTokens, isTokenStorageAvailable } from '../storage/canvaTokens'
 import { getOperatorWindow } from '../windows'
 
@@ -120,8 +120,4 @@ export function registerCanvaHandlers(): void {
   )
 
   ipcMain.handle(CHANNELS.canva.deletePdf, (_, absPath: string) => deleteCanvaPdf(absPath))
-
-  ipcMain.handle(CHANNELS.canva.sweepOrphans, (_, referenced: string[]) =>
-    sweepOrphanPdfs(referenced)
-  )
 }

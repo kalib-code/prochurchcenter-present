@@ -712,9 +712,6 @@ export const CHANNELS = {
     importDesign: 'canva:importDesign',
     checkStale: 'canva:checkStale',
     deletePdf: 'canva:deletePdf',
-    // Not on PresentApi — invoked by main-process startup/setlist-save
-    // housekeeping (Task 13), never from the renderer.
-    sweepOrphans: 'canva:sweepOrphans',
     // Broadcast main -> operator window during an import
     eventImportProgress: 'canva:event:importProgress'
   },

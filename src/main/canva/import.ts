@@ -91,10 +91,24 @@ export async function deleteCanvaPdf(absPath: string): Promise<void> {
  * that cleanup never runs and the `.tmp` is stranded forever — nothing
  * else in the codebase ever looks at it again. A `.tmp` file is never
  * referenced by a setlist item (only the final `.pdf` path is stored),
- * so unlike real `.pdf` files it needs no `referenced` comparison: once
- * this function runs, any `.tmp` present is garbage by definition. This
- * is only true because the caller guarantees no import can be mid-write
- * when the sweep runs — see the call site in `src/main/index.ts`.
+ * so unlike real `.pdf` files it needs no `referenced` comparison: it
+ * is deleted unconditionally, on the assumption that no import is
+ * currently writing one.
+ *
+ * SAFE TO CALL ONLY AT STARTUP, BEFORE ANY IMPORT CAN BE IN FLIGHT.
+ * The unconditional `.tmp` deletion has no way to distinguish "stranded
+ * from a past crash" from "being written right now" — it relies
+ * entirely on the caller ensuring the latter can't happen. The one
+ * legitimate call site (`src/main/index.ts`) runs this before
+ * `createWindows()`, so no renderer — and therefore no way to trigger
+ * `importDesign()` — exists yet. Deliberately NOT exposed over IPC
+ * (no `sweepOrphans` entry in `PresentApi`/`CHANNELS.canva`): a
+ * renderer-triggered call could run while an import is mid-write and
+ * delete its `.pdf.tmp` out from under `atomicWriteFile`'s pending
+ * `rename()`, corrupting a live import. If a future task needs to
+ * expose this over IPC, it must first close that gap (e.g. track
+ * in-flight writes, or drop the unconditional `.tmp` deletion in favor
+ * of something that doesn't assume the caller's timing).
  */
 export async function sweepOrphanPdfs(referenced: string[]): Promise<number> {
   const dir = getCanvaMediaDir()
