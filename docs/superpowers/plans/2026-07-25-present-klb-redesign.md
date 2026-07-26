@@ -3389,7 +3389,7 @@ Run: `pnpm dev`. Acceptance:
 2. Every control still works: changing the theme font updates the live preview and the projector.
 3. Backup create / restore / open-folder still work.
 4. Check-for-updates still works.
-5. `grep -rn "rounded-\(sm\|md\|lg\|xl\|2xl\)\|shadow-\|backdrop-blur\|bg-gradient" src/renderer/src` returns nothing outside `SlideRenderer.tsx` and the output views.
+5. `grep -rnE "rounded\b|shadow-|backdrop-blur|bg-gradient" src/renderer/src` returns nothing outside `SlideRenderer.tsx` and the output views. (`rounded\b` — not the old size-suffix alternation — because Tailwind's `DEFAULT` and `3xl` radii aren't covered by the `sm|md|lg|xl|2xl` scale in `tailwind.config.js`; a bare `rounded` or `rounded-3xl` utility passes the old pattern completely unflagged while still rendering rounded.)
 
 - [ ] **Step 6: Commit**
 
@@ -3408,5 +3408,5 @@ git commit -m "feat(settings): KLB conversion; drop deprecated Card and secondar
 - [ ] Every screen matches its design section structurally
 - [ ] Pre-flight, service timing, grouped grid, and NEXT all work end to end
 - [ ] A backup zip created before Task 13 still restores cleanly
-- [ ] No `rounded-*` (except `rounded-full` on dots), no shadows, no blurs, no gradients in operator chrome
+- [ ] No `rounded` / `rounded-*` of any suffix — bare `rounded`, `rounded-sm/md/lg/xl/2xl/3xl`, all zeroed by `--radius: 0` — except `rounded-full` on dots, no shadows, no blurs, no gradients in operator chrome. Verify with `grep -rnE "rounded\b|shadow-|backdrop-blur|bg-gradient" src/renderer/src`.
 - [ ] No hex colour literals in any `.tsx` outside `SlideRenderer.tsx` and the output views

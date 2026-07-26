@@ -91,11 +91,24 @@ Exposed in `tailwind.config.js` as `rule`, `dim`, `soft`, `quiet`, `bone`, `ok`,
 `ember`, `panel-hi` under `theme.extend.colors`, each as `hsl(var(--x) / <alpha-value>)`.
 
 `--radius: 0` squares every `rounded-lg` / `rounded-md` / `rounded-sm` / `rounded-xl`
-/ `rounded-2xl` in the codebase in a single edit, because `tailwind.config.js`
-already derives all five from `var(--radius)`. `rounded-full` is unaffected
+/ `rounded-2xl` / `rounded-3xl` / bare `rounded` (Tailwind's `DEFAULT`) in the
+codebase in a single edit, because `tailwind.config.js` derives all seven from
+`var(--radius)`. The `DEFAULT` and `3xl` keys matter as much as the five named
+sizes: Tailwind's stock `DEFAULT` (`0.25rem`) and `3xl` are not part of the
+`sm`/`md`/`lg`/`xl`/`2xl` scale, so a config that only overrides those five
+leaves the bare `rounded` utility and `rounded-3xl` rounded even at
+`--radius: 0` — the same class of gap that let the `xl`/`2xl` `+4px`/`+8px`
+offsets survive before this scale was flattened. `rounded-full` is unaffected
 (Tailwind hardcodes `9999px`), which is correct: status dots stay circular per the
 design's `border-radius:50%`, and the only `rounded-full` that must change is
 `Badge`, handled explicitly in §3.
+
+Verification gate (grep for any surviving radius, shadow, blur, or gradient in
+operator chrome): `grep -rnE "rounded\b|shadow-|backdrop-blur|bg-gradient"
+src/renderer/src` — must return nothing outside `SlideRenderer.tsx` and the
+output/stage/lower-thirds views, which legitimately render the *user's* theme,
+not app chrome. Use `rounded\b`, not a `rounded-(sm|md|lg|xl|2xl)` alternation:
+the alternation only catches suffixed forms and misses the bare utility.
 
 ### 1.2 Removals
 

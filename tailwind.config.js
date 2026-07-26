@@ -61,11 +61,20 @@ module.exports = {
         // added +4px/+8px for xl/2xl, which meant `--radius: 0` still left
         // those two rounded — defeating the zero-radius constraint at eight
         // call sites. The KLB system has exactly one radius: none.
-        lg: 'var(--radius)',
-        md: 'var(--radius)',
+        //
+        // DEFAULT and 3xl are included too: Tailwind's own DEFAULT
+        // (0.25rem) and 3xl are NOT overridden by the sm/md/lg/xl/2xl
+        // keys above, so the bare `rounded` utility and `rounded-3xl`
+        // silently kept their built-in radius even with every other size
+        // zeroed out — exactly the gap that let two bare `rounded` call
+        // sites in MediaPreview.tsx slip past the project's grep gate.
+        DEFAULT: 'var(--radius)',
         sm: 'var(--radius)',
+        md: 'var(--radius)',
+        lg: 'var(--radius)',
         xl: 'var(--radius)',
-        '2xl': 'var(--radius)'
+        '2xl': 'var(--radius)',
+        '3xl': 'var(--radius)'
       },
       fontFamily: {
         sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],

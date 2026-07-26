@@ -110,7 +110,7 @@ function VideoThumb({ path }: { path: string }): JSX.Element {
       />
       {/* Play-glyph badge so the operator immediately reads this as
           "video" rather than "weird static image" */}
-      <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
+      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
         ▶ video
       </div>
     </div>
@@ -209,7 +209,7 @@ function PdfThumb({
           loading…
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
+      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
         pdf
       </div>
     </div>
