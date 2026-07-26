@@ -101,7 +101,13 @@ export function MediaPreview({
   return (
     <div
       className={cn(
-        'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/50 bg-black',
+        // Deliberately square: the project's binding constraint is zero
+        // border radius everywhere outside SlideRenderer.tsx and the
+        // output views. Every consumer (SetlistEditor's list thumbnails,
+        // Service Mode's SlideCard grid) relies on this default — do NOT
+        // reintroduce any Tailwind border-radius utility here, and
+        // consumers should not need a cancelling override to undo one.
+        'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden border border-border/50 bg-black',
         className
       )}
     >
@@ -157,7 +163,7 @@ function VideoThumb({ path }: { path: string }): JSX.Element {
       />
       {/* Play-glyph badge so the operator immediately reads this as
           "video" rather than "weird static image" */}
-      <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
+      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
         ▶ video
       </div>
     </div>
@@ -256,7 +262,7 @@ function PdfThumb({
           loading…
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
+      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
         pdf
       </div>
     </div>
@@ -372,7 +378,7 @@ function PptxThumb({
       ) : null}
       {/* Bottom-right badge is the only "pptx" label while off-screen —
           avoids showing the word twice in one small thumbnail. */}
-      <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
+      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
         pptx
       </div>
     </div>

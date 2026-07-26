@@ -20,7 +20,7 @@
 
 import { useEffect } from 'react'
 import { useCanvaStore } from '../stores/useCanvaStore'
-import { Card } from './ui/Card'
+import { Panel } from './ui/Card'
 import { Button } from './ui/Button'
 
 export function CanvaConnectionCard(): JSX.Element {
@@ -31,7 +31,7 @@ export function CanvaConnectionCard(): JSX.Element {
   }, [loadState])
 
   return (
-    <Card className="space-y-3 p-4">
+    <Panel className="space-y-3 p-4">
       <div>
         <h3 className="text-sm font-semibold text-foreground">Canva</h3>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -49,7 +49,7 @@ export function CanvaConnectionCard(): JSX.Element {
             Connected{state.accountName ? ` as ${state.accountName}` : ''} ·{' '}
             {new Date(state.connectedAt).toLocaleDateString()}
           </span>
-          <Button size="sm" variant="secondary" onClick={() => void disconnect()}>
+          <Button size="sm" variant="outline" onClick={() => void disconnect()}>
             Disconnect
           </Button>
         </div>
@@ -69,6 +69,6 @@ export function CanvaConnectionCard(): JSX.Element {
         Disconnecting does not remove designs you have already imported —
         those PDFs stay on this computer and keep working offline.
       </p>
-    </Card>
+    </Panel>
   )
 }

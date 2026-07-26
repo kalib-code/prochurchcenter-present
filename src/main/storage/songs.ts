@@ -9,7 +9,8 @@
 import { readFile, readdir, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { Song, SongLanguage } from '@shared/types'
+import type { Song } from '@shared/types'
+import type { CreateSongInput, UpdateSongPatch } from '@shared/ipc-contract'
 import { parseSongText } from '@shared/parser'
 import { getSongsDir } from './paths'
 import { atomicWriteJson } from './atomic'
@@ -20,18 +21,6 @@ function songPath(id: string): string {
 
 function nowIso(): string {
   return new Date().toISOString()
-}
-
-export interface CreateSongInput {
-  title: string
-  author?: string | null
-  ccli?: string | null
-  copyright?: string | null
-  year?: number | null
-  language?: SongLanguage
-  categories?: string[]
-  rawText: string
-  notes?: string
 }
 
 /**
@@ -111,22 +100,6 @@ export async function createSong(input: CreateSongInput): Promise<Song> {
   await atomicWriteJson(songPath(id), song)
   return song
 }
-
-export type UpdateSongPatch = Partial<
-  Pick<
-    Song,
-    | 'title'
-    | 'author'
-    | 'ccli'
-    | 'copyright'
-    | 'year'
-    | 'language'
-    | 'categories'
-    | 'rawText'
-    | 'notes'
-    | 'themeOverride'
-  >
->
 
 export async function updateSong(id: string, patch: UpdateSongPatch): Promise<Song> {
   const existing = await getSong(id)

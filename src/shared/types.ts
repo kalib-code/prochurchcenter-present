@@ -82,7 +82,23 @@ export interface CanvaOrigin {
   importedAt: string
 }
 
-export type SetlistItem =
+/**
+ * Planned duration in whole minutes, used by the setlist editor's running
+ * clock. Absent means "not yet estimated" and contributes 0. Section
+ * dividers are always 0 — they occupy no service time because they never
+ * reach the projector.
+ */
+export interface SetlistItemTiming {
+  durationMinutes?: number
+}
+
+/**
+ * The union is parenthesised before the `&` so the timing field lands on
+ * EVERY variant. Without the parentheses the intersection would bind to
+ * the last member alone and the rest would silently lack it. Narrowing on
+ * `kind` is unaffected.
+ */
+export type SetlistItem = (
   | { kind: 'song'; id: string; songId: string }
   | {
       kind: 'scripture'
@@ -162,6 +178,8 @@ export type SetlistItem =
       /** Optional display name shown in the operator upcoming list */
       title?: string
     }
+) &
+  SetlistItemTiming
 
 export interface Setlist {
   id: string
@@ -171,6 +189,11 @@ export interface Setlist {
   items: SetlistItem[]
   createdAt: string
   updatedAt: string
+  /**
+   * Wall-clock service start, "HH:MM" 24-hour local. Absent defaults to
+   * "10:00". Drives the per-item clock column in the setlist editor.
+   */
+  startTime?: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

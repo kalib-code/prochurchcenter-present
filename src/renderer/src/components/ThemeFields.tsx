@@ -1,28 +1,34 @@
 /**
  * ThemeFields — the grouped theme-editor form.
  *
- * Rendered by TWO consumers:
- *   1. Settings.tsx — edits the global theme
- *   2. SongEditor.tsx — edits a per-song theme override
+ * Rendered by ONE consumer now: Settings.tsx's THEME tab, editing the
+ * global theme. (SongEditor.tsx moved to ThemeOverrideEditor.tsx for its
+ * per-song override chips — see that file's doc comment.)
  *
- * Both pass a `theme` value to display and an `onChange(patch)` callback
- * that receives a partial theme diff. The caller decides what to do with
- * the patch (write to the global theme record vs spread into an override).
+ * The caller passes a `theme` value to display and an `onChange(patch)`
+ * callback that receives a partial theme diff. The caller decides what to
+ * do with the patch (write to the global theme record).
  *
  * This component does not own state; it's a pure render-prop of the
  * current theme value. Any "live preview" behavior lives in the parent
  * because the preview depends on the parent's context (current service
  * slide, current song draft, etc).
  *
- * The layout is identical to the one that used to live inline in
- * Settings.tsx; extracting kept all visual details the same so the
- * Settings page looks unchanged.
+ * Presentation matches the KLB row layout used throughout Settings.tsx —
+ * bordered `Panel` groups with a mono head, each row a
+ * `flex items-center gap-4 border-b border-rule px-4 py-3.5` with the
+ * label on the left and the control on the right. The props and
+ * `onChange` patch contract are unchanged from the pre-redesign version;
+ * only presentation moved.
  */
 
 import { useEffect } from 'react'
 import type { Theme, TextAlign, TextPosition, TextEffect, Transition } from '@shared/types'
 import type { PickFileKind } from '@shared/ipc-contract'
 import { useFontsStore } from '../stores/useFontsStore'
+import { Button } from './ui/Button'
+import { Panel } from './ui/Card'
+import { Segmented } from './ui/Segmented'
 
 const BUILT_IN_FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'System', value: 'system-ui, -apple-system, Segoe UI, sans-serif' },
@@ -60,9 +66,9 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
   }, [systemFonts.length, loadingSystem, systemError, loadSystem])
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Typography */}
-      <Group title="Typography" description="Font and text color for song lyrics and scripture.">
+      <Group title="TYPOGRAPHY" description="Font and text color for song lyrics and scripture.">
         <Row label="Font">
           <select
             value={theme.fontFamily}
@@ -105,26 +111,27 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
         </Row>
 
         <Row label="Custom fonts">
-          <div className="flex flex-col gap-1.5">
-            <button
+          <div className="flex flex-col items-end gap-1.5">
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => {
                 void uploadCustom()
               }}
-              className="self-start rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
             >
               Upload font file…
-            </button>
-            <p className="text-[11px] text-muted-foreground/80">
+            </Button>
+            <p className="max-w-[220px] text-right text-[10.5px] leading-[1.5] text-muted-foreground">
               .ttf, .otf, .woff, .woff2 — uploaded fonts are available
               to every theme.
             </p>
             {customFonts.length > 0 && (
-              <ul className="mt-1 flex flex-col gap-0.5">
+              <ul className="mt-1 flex w-full flex-col gap-1">
                 {customFonts.map((f) => (
                   <li
                     key={f.family}
-                    className="flex items-center justify-between gap-2 rounded border border-border/40 bg-background/40 px-2 py-1 text-[11px]"
+                    className="flex items-center justify-between gap-2 border border-rule px-2 py-1 text-[11px]"
                   >
                     <span
                       className="truncate"
@@ -138,7 +145,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
                       onClick={() => {
                         void deleteCustom(f.family)
                       }}
-                      className="text-muted-foreground hover:text-foreground"
+                      className="shrink-0 text-muted-foreground hover:text-signal"
                       title="Remove font"
                     >
                       Remove
@@ -161,9 +168,9 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
               onChange={(e) =>
                 onChange({ fontSizePercent: Number(e.target.value) })
               }
-              className="flex-1"
+              className="w-28"
             />
-            <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+            <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
               {theme.fontSizePercent}%
             </span>
           </div>
@@ -179,7 +186,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
 
       {/* Background */}
       <Group
-        title="Background"
+        title="BACKGROUND"
         description="The base layer behind every slide. Picking an image clears the video and vice versa."
       >
         <Row label="Color">
@@ -211,11 +218,12 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
       </Group>
 
       {/* Placement */}
-      <Group title="Text placement" description="Where lyrics land on the slide.">
+      <Group title="TEXT PLACEMENT" description="Where lyrics land on the slide.">
         <Row label="Horizontal">
-          <SegmentedButtons<TextAlign>
+          <Segmented<TextAlign>
             value={theme.textAlign}
             onChange={(v) => onChange({ textAlign: v })}
+            size="sm"
             options={[
               { value: 'left', label: 'Left' },
               { value: 'center', label: 'Center' },
@@ -225,9 +233,10 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
         </Row>
 
         <Row label="Vertical">
-          <SegmentedButtons<TextPosition>
+          <Segmented<TextPosition>
             value={theme.textPosition}
             onChange={(v) => onChange({ textPosition: v })}
+            size="sm"
             options={[
               { value: 'top', label: 'Top' },
               { value: 'center', label: 'Middle' },
@@ -239,13 +248,14 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
 
       {/* Effects */}
       <Group
-        title="Text effects"
+        title="TEXT EFFECTS"
         description="Makes text legible against busy backgrounds."
       >
         <Row label="Effect">
-          <SegmentedButtons<TextEffect>
+          <Segmented<TextEffect>
             value={theme.textEffect}
             onChange={(v) => onChange({ textEffect: v })}
+            size="sm"
             options={[
               { value: 'none', label: 'None' },
               { value: 'shadow', label: 'Shadow' },
@@ -266,11 +276,12 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
       </Group>
 
       {/* Transitions */}
-      <Group title="Transitions" description="How one slide hands off to the next.">
+      <Group title="TRANSITIONS" description="How one slide hands off to the next.">
         <Row label="Type">
-          <SegmentedButtons<Transition>
+          <Segmented<Transition>
             value={theme.transition}
             onChange={(v) => onChange({ transition: v })}
+            size="sm"
             options={[
               { value: 'fade', label: 'Fade' },
               { value: 'instant', label: 'Instant' }
@@ -290,9 +301,9 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
                 onChange={(e) =>
                   onChange({ transitionDurationMs: Number(e.target.value) })
                 }
-                className="flex-1"
+                className="w-28"
               />
-              <span className="w-14 text-right text-xs tabular-nums text-muted-foreground">
+              <span className="w-14 text-right text-[11px] tabular-nums text-muted-foreground">
                 {theme.transitionDurationMs}ms
               </span>
             </div>
@@ -302,7 +313,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
 
       {/* Standby */}
       <Group
-        title="Standby image"
+        title="STANDBY IMAGE"
         description="Shown when you press L during a service (e.g. church logo)."
       >
         <MediaPickerRow
@@ -318,7 +329,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Local layout primitives (identical to the ones that used to live in Settings.tsx)
+// Local layout primitives
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Group({
@@ -331,17 +342,14 @@ function Group({
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <section>
-      <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h2>
+    <Panel title={title}>
       {description && (
-        <p className="mt-0.5 text-[11px] text-muted-foreground/70">{description}</p>
+        <div className="border-b border-rule px-4 py-2.5 text-[11px] leading-[1.5] text-muted-foreground">
+          {description}
+        </div>
       )}
-      <div className="mt-2 space-y-2 rounded-lg border border-border/40 p-3">
-        {children}
-      </div>
-    </section>
+      {children}
+    </Panel>
   )
 }
 
@@ -353,10 +361,10 @@ function Row({
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <label className="flex items-center justify-between gap-3">
-      <span className="text-xs text-muted-foreground">{label}</span>
+    <div className="flex items-center gap-4 border-b border-rule px-4 py-3.5 last:border-b-0">
+      <span className="text-[13px] font-semibold text-foreground">{label}</span>
       <div className="min-w-0 flex-1 text-right">{children}</div>
-    </label>
+    </div>
   )
 }
 
@@ -373,13 +381,13 @@ function ColorField({
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-7 w-10 cursor-pointer rounded-md border border-border/60 bg-transparent"
+        className="h-8 w-11 cursor-pointer border border-border bg-transparent"
       />
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-20 rounded-md border border-border/60 bg-background px-2 py-1 text-right font-mono text-[11px] outline-none focus:border-border"
+        className="w-24 border border-border bg-background px-2 py-1 text-right font-mono text-[11px] text-foreground outline-none focus:border-signal/50"
       />
     </div>
   )
@@ -408,25 +416,25 @@ function MediaPickerRow({
       <div className="flex items-center justify-end gap-2">
         {value && (
           <span
-            className="max-w-[10rem] truncate text-[10px] text-muted-foreground"
+            className="max-w-[10rem] truncate font-mono text-[10px] text-muted-foreground"
             title={value}
           >
             {displayFileName(value)}
           </span>
         )}
-        <button
-          onClick={handlePick}
-          className="rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] hover:border-border"
-        >
+        <Button type="button" variant="outline" size="sm" onClick={handlePick}>
           {value ? 'Change…' : 'Choose…'}
-        </button>
+        </Button>
         {value && (
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-signal-deep hover:text-signal"
             onClick={onClear}
-            className="text-[11px] text-red-500 hover:underline"
           >
-            clear
-          </button>
+            Clear
+          </Button>
         )}
       </div>
     </Row>
@@ -438,36 +446,5 @@ function displayFileName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-function SegmentedButtons<T extends string>({
-  value,
-  onChange,
-  options
-}: {
-  value: T
-  onChange: (v: T) => void
-  options: { value: T; label: string }[]
-}): JSX.Element {
-  return (
-    <div className="inline-flex overflow-hidden rounded-md border border-border/60">
-      {options.map((opt) => {
-        const active = opt.value === value
-        return (
-          <button
-            key={opt.value}
-            onClick={() => onChange(opt.value)}
-            className={`px-2.5 py-1 text-[11px] transition-colors ${
-              active
-                ? 'bg-foreground text-background'
-                : 'bg-background text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {opt.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 const selectClass =
-  'w-48 rounded-md border border-border/60 bg-background px-2 py-1 text-xs outline-none focus:border-border'
+  'w-56 border border-border bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus:border-signal/50'

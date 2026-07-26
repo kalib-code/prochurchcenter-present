@@ -970,25 +970,21 @@ function PdfPageView({
  *   resume from where it was paused.
  *
  * Mute semantics:
- *   - audio=false (confidence monitor): element is always muted
- *     regardless of control.muted.
+ *   - audio=false (stage monitor / Settings' live preview — NOT
+ *     Service Mode's confidence monitor, see VideoSlideOperator below):
+ *     element is always muted regardless of control.muted.
  *   - audio=true (output window): element is muted iff control.muted
  *     is true. Default (no control passed) is unmuted.
  *
- * Cross-window position sync:
- *   Two independent <video> elements playing the same source drift
- *   over time even when started simultaneously — separate decoders,
- *   separate clocks. We use FreeShow's pattern: the OUTPUT side
- *   broadcasts its currentTime via IPC every ~250ms (the browser's
- *   native timeupdate rate), and the OPERATOR side snaps its local
- *   video when drift exceeds 0.5 seconds. At thumbnail size 500ms is
- *   invisible to the eye, but constant per-frame snapping would
- *   cause visible micro-stutters — the dead-band is what makes it
- *   feel smooth.
- *
- *   Dispatch is by the existing `audio` prop:
- *     - audio=true  → output → broadcast timeupdate events
- *     - audio=false → operator → subscribe and snap
+ * Cross-window position broadcast (output → Service Mode only):
+ *   There is no cross-window <video> sync to do anymore — Service
+ *   Mode's confidence monitor doesn't render a SlideRenderer instance
+ *   at all, it's a pixel mirror of the output window via OutputMirror
+ *   (desktopCapturer). The OUTPUT side still broadcasts its currentTime
+ *   via IPC every ~250ms (the browser's native timeupdate rate), but
+ *   the only consumer left is Service Mode's `<VideoRunway>`, which
+ *   just formats it into a progress bar and time readout — there is no
+ *   second decoder anywhere to keep in sync with it.
  */
 function VideoSlide(props: {
   videoPath: string
@@ -1000,14 +996,18 @@ function VideoSlide(props: {
   // window we're in, so we split into sub-components instead of
   // branching inside a single useEffect tangle:
   //
-  //   output   → decodes the video file with audio, honors the
-  //              operator's pause/mute controls (this is what the
-  //              congregation sees on the projector)
-  //   operator → mirrors the output window's actual pixels via
-  //              desktopCapturer + getUserMedia (Option C). Zero clock
-  //              drift because there's only one decoder anywhere in
-  //              the app, and the confidence preview is literally the
-  //              projector's pixel output on a tiny delay
+  //   audio=true  → decodes the video file with audio, honors the
+  //                 operator's pause/mute controls (this is what the
+  //                 congregation sees on the projector — the OUTPUT
+  //                 window only)
+  //   audio=false → mirrors the output window's actual pixels via
+  //                 desktopCapturer + getUserMedia (Option C) instead of
+  //                 decoding the file a second time. Zero clock drift
+  //                 because there's only one decoder anywhere in the
+  //                 app. Mounted by the stage monitor and Settings'
+  //                 live preview — NOT by Service Mode's confidence
+  //                 monitor, which mirrors the whole output window via
+  //                 <OutputMirror> rather than a per-slide instance.
   return props.audio ? (
     <VideoSlideOutput
       videoPath={props.videoPath}
@@ -1090,6 +1090,22 @@ function VideoSlideOutput({
     )
     let nearEndFired = false
     const handleTimeUpdate = (): void => {
+      // Broadcast position to the operator's runway readout. Sent BEFORE
+      // the duration guard below so the operator gets currentTime
+      // immediately; `duration` is NaN until metadata loads and the
+      // consumer is documented to guard with Number.isFinite. Coercing
+      // it here would be a lie. `v.paused` (not the `paused` prop) is
+      // read so the operator sees the element's actual playback state,
+      // not just the last commanded intent (e.g. if a play() call was
+      // rejected by autoplay policy, `v.paused` stays true even though
+      // the prop says otherwise).
+      void window.api.output.setVideoTimeUpdate({
+        videoPath,
+        currentTime: v.currentTime,
+        duration: v.duration,
+        paused: v.paused
+      })
+
       if (!v.duration || !Number.isFinite(v.duration)) return
       const nearEnd = v.currentTime >= v.duration - 0.5
       if (nearEnd && !nearEndFired) {
@@ -1179,12 +1195,22 @@ function VideoSlideOutput({
 }
 
 /**
- * Operator-window confidence preview: mirrors the output window's
- * pixels via `desktopCapturer` + `navigator.mediaDevices.getUserMedia`
- * with a `chromeMediaSource: 'desktop'` constraint. Because only one
- * decoder exists (on the output side), there is literally nothing to
- * drift — the operator sees exactly what the projector is showing,
- * frame for frame, at the projector's real framerate.
+ * NOT dead code, despite Service Mode's own confidence monitor no
+ * longer mounting it — that monitor is <OutputMirror>, a component-level
+ * mirror of the whole output window, not a per-slide SlideRenderer
+ * instance. This function is the audio=false branch reached from two
+ * OTHER mount sites:
+ *   - the stage monitor (output/StageView.tsx:126 and :142, both pass
+ *     `audio={false}`) — the on-demand projector for the speaker
+ *   - Settings' live preview (Settings.tsx's <SlideRenderer> call,
+ *     which passes no `audio` prop and so defaults to false)
+ *
+ * Mirrors the output window's pixels via `desktopCapturer` +
+ * `navigator.mediaDevices.getUserMedia` with a `chromeMediaSource:
+ * 'desktop'` constraint. Because only one decoder exists (on the output
+ * side), there is literally nothing to drift — whichever window mounts
+ * this sees exactly what the projector is showing, frame for frame, at
+ * the projector's real framerate.
  *
  * Failure handling: if the capture source can't be resolved (output
  * window not yet registered with the OS compositor) or if getUserMedia

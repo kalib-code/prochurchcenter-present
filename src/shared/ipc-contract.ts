@@ -110,22 +110,40 @@ export interface StageContext {
 
 /**
  * Authoritative video position update sent from the OUTPUT window to
- * the operator confidence monitor so two independent <video> elements
- * playing the same source stay in sync.
+ * the operator's Service Mode. There is no independent <video> on the
+ * operator side to keep in sync — the confidence monitor is a literal
+ * pixel mirror of the output window via `desktopCapturer` (see
+ * OutputMirror.tsx / VideoSlideOperator in SlideRenderer.tsx), so
+ * there's nothing on the operator side that could drift from it.
  *
- * The pattern (matching FreeShow's BackgroundMedia.svelte 220ms / 0.5s
- * snap parameters): output's <video> emits `timeupdate` events ~4x/sec,
- * each one becomes a VideoTimeUpdate broadcast. The operator subscribes
- * and only nudges its local video when |local - remote| > 0.5s — below
- * that the drift is invisible at thumbnail size and snapping every
- * frame would cause visible micro-stutters.
+ * What this actually feeds: the operator's `<VideoRunway>` progress bar
+ * and time readout under the mirror, and the pause/mute button state.
+ * Output's <video> emits `timeupdate` events ~4x/sec, each one becomes
+ * a VideoTimeUpdate broadcast; ServiceMode only re-renders the runway's
+ * text/percentage from it — no local playback element to nudge.
  *
- * `paused` is included so the operator can also re-align after a
+ * `paused` is included so the runway can also re-render after a
  * pause/play state change (timeupdate doesn't fire while paused).
  */
 export interface VideoTimeUpdate {
   videoPath: string
   currentTime: number
+  /**
+   * Total length in seconds, read straight from the output <video>
+   * element's `duration` property. Required (not optional) so an emit
+   * site can never silently omit it — an optional field would let the
+   * consumer's "confidence monitor" runway readout ("advances in
+   * 0:32") mistake "not sent" for "not loaded yet".
+   *
+   * `HTMLMediaElement.duration` is `NaN` until the browser has loaded
+   * the video's metadata, and can be `Infinity` for a stream — both
+   * are passed through as-is, never coerced to 0 (0 would lie: it
+   * reads as "already finished" rather than "not loaded yet").
+   * Consumers MUST guard with `Number.isFinite(duration)` before doing
+   * arithmetic on it; `duration - currentTime` on a `NaN` duration
+   * renders "advances in NaN:NaN" on a live display.
+   */
+  duration: number
   paused: boolean
 }
 
@@ -233,7 +251,9 @@ export interface CreateSetlistInput {
   date: string
 }
 
-export type UpdateSetlistPatch = Partial<Pick<Setlist, 'name' | 'date' | 'items'>>
+export type UpdateSetlistPatch = Partial<
+  Pick<Setlist, 'name' | 'date' | 'items' | 'startTime'>
+>
 
 export type UpdateThemePatch = Partial<Omit<Theme, 'id'>>
 
@@ -319,6 +339,48 @@ export interface CustomFontEntry {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pre-flight (Home readiness checks)
+//
+// Four things break Sunday: the projector is on the wrong display, macOS
+// Screen Recording is off so the confidence monitor is black, a media file
+// moved since it was added, or there is no recent backup. Pre-flight surfaces
+// all four on Saturday night with the remedy attached.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the operator can do about a failing check.
+ *   'external' — `target` is a URL opened via shell.openExternal, e.g. the
+ *                macOS Screen Recording privacy pane.
+ *   'in-app'   — `target` is a renderer route, e.g. "/settings".
+ */
+export interface PreflightRemedy {
+  label: string
+  kind: 'external' | 'in-app'
+  target: string
+}
+
+export interface PreflightCheck {
+  id: 'display' | 'screenRecording' | 'media' | 'backup'
+  status: 'ready' | 'warning'
+  /** Short name, e.g. "Screen Recording" */
+  name: string
+  /** One-sentence explanation with the specific numbers filled in. */
+  detail: string
+  remedy?: PreflightRemedy
+}
+
+export interface PreflightReport {
+  /**
+   * Checks that APPLY on this platform. The screenRecording check is
+   * macOS-only and is omitted entirely elsewhere, rather than emitting a
+   * misleading disabled row — so consumers must never assume length 4.
+   */
+  checks: PreflightCheck[]
+  /** ISO timestamp of when the report was produced. */
+  checkedAt: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PresentApi — the surface exposed on `window.api`
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -356,6 +418,21 @@ export interface PresentApi {
   settings: {
     get(): Promise<Settings>
     update(patch: UpdateSettingsPatch): Promise<Settings>
+  }
+
+  /**
+   * Readiness checks surfaced on Home. `setlistId` is nullable so Home can
+   * ask before any setlist exists; the media check is then omitted.
+   */
+  system: {
+    getPreflight(setlistId: string | null): Promise<PreflightReport>
+    /** Open a remedy's target. Routes through shell.openExternal. */
+    openExternal(url: string): Promise<void>
+  }
+
+  /** Read-only existence probe. Used by pre-flight and the setlist editor. */
+  files: {
+    checkExists(paths: string[]): Promise<Record<string, boolean>>
   }
 
   dialog: {
@@ -534,10 +611,12 @@ export interface PresentApi {
     setStageContext(context: StageContext): Promise<void>
     /**
      * Push the OUTPUT window's authoritative video playback position
-     * to the operator confidence monitor. Called from the output
+     * to the operator's Service Mode. Called from the output
      * renderer's <video> element on `timeupdate` / `seeked` /
-     * `play` / `pause` events. Operator subscribes via
-     * onVideoTimeUpdate and snaps its local video when drift > 500ms.
+     * `play` / `pause` events. The operator subscribes via
+     * onVideoTimeUpdate and feeds it straight into `<VideoRunway>`'s
+     * progress bar / time readout — there is no local video to snap,
+     * the confidence monitor mirrors the output's actual pixels.
      */
     setVideoTimeUpdate(update: VideoTimeUpdate): Promise<void>
     /**
@@ -626,9 +705,10 @@ export interface PresentApi {
     onVideoControl(callback: (control: VideoControl) => void): () => void
     /**
      * Subscribe to authoritative video time updates from the OUTPUT
-     * window. Operator confidence monitor only. The operator's
-     * VideoSlide nudges its local <video> currentTime when drift
-     * exceeds the snap threshold (~500ms).
+     * window. Service Mode only. Feeds ServiceMode's `<VideoRunway>`
+     * progress bar and time readout directly — there's no local video
+     * element on the operator side to nudge; the confidence monitor is
+     * a pixel mirror of the output window, not an independent decoder.
      */
     onVideoTimeUpdate(
       callback: (update: VideoTimeUpdate) => void
@@ -689,6 +769,13 @@ export const CHANNELS = {
   settings: {
     get: 'settings:get',
     update: 'settings:update'
+  },
+  system: {
+    getPreflight: 'system:getPreflight',
+    openExternal: 'system:openExternal'
+  },
+  files: {
+    checkExists: 'files:checkExists'
   },
   dialog: {
     pickFile: 'dialog:pickFile'

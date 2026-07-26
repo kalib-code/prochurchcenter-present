@@ -9,6 +9,7 @@ import { readFile, readdir, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { Setlist } from '@shared/types'
+import type { UpdateSetlistPatch } from '@shared/ipc-contract'
 import { getSetlistsDir } from './paths'
 import { atomicWriteJson } from './atomic'
 
@@ -62,8 +63,6 @@ export async function createSetlist(input: { name: string; date: string }): Prom
   await atomicWriteJson(setlistPath(id), setlist)
   return setlist
 }
-
-export type UpdateSetlistPatch = Partial<Pick<Setlist, 'name' | 'date' | 'items'>>
 
 export async function updateSetlist(id: string, patch: UpdateSetlistPatch): Promise<Setlist> {
   const existing = await getSetlist(id)

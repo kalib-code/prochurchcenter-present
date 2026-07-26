@@ -100,3 +100,24 @@ export function suggestCloneDefaults(source: Setlist): CloneDefaults {
     date: nextSundayISO()
   }
 }
+
+/**
+ * Choose the setlist most worth spotlighting.
+ *   1. If one is today, use it.
+ *   2. Else use the next upcoming future setlist (earliest date >= today).
+ *   3. Else use the most recent past setlist (for recap / rehearsal).
+ *   4. Else null (no setlists at all).
+ */
+export function pickHero(setlists: Setlist[]): Setlist | null {
+  if (setlists.length === 0) return null
+  const todayOne = setlists.find(isToday)
+  if (todayOne) return todayOne
+
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const upcoming = setlists
+    .filter((s) => s.date >= todayIso)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (upcoming[0]) return upcoming[0]
+
+  return setlists[0] ?? null
+}

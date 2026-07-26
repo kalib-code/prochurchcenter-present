@@ -1,16 +1,22 @@
 /**
- * Settings — polished shell around the existing stores.
+ * Settings — KLB shell around the existing stores.
  *
  * Layout:
- *   - PageHeader at top
- *   - Two-column body: left = section tabs + form, right = live preview
- *   - Section tabs (Display / Theme / Output / About) split the form
- *     so the massive ThemeFields editor isn't competing with the
- *     short Display/Output rows for vertical real estate
+ *   - PageHeader at top, with the DISPLAY/THEME/OUTPUT/DATA/ABOUT tab row
+ *     rendered as its `children`.
+ *   - Two-column body: left = tab title/description + bordered control
+ *     groups (520px, scrolls independently), right = live preview (does
+ *     not scroll, so it stays in view while the left column scrolls —
+ *     the redesign brief's "sticky" preview).
  *
- * Stores behavior is unchanged — this is purely a layout / visual
+ * Store behavior is unchanged — this is purely a layout / visual
  * overhaul. Every update still flows through useSettingsStore.update
  * and useThemeStore.update and broadcasts to the output window.
+ *
+ * The design file's Settings section (L699-747) draws each row as a
+ * read-only value chip — it is mocking the shell, not the controls. Every
+ * control below is the same real `<select>`/`<input>`/`<button>` the
+ * pre-redesign Settings.tsx used; only the surrounding chrome changed.
  */
 
 import { useEffect, useState } from 'react'
@@ -28,7 +34,11 @@ import { ThemeFields } from '../components/ThemeFields'
 import { CanvaConnectionCard } from '../components/CanvaConnectionCard'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
-import { Card } from '../components/ui/Card'
+import { Panel } from '../components/ui/Card'
+import { Badge } from '../components/ui/Badge'
+import { MonoLabel } from '../components/ui/MonoLabel'
+import { TitleDot } from '../components/ui/TitleDot'
+import { EmptyState } from '../components/ui/EmptyState'
 import { cn } from '../lib/utils'
 
 type Section = 'display' | 'theme' | 'output' | 'data' | 'connections' | 'about'
@@ -83,8 +93,28 @@ function buildFallbackPayload(maxLines: number): SlidePayload {
   }
 }
 
+/** Operator-facing breadcrumb for the live preview's caption row. Every
+ * SlidePayload kind is covered so a mid-service preview (which can be any
+ * kind, not just text) still shows something meaningful. */
+function slideCaption(payload: SlidePayload): string {
+  switch (payload.kind) {
+    case 'text':
+      return payload.sectionLabel ?? 'Text slide'
+    case 'image':
+      return payload.caption ?? 'Image slide'
+    case 'video':
+      return payload.title ?? 'Video slide'
+    case 'pdf-page':
+      return `PDF · page ${payload.pageIndex} of ${payload.pageCount}`
+    case 'pptx-slide':
+      return `PowerPoint slide ${payload.slideOrdinal} of ${payload.slideCount}`
+    case 'countdown':
+      return payload.label
+  }
+}
+
 export function Settings(): JSX.Element {
-  const { settings, loading, load: loadSettings, update: updateSettings } = useSettingsStore()
+  const { settings, loading, load: loadSettings } = useSettingsStore()
   const { theme, load: loadTheme, update: updateTheme } = useThemeStore()
   const serviceState = useServiceStore((s) => s.state)
 
@@ -117,132 +147,65 @@ export function Settings(): JSX.Element {
       <PageHeader
         eyebrow="Workspace"
         title="Settings"
-        subtitle="Changes save instantly. The projector restyles on the next frame."
-        backTo="/"
-      />
+        description="Changes save instantly. The projector restyles on the next frame."
+        back={{ to: '/', label: 'Home' }}
+      >
+        <nav className="flex gap-0" aria-label="Settings sections">
+          {SECTIONS.map((s) => {
+            const active = s.id === section
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSection(s.id)}
+                aria-pressed={active}
+                className={cn(
+                  'border-b-2 bg-transparent px-[18px] py-3 font-mono text-[9.5px] font-semibold uppercase tracking-[0.12em] transition-colors',
+                  active
+                    ? 'border-signal text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {s.label}
+              </button>
+            )
+          })}
+        </nav>
+      </PageHeader>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── Left: section tabs + form ─────────────────────────── */}
-        <section className="flex w-[32rem] shrink-0 flex-col border-r border-border/40">
-          {/* Section tabs */}
-          <nav className="flex shrink-0 gap-1 border-b border-border/40 px-6 pt-4">
-            {SECTIONS.map((s) => {
-              const active = s.id === section
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setSection(s.id)}
-                  className={cn(
-                    'relative px-3 pb-3 pt-1 text-xs font-medium transition-colors',
-                    active
-                      ? 'text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {s.label}
-                  {active && (
-                    <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-brand" />
-                  )}
-                </button>
-              )
-            })}
-          </nav>
+      <div className="grid min-h-0 flex-1 grid-cols-[520px_1fr]">
+        {/* ── Left: tab title/description + bordered control groups ──── */}
+        <section className="scroll-hairline min-h-0 overflow-y-auto border-r border-border bg-card p-6">
+          <h2 className="text-[20px] font-extrabold tracking-[-0.02em] text-foreground">
+            {activeSection.label}
+          </h2>
+          <p className="mb-[22px] mt-1.5 text-[12.5px] leading-[1.6] text-soft">
+            {activeSection.description}
+          </p>
 
-          {/* Section description */}
-          <div className="shrink-0 px-6 pt-4">
-            <h2 className="text-lg font-semibold text-foreground">
-              {activeSection.label}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {activeSection.description}
-            </p>
-          </div>
+          {section === 'display' && <DisplaySection />}
 
-          {/* Section content */}
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            {section === 'display' && (
-              <div className="space-y-4">
-                <Card className="p-4">
-                  <Row
-                    label="Max lines per slide"
-                    hint="Lines beyond this split into a new slide automatically."
-                  >
-                    <input
-                      type="number"
-                      min={2}
-                      max={20}
-                      step={1}
-                      value={settings.maxLinesPerSlide}
-                      onChange={(e) => {
-                        const v = Math.max(
-                          2,
-                          Math.min(20, Math.floor(Number(e.target.value)))
-                        )
-                        if (v !== settings.maxLinesPerSlide) {
-                          void updateSettings({ maxLinesPerSlide: v })
-                        }
-                      }}
-                      className="h-9 w-20 rounded-md border border-border/60 bg-background/60 px-2 text-center text-sm outline-none focus:border-brand/50"
-                    />
-                  </Row>
-                </Card>
+          {section === 'theme' && (
+            <ThemeFields theme={theme} onChange={(patch) => void updateTheme(patch)} />
+          )}
 
-                <Card className="p-4">
-                  <Row
-                    label="Song intro slide"
-                    hint="Adds an empty intro slide before each song's first verse so the background can transition in before lyrics appear."
-                  >
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={settings.songTransitionSlide}
-                        onChange={(e) => {
-                          void updateSettings({
-                            songTransitionSlide: e.target.checked
-                          })
-                        }}
-                        className="h-4 w-4 rounded border-border/60 bg-background"
-                      />
-                      <span>Insert intro slide for each song</span>
-                    </label>
-                  </Row>
-                </Card>
-              </div>
-            )}
+          {section === 'output' && <OutputDisplaySection />}
 
-            {section === 'theme' && (
-              <ThemeFields theme={theme} onChange={(patch) => void updateTheme(patch)} />
-            )}
+          {section === 'data' && <DataSection />}
 
-            {section === 'output' && <OutputDisplaySection />}
+          {section === 'connections' && <CanvaConnectionCard />}
 
-            {section === 'data' && <DataSection />}
-
-            {section === 'connections' && <CanvaConnectionCard />}
-
-            {section === 'about' && <AboutSection />}
-          </div>
+          {section === 'about' && <AboutSection />}
         </section>
 
-        {/* ── Right: live preview ───────────────────────────────── */}
-        <aside className="flex flex-1 flex-col bg-background/60 p-8">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand/80">
-                Live preview
-              </div>
-              <h3 className="mt-0.5 text-sm font-semibold text-foreground">
-                {serviceState.mode === 'running'
-                  ? 'Current service slide'
-                  : 'Sample verse'}
-              </h3>
-            </div>
-            <span className="text-[11px] text-muted-foreground">
-              Reflects every change instantly
-            </span>
+        {/* ── Right: live preview — does not scroll, stays in view ──── */}
+        <aside className="flex min-h-0 flex-col bg-background p-6">
+          <div className="mb-3 flex items-baseline justify-between">
+            <MonoLabel tone="signal">Live preview</MonoLabel>
+            <MonoLabel tone="muted">Reflects every change instantly</MonoLabel>
           </div>
 
-          <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/60 shadow-[0_30px_80px_-50px_hsl(var(--brand)/0.35)]">
+          <div className="aspect-video w-full overflow-hidden border border-border bg-black">
             <SlideRenderer
               payload={previewPayload}
               mode="live"
@@ -251,14 +214,63 @@ export function Settings(): JSX.Element {
             />
           </div>
 
-          <p className="mt-5 max-w-md text-[11px] leading-relaxed text-muted-foreground">
-            Every change you make is immediately pushed to the projector
-            window. There's no Save button — just close Settings when it
-            looks the way you want.
-          </p>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <MonoLabel tone="muted" className="truncate">
+              {slideCaption(previewPayload)}
+            </MonoLabel>
+            <MonoLabel tone="dim" className="shrink-0">
+              No save button — close when it looks right
+            </MonoLabel>
+          </div>
         </aside>
       </div>
     </div>
+  )
+}
+
+// ─── Display (slide breaks) ────────────────────────────────────────────
+
+function DisplaySection(): JSX.Element | null {
+  const { settings, update } = useSettingsStore()
+  if (!settings) return null
+
+  return (
+    <Panel title="SLIDE BREAKS">
+      <Row
+        label="Max lines per slide"
+        hint="Lines beyond this split into a new slide automatically."
+      >
+        <input
+          type="number"
+          min={2}
+          max={20}
+          step={1}
+          value={settings.maxLinesPerSlide}
+          onChange={(e) => {
+            const v = Math.max(2, Math.min(20, Math.floor(Number(e.target.value))))
+            if (v !== settings.maxLinesPerSlide) {
+              void update({ maxLinesPerSlide: v })
+            }
+          }}
+          className="h-9 w-20 border border-border bg-background px-2 text-center text-[13px] text-foreground outline-none focus:border-signal/50"
+        />
+      </Row>
+
+      <Row
+        label="Song intro slide"
+        hint="Adds an empty intro slide before each song's first verse so the background can transition in before lyrics appear."
+      >
+        <label className="flex items-center gap-2 text-[13px] text-foreground">
+          <input
+            type="checkbox"
+            checked={settings.songTransitionSlide}
+            onChange={(e) => void update({ songTransitionSlide: e.target.checked })}
+            className="h-4 w-4 border-border bg-background accent-signal"
+          />
+          <span>Insert intro slide for each song</span>
+        </label>
+      </Row>
+    </Panel>
   )
 }
 
@@ -286,7 +298,14 @@ function OutputDisplaySection(): JSX.Element | null {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4">
+      <Panel
+        title="PROJECTOR OUTPUT"
+        action={
+          <Button size="sm" variant="ghost" onClick={refresh}>
+            ↻ Refresh display list
+          </Button>
+        }
+      >
         <Row label="Display" hint="Which monitor runs the fullscreen output window.">
           <select
             value={settings.outputDisplayId ?? ''}
@@ -296,7 +315,7 @@ function OutputDisplaySection(): JSX.Element | null {
               await update({ outputDisplayId: id })
               await window.api.output.setDisplay(id)
             }}
-            className="h-9 w-56 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+            className={selectClass}
           >
             <option value="">Primary</option>
             {displays.map((d) => (
@@ -306,15 +325,15 @@ function OutputDisplaySection(): JSX.Element | null {
             ))}
           </select>
         </Row>
-      </Card>
+      </Panel>
 
       {/* Stage monitor — second projector facing the speaker */}
-      <Card className="p-4 space-y-3">
+      <Panel title="STAGE MONITOR">
         <Row
           label="Stage monitor"
           hint="A second projector facing the speaker on stage. Mirrors the main output, no audio."
         >
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-[13px] text-foreground">
             <input
               type="checkbox"
               checked={settings.stageMonitorEnabled}
@@ -323,7 +342,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 await update({ stageMonitorEnabled: enabled })
                 await window.api.output.setStageMonitorEnabled(enabled)
               }}
-              className="h-4 w-4 rounded border-border/60 bg-background"
+              className="h-4 w-4 border-border bg-background accent-signal"
             />
             <span>Enable stage monitor window</span>
           </label>
@@ -338,7 +357,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 await update({ stageMonitorDisplayId: id })
                 await window.api.output.setStageMonitorDisplay(id)
               }}
-              className="h-9 w-56 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+              className={selectClass}
             >
               <option value="">Auto (next display)</option>
               {displays.map((d) => (
@@ -349,15 +368,15 @@ function OutputDisplaySection(): JSX.Element | null {
             </select>
           </Row>
         )}
-      </Card>
+      </Panel>
 
       {/* Lower thirds — chroma key window for OBS feeds */}
-      <Card className="p-4 space-y-3">
+      <Panel title="LOWER THIRDS">
         <Row
           label="Lower thirds"
           hint="A chroma-key window for OBS / live stream feeds. Operator types content in the service-mode bottom strip."
         >
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-[13px] text-foreground">
             <input
               type="checkbox"
               checked={settings.lowerThirdsEnabled}
@@ -366,7 +385,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 await update({ lowerThirdsEnabled: enabled })
                 await window.api.output.setLowerThirdsEnabled(enabled)
               }}
-              className="h-4 w-4 rounded border-border/60 bg-background"
+              className="h-4 w-4 border-border bg-background accent-signal"
             />
             <span>Enable lower thirds window</span>
           </label>
@@ -382,7 +401,7 @@ function OutputDisplaySection(): JSX.Element | null {
                   await update({ lowerThirdsDisplayId: id })
                   await window.api.output.setLowerThirdsDisplay(id)
                 }}
-                className="h-9 w-56 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+                className={selectClass}
               >
                 <option value="">Auto (next display)</option>
                 {displays.map((d) => (
@@ -409,7 +428,7 @@ function OutputDisplaySection(): JSX.Element | null {
                     await window.api.output.setLowerThirdsEnabled(true)
                   }
                 }}
-                className="h-9 w-16 cursor-pointer rounded border border-border/60 bg-background"
+                className="h-9 w-16 cursor-pointer border border-border bg-background"
               />
             </Row>
             <Row
@@ -428,7 +447,7 @@ function OutputDisplaySection(): JSX.Element | null {
                     await window.api.output.setLowerThirdsEnabled(true)
                   }
                 }}
-                className="h-9 w-32 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+                className="h-9 w-32 border border-border bg-background px-2 text-[13px] text-foreground outline-none focus:border-signal/50"
               >
                 <option value="left">Left</option>
                 <option value="center">Center</option>
@@ -454,9 +473,9 @@ function OutputDisplaySection(): JSX.Element | null {
                       lowerThirdsFontSize: Number(e.target.value)
                     })
                   }}
-                  className="flex-1"
+                  className="w-24"
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+                <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
                   {settings.lowerThirdsFontSize}px
                 </span>
               </div>
@@ -468,7 +487,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 onChange={(e) => {
                   void update({ lowerThirdsTextColor: e.target.value })
                 }}
-                className="h-9 w-16 cursor-pointer rounded border border-border/60 bg-background"
+                className="h-9 w-16 cursor-pointer border border-border bg-background"
               />
             </Row>
             <Row
@@ -481,7 +500,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 onChange={(e) => {
                   void update({ lowerThirdsBoxColor: e.target.value })
                 }}
-                className="h-9 w-16 cursor-pointer rounded border border-border/60 bg-background"
+                className="h-9 w-16 cursor-pointer border border-border bg-background"
               />
             </Row>
             <Row
@@ -500,9 +519,9 @@ function OutputDisplaySection(): JSX.Element | null {
                       lowerThirdsBoxOpacity: Number(e.target.value)
                     })
                   }}
-                  className="flex-1"
+                  className="w-24"
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+                <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
                   {settings.lowerThirdsBoxOpacity}%
                 </span>
               </div>
@@ -521,7 +540,7 @@ function OutputDisplaySection(): JSX.Element | null {
                       | 'outline'
                   })
                 }}
-                className="h-9 w-32 rounded-md border border-border/60 bg-background/60 px-2 text-sm outline-none focus:border-brand/50"
+                className="h-9 w-32 border border-border bg-background px-2 text-[13px] text-foreground outline-none focus:border-signal/50"
               >
                 <option value="none">None</option>
                 <option value="shadow">Shadow</option>
@@ -530,13 +549,7 @@ function OutputDisplaySection(): JSX.Element | null {
             </Row>
           </>
         )}
-      </Card>
-
-      <div className="flex justify-end">
-        <Button variant="ghost" size="sm" onClick={refresh}>
-          ↻ Refresh display list
-        </Button>
-      </div>
+      </Panel>
     </div>
   )
 }
@@ -651,16 +664,12 @@ function DataSection(): JSX.Element {
   return (
     <div className="space-y-4">
       {/* Create backup + open folder */}
-      <Card className="p-4 space-y-3">
+      <Panel title="BACKUP">
         <Row
           label="Create a backup now"
           hint="Writes a timestamped zip of your songs, setlists, themes, fonts, and settings. Runs instantly — no waiting."
         >
-          <Button
-            size="sm"
-            onClick={exportNow}
-            disabled={busy !== null}
-          >
+          <Button size="sm" onClick={exportNow} disabled={busy !== null}>
             {busy === 'export' ? 'Creating…' : 'Backup now'}
           </Button>
         </Row>
@@ -695,104 +704,94 @@ function DataSection(): JSX.Element {
             </Button>
           </div>
         </Row>
-      </Card>
+      </Panel>
 
       {/* Status line */}
       {lastMessage && (
-        <div className="rounded-md border border-brand/30 bg-brand/5 px-3 py-2 text-xs text-foreground">
+        <div className="border border-signal/30 bg-signal/5 px-3.5 py-2.5 text-[12px] text-foreground">
           {lastMessage}
         </div>
       )}
 
       {/* Backup list */}
-      <Card className="p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium text-foreground">
-              Available backups ({backups.length})
-            </div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              Auto-backup keeps the 7 most recent. Pre-import safety snapshots are kept separately.
-            </div>
-          </div>
+      <Panel
+        title={`AVAILABLE BACKUPS (${backups.length})`}
+        action={
           <Button size="sm" variant="ghost" onClick={() => void refresh()}>
             ↻ Refresh
           </Button>
+        }
+      >
+        <div className="border-b border-rule px-4 py-2.5 text-[11px] leading-[1.5] text-muted-foreground">
+          Auto-backup keeps the 7 most recent. Pre-import safety snapshots are kept separately.
         </div>
 
         {backups.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border/60 bg-background/40 p-6 text-center text-xs text-muted-foreground">
-            No backups yet. Click <span className="font-medium">Backup now</span> to create the first one.
-          </div>
+          <EmptyState
+            title="No backups yet"
+            description="Click Backup now to create the first one."
+            className="border-0 bg-transparent px-4 py-8"
+          />
         ) : (
-          <ul className="space-y-2">
-            {backups.map((entry) => {
+          <ul>
+            {backups.map((entry, i) => {
               const isSafety = entry.filename.startsWith('pre-import-')
               const isBusy = busy === entry.absolutePath
               return (
                 <li
                   key={entry.absolutePath}
                   className={cn(
-                    'rounded-md border border-border/50 bg-background/60 px-3 py-2.5 transition-colors',
+                    'flex items-start justify-between gap-3 px-4 py-3',
+                    i > 0 && 'border-t border-rule',
                     entry.manifest === null && 'opacity-60'
                   )}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {formatBackupTime(entry.createdAt)}
-                        </span>
-                        {isSafety && (
-                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-amber-400">
-                            Safety snapshot
-                          </span>
-                        )}
-                        {entry.manifest === null && (
-                          <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-red-400">
-                            Corrupt
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {entry.manifest
-                          ? `${entry.manifest.counts.songs} songs · ${entry.manifest.counts.setlists} setlists · ${entry.manifest.counts.themes} themes · ${formatBytes(entry.sizeBytes)}`
-                          : formatBytes(entry.sizeBytes)}
-                      </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-semibold text-foreground">
+                        {formatBackupTime(entry.createdAt)}
+                      </span>
+                      {isSafety && <Badge tone="neutral">Safety snapshot</Badge>}
+                      {entry.manifest === null && <Badge tone="signal">Corrupt</Badge>}
                     </div>
-                    <div className="flex shrink-0 gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={entry.manifest === null || isBusy || busy !== null}
-                        onClick={() => void restore(entry, 'merge')}
-                      >
-                        Merge
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={entry.manifest === null || isBusy || busy !== null}
-                        onClick={() => void restore(entry, 'replace')}
-                      >
-                        Replace
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={isBusy || busy !== null}
-                        onClick={() => void remove(entry)}
-                      >
-                        ✕
-                      </Button>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      {entry.manifest
+                        ? `${entry.manifest.counts.songs} songs · ${entry.manifest.counts.setlists} setlists · ${entry.manifest.counts.themes} themes · ${formatBytes(entry.sizeBytes)}`
+                        : formatBytes(entry.sizeBytes)}
                     </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={entry.manifest === null || isBusy || busy !== null}
+                      onClick={() => void restore(entry, 'merge')}
+                    >
+                      Merge
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={entry.manifest === null || isBusy || busy !== null}
+                      onClick={() => void restore(entry, 'replace')}
+                    >
+                      Replace
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={isBusy || busy !== null}
+                      onClick={() => void remove(entry)}
+                    >
+                      ✕
+                    </Button>
                   </div>
                 </li>
               )
             })}
           </ul>
         )}
-      </Card>
+      </Panel>
     </div>
   )
 }
@@ -842,12 +841,12 @@ function AboutSection(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4 space-y-3">
+      <Panel title="VERSION">
         <Row
           label="Current version"
           hint="Auto-update checks GitHub Releases on every launch. Mac users: see the INSTALL guide — signed updates are coming in a later release."
         >
-          <span className="font-mono text-sm text-foreground">
+          <span className="font-mono text-[13px] text-foreground">
             {version ? `v${version}` : '…'}
           </span>
         </Row>
@@ -862,48 +861,54 @@ function AboutSection(): JSX.Element {
         {statusLine && (
           <div
             className={cn(
-              'rounded-md border px-3 py-2 text-xs',
+              'border px-4 py-3 text-[12px]',
               checkResult?.status === 'error'
-                ? 'border-red-500/30 bg-red-500/5 text-red-300'
-                : 'border-brand/30 bg-brand/5 text-foreground'
+                ? 'border-signal-deep/40 bg-signal-deep/10 text-signal-deep'
+                : 'border-signal/30 bg-signal/5 text-foreground'
             )}
           >
             {statusLine}
           </div>
         )}
-      </Card>
+      </Panel>
 
-      <Card className="p-4">
+      <Panel title="LANGUAGE">
         <Row label="Interface language" hint="Tagalog support lands in Phase 7.">
           <select
             disabled
             value={settings?.uiLanguage ?? 'en'}
-            className="h-9 w-48 rounded-md border border-border/60 bg-background/40 px-2 text-sm opacity-60"
+            className="h-9 w-48 border border-border bg-background/40 px-2 text-[13px] text-foreground opacity-60"
           >
             <option value="en">English</option>
             <option value="tl">Tagalog</option>
           </select>
         </Row>
-      </Card>
+      </Panel>
 
-      <Card className="p-5">
-        <div className="font-editorial text-xl font-semibold text-foreground">
-          ProChurchCenter — Present
+      <Panel title="ABOUT">
+        <div className="p-4">
+          <div className="text-[20px] font-extrabold tracking-[-0.02em] text-foreground">
+            ProChurchCenter — Present
+            <TitleDot />
+          </div>
+          <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-signal">
+            Sunday Task
+          </p>
+          <p className="mt-3 text-[12px] leading-relaxed text-soft">
+            A minimal church presenter built for Filipino worship teams.
+            Designed to be reliable on Sunday morning, editable on Saturday
+            night, and learnable in one rehearsal.
+          </p>
         </div>
-        <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-brand/80">
-          Sunday Task
-        </p>
-        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-          A minimal church presenter built for Filipino worship teams.
-          Designed to be reliable on Sunday morning, editable on Saturday
-          night, and learnable in one rehearsal.
-        </p>
-      </Card>
+      </Panel>
     </div>
   )
 }
 
 // ─── Local row primitive ─────────────────────────────────────────────
+
+const selectClass =
+  'h-9 w-56 border border-border bg-background px-2 text-[13px] text-foreground outline-none focus:border-signal/50'
 
 function Row({
   label,
@@ -915,11 +920,13 @@ function Row({
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex items-center gap-4 border-b border-rule px-4 py-3.5 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="text-[13px] font-semibold text-foreground">{label}</div>
         {hint && (
-          <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+          <div className="mt-[3px] text-[11.5px] leading-[1.55] text-soft">
+            {hint}
+          </div>
         )}
       </div>
       <div className="shrink-0">{children}</div>
@@ -932,7 +939,7 @@ function Row({
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-      <PageHeader eyebrow="Workspace" title="Settings" backTo="/" />
+      <PageHeader eyebrow="Workspace" title="Settings" back={{ to: '/', label: 'Home' }} />
       <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         {children}
       </main>

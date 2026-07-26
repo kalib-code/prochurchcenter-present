@@ -16,6 +16,8 @@ import { registerBibleHandlers } from './bible'
 import { registerFontsHandlers } from './fonts'
 import { registerBackupHandlers } from './backup'
 import { registerUpdaterHandlers } from './updater'
+import { registerSystemHandlers } from './system'
+import { registerFilesHandlers } from './files'
 import { registerCanvaHandlers } from './canva'
 
 export function registerAllIpcHandlers(): void {
@@ -29,5 +31,7 @@ export function registerAllIpcHandlers(): void {
   registerFontsHandlers()
   registerBackupHandlers()
   registerUpdaterHandlers()
+  registerSystemHandlers()
+  registerFilesHandlers()
   registerCanvaHandlers()
 }

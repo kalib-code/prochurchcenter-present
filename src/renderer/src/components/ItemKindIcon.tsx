@@ -1,15 +1,15 @@
 /**
- * ItemKindIcon — the canonical visual vocabulary for every kind of
- * setlist item. Centralizing this here means the setlist editor, the
- * home page preview, and the add-item picker all share the same glyph
- * for "song" / "scripture" / "image" / etc, so the operator builds
- * muscle memory: a musical-note always means song, a document always
- * means scripture, and so on.
+ * ItemKindIcon — canonical text vocabulary for every kind of setlist
+ * item: `itemKindLabel` (human-readable) and `itemKindCode` (3-letter
+ * mono Badge code). Centralizing these here means the setlist editor,
+ * the home page preview, and the add-item picker all agree on the same
+ * label and code for "song" / "scripture" / "image" / etc — a countdown
+ * reads CDN everywhere, never CDN in one place and CNT in another.
  *
- * Line-style 1.5px SVGs sized by a single `size` prop (default 20).
- * `color` defaults to currentColor so the caller can tint via parent
- * text color — matches how Tailwind's `text-foreground` / `text-brand`
- * utilities are already being used elsewhere.
+ * Also exports the `ItemKindIcon` SVG glyph component. Most KLB surfaces
+ * render a mono Badge of `itemKindCode` instead, but the glyphs are still
+ * used where a compact pictogram reads better than a code — the add-item
+ * picker's kind cards and Home's item strips.
  */
 
 import type { SetlistItem } from '@shared/types'
@@ -130,7 +130,7 @@ export function ItemKindIcon({ kind, size = 20, className }: Props): JSX.Element
 }
 
 /**
- * Human-readable label for each item kind. Kept next to the icon so
+ * Human-readable label for each item kind. Kept next to the code so
  * every caller — picker, home preview, list card — uses the same
  * capitalization and wording.
  */
@@ -154,5 +154,36 @@ export function itemKindLabel(kind: Kind): string {
       return 'PowerPoint'
     case 'canva':
       return 'Canva'
+  }
+}
+
+/**
+ * Three-letter mono code shown on kind Badges in the setlist editor —
+ * the add-item grid and every item row's own kind chip. Matches the
+ * KLB design file exactly (SNG / SCR / IMG / VID / PDF / CDN / SEC).
+ */
+export function itemKindCode(kind: Kind): string {
+  switch (kind) {
+    case 'song':
+      return 'SNG'
+    case 'scripture':
+      return 'SCR'
+    case 'image':
+      return 'IMG'
+    case 'video':
+      return 'VID'
+    case 'deck':
+      return 'PDF'
+    case 'countdown':
+      return 'CDN'
+    case 'section-divider':
+      return 'SEC'
+    case 'pptx':
+      // PPT, not PDF — a live PowerPoint and an imported PDF deck are
+      // different items with different failure modes, and the operator
+      // needs to tell them apart at a glance in the run of show.
+      return 'PPT'
+    case 'canva':
+      return 'CNV'
   }
 }

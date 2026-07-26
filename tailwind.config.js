@@ -42,17 +42,47 @@ module.exports = {
           DEFAULT: 'hsl(var(--brand))',
           foreground: 'hsl(var(--brand-foreground))',
           muted: 'hsl(var(--brand-muted))'
+        },
+        rule: 'hsl(var(--rule) / <alpha-value>)',
+        dim: 'hsl(var(--dim) / <alpha-value>)',
+        soft: 'hsl(var(--soft-fg) / <alpha-value>)',
+        quiet: 'hsl(var(--quiet-fg) / <alpha-value>)',
+        bone: 'hsl(var(--bone) / <alpha-value>)',
+        ok: 'hsl(var(--ok) / <alpha-value>)',
+        ember: 'hsl(var(--ember) / <alpha-value>)',
+        'panel-hi': 'hsl(var(--panel-hi) / <alpha-value>)',
+        signal: {
+          DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
+          deep: 'hsl(var(--brand-muted) / <alpha-value>)'
         }
       },
       borderRadius: {
+        // Every size derives from --radius with no offset. The old scale
+        // added +4px/+8px for xl/2xl, which meant `--radius: 0` still left
+        // those two rounded — defeating the zero-radius constraint at eight
+        // call sites. The KLB system has exactly one radius: none.
+        //
+        // DEFAULT and 3xl are included too: Tailwind's own DEFAULT
+        // (0.25rem) and 3xl are NOT overridden by the sm/md/lg/xl/2xl
+        // keys above, so the bare `rounded` utility and `rounded-3xl`
+        // silently kept their built-in radius even with every other size
+        // zeroed out — exactly the gap that let two bare `rounded` call
+        // sites in MediaPreview.tsx slip past the project's grep gate.
+        DEFAULT: 'var(--radius)',
+        sm: 'var(--radius)',
+        md: 'var(--radius)',
         lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
-        xl: 'calc(var(--radius) + 4px)',
-        '2xl': 'calc(var(--radius) + 8px)'
+        xl: 'var(--radius)',
+        '2xl': 'var(--radius)',
+        '3xl': 'var(--radius)'
       },
-      boxShadow: {
-        'glow-brand': '0 0 0 1px hsl(var(--brand) / 0.25), 0 8px 24px -12px hsl(var(--brand) / 0.45)'
+      fontFamily: {
+        sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono Variable', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+      },
+      animation: {
+        'pulse-signal': 'pulse-signal 2.4s ease-in-out infinite',
+        'pulse-signal-fast': 'pulse-signal 1.6s ease-in-out infinite'
       }
     }
   },

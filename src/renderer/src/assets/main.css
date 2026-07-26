@@ -1,3 +1,9 @@
+/* Self-hosted variable fonts — bundled by Vite so the app keeps both
+   faces with no network. Inter carries the 400–800 range the design
+   uses; JetBrains Mono carries 500–600 for micro-labels. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -13,60 +19,88 @@
  * below is deliberately DARK; a `.light` class (if we add a toggle
  * later) would override back to light values.
  *
- * --brand is a warm amber/gold — sacred, readable, not corporate. Used
- * for primary actions only. Everything else is neutral slate.
+ * --brand is signal orange (#E23C0F) — sacred, readable, not corporate.
+ * Used for primary actions only. Everything else is neutral slate.
  */
 
 @layer base {
   :root {
-    /* Surfaces — deeper than the original shadcn defaults so cards have
-       real breathing room against the background. */
-    --background: 240 10% 5%;
-    --foreground: 0 0% 96%;
+    /* ── KLB surfaces ────────────────────────────────────────────────
+       Opaque hairline system. Values are HSL components (not hex) so
+       Tailwind's alpha syntax composes: `border-signal/45` is used on
+       every warning surface and active chip in the design. */
+    --background: 0 0% 4%;          /* #0A0A0A page */
+    --foreground: 0 0% 100%;        /* #FFFFFF   */
 
-    --card: 240 8% 8%;
-    --card-foreground: 0 0% 96%;
+    --card: 0 0% 7%;                /* #111111 panel */
+    --card-foreground: 0 0% 100%;
 
-    --popover: 240 10% 6%;
-    --popover-foreground: 0 0% 96%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 100%;
 
-    /* Semantic neutrals */
-    --muted: 240 6% 13%;
-    --muted-foreground: 240 5% 62%;
+    /* Legacy semantic names from the pre-KLB palette. Every screen is
+       now converted (redesign complete), but these are NOT all dead:
+       `text-muted-foreground` in particular is still a real, actively
+       used secondary-text token across every converted screen (~65
+       call sites), not migration debt. `--accent` / `--accent-foreground`
+       have zero remaining call sites and could be dropped; `--secondary`
+       is likewise unused directly but shares its value with
+       `--panel-hi`, which IS live, so removing it buys nothing. */
+    --muted: 60 4% 11%;             /* #1C1C1A */
+    --muted-foreground: 60 1% 41%;  /* #6B6B68 */
+    --accent: 60 4% 9%;             /* #181816 */
+    --accent-foreground: 0 0% 100%;
+    --secondary: 60 5% 8%;          /* #161614 — same value as --panel-hi */
+    --secondary-foreground: 0 0% 100%;
 
-    --accent: 240 6% 14%;
-    --accent-foreground: 0 0% 96%;
+    --border: 60 2% 16%;            /* #2A2A28 */
+    --input: 60 2% 16%;
+    --ring: 13 88% 47%;
 
-    --secondary: 240 6% 12%;
-    --secondary-foreground: 0 0% 96%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 4%;
 
-    /* Borders soften with alpha at the usage site — these are the base */
-    --border: 240 6% 18%;
-    --input: 240 6% 18%;
-    --ring: 38 92% 55%;
+    --destructive: 0 74% 42%;       /* #B91C1C */
+    --destructive-foreground: 0 0% 100%;
 
-    /* Primary stays as the inverted-foreground for any code still using
-       the old shadcn pattern. New primary actions should use `brand`
-       below, not `primary`. */
-    --primary: 0 0% 96%;
-    --primary-foreground: 240 10% 5%;
+    /* ── Signal ──────────────────────────────────────────────────────
+       #E23C0F. Replaces the old warm gold. Operator chrome only — the
+       projector renders the USER's theme and is untouched. */
+    --brand: 13 88% 47%;
+    --brand-foreground: 0 0% 100%;
+    --brand-muted: 0 74% 42%;
 
-    --destructive: 0 72% 55%;
-    --destructive-foreground: 0 0% 98%;
+    /* ── KLB-specific roles ──────────────────────────────────────── */
+    --rule: 60 4% 11%;              /* #1C1C1A inner hairline, list rows */
+    --dim: 60 2% 28%;               /* #4A4A47 disabled, inactive labels */
+    --soft-fg: 60 1% 55%;           /* #8F8F8C secondary body */
+    --quiet-fg: 60 3% 71%;          /* #B8B8B4 inactive slide-card text */
+    --bone: 37 17% 91%;             /* #ECE9E4 primary body on panels */
+    --ok: 147 65% 38%;              /* #22A05B pre-flight READY only */
+    --ember: 16 41% 7%;             /* #1A0F0B active row background */
+    --panel-hi: 60 5% 8%;           /* #161614 hover, inactive card header */
 
-    /* Brand — warm gold, single accent color.
-       #F5B849-ish. Sacred, warm, readable on both the card surface and
-       directly on the background. brand-foreground is the near-black
-       used for text ON a gold button. */
-    --brand: 38 88% 62%;
-    --brand-foreground: 240 15% 6%;
-    --brand-muted: 38 50% 50%;
-
-    --radius: 0.625rem;
+    /* Squares every rounded-* utility in the codebase in one line,
+       because tailwind.config.js derives all seven radii — DEFAULT,
+       sm, md, lg, xl, 2xl, 3xl — from this. (Not five: DEFAULT and 3xl
+       are outside the sm–2xl scale and must be derived too, or a bare
+       `rounded` / `rounded-3xl` utility keeps Tailwind's stock radius
+       even at --radius: 0.) */
+    --radius: 0;
   }
 
-  /* Light-mode override — not active by default but preserved so we
-     could add a toggle later without re-computing the palette. */
+  /* Light-mode override — unmaintained and unreachable. Nothing in the
+     app ever applies the `.light` class (no toggle UI exists), and this
+     block was never updated for the KLB redesign: it still carries the
+     pre-redesign palette (the old gold `--brand`, none of the new
+     `--rule` / `--dim` / `--soft-fg` / `--quiet-fg` / `--bone` / `--ok` /
+     `--ember` / `--panel-hi` roles the KLB screens actually render
+     with). Applying `.light` today would leave every KLB-specific
+     utility — `text-soft`, `text-bone`, `bg-panel-hi`, `border-rule`,
+     etc. — resolving to their DARK-palette values on a light background,
+     which is actively illegible (e.g. `--bone`'s near-white text would
+     vanish against white). Do not wire up a light-mode toggle against
+     this block without recomputing every KLB role first. */
   .light {
     --background: 0 0% 100%;
     --foreground: 240 10% 6%;
@@ -106,27 +140,43 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+    font-feature-settings: 'cv11' 1, 'ss01' 1;
     font-family:
+      'Inter Variable',
       -apple-system,
       'SF Pro Text',
-      'Inter',
       'Segoe UI',
       Roboto,
       system-ui,
       sans-serif;
   }
 
-  /* Serif utility for editorial accents (wordmark, hero numerals).
-     Uses system serif stack — zero font loading cost on church laptops. */
-  .font-editorial {
-    font-family: 'Iowan Old Style', 'Charter', 'Georgia', 'Times New Roman', serif;
-    font-feature-settings: 'liga' 1, 'dlig' 1;
-  }
-
-  /* Subtle text selection color that matches the brand tone */
   ::selection {
-    background-color: hsl(var(--brand) / 0.35);
+    background-color: hsl(var(--brand) / 0.25);
     color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  /* Design's .pcp-sc rule — 8px, edge-coloured thumb, no track. */
+  .scroll-hairline::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-hairline::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+  }
+  .scroll-hairline::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes pulse-signal {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
   }
 }
