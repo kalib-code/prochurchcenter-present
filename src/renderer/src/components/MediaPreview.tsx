@@ -55,6 +55,12 @@ export function MediaPreview({
   return (
     <div
       className={cn(
+        // Deliberately square: the project's binding constraint is zero
+        // border radius everywhere outside SlideRenderer.tsx and the
+        // output views. Every consumer (SetlistEditor's list thumbnails,
+        // Service Mode's SlideCard grid) relies on this default — do NOT
+        // reintroduce any Tailwind border-radius utility here, and
+        // consumers should not need a cancelling override to undo one.
         'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden border border-border/50 bg-black',
         className
       )}
