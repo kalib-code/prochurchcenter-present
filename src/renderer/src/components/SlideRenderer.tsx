@@ -39,6 +39,7 @@ import type { SlidePayload, VideoControl } from '@shared/ipc-contract'
 import type { Theme, TextAlign, TextPosition } from '@shared/types'
 import { formatCountdown } from '../lib/slideify'
 import { loadPdfDocument } from '../lib/pdfLoader'
+import PptxSlideView from './PptxSlideView'
 
 /**
  * Build a URL the renderer can pass to <img src>/<video src>/CSS url()
@@ -141,7 +142,10 @@ export function SlideRenderer({
   // worship-song background would be chaotic and illegible. Black is
   // the universal neutral letterbox color.
   const isFullBleedMedia =
-    showLive && (payload.kind === 'pdf-page' || payload.kind === 'video')
+    showLive &&
+    (payload.kind === 'pdf-page' ||
+      payload.kind === 'pptx-slide' ||
+      payload.kind === 'video')
 
   // Background: color always, plus optional image overlay (covers bg color).
   // Video, when set, renders as an absolutely-positioned <video> element
@@ -252,6 +256,29 @@ export function SlideRenderer({
         </div>
       )}
 
+      {/* PowerPoint slides bypass auto-fit for the same reason PDF pages
+          do: a pptx slide arrives already laid out at the deck's native
+          pixel dimensions, and PptxSlideView itself scales that fixed
+          layout to contain-fit this host via a CSS transform. Running it
+          through AutoFitSlide's font-size-driven scaling on top would
+          double-scale it. No onError prop is wired here — PptxSlideView
+          already leaves the previous slide on screen on failure (its own
+          documented contract) and logs the error to the console; there's
+          no error-surfacing UI at this layer to hand the message to, so
+          adding an inline callback would only risk an unstable identity
+          (see PptxSlideView's effect deps) for no benefit. */}
+      {!isBlackout && showLive && payload.kind === 'pptx-slide' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <PptxSlideView
+            pptxPath={payload.pptxPath}
+            slideOrdinal={payload.slideOrdinal}
+            animate={animate}
+            transitionDurationMs={t.transitionDurationMs}
+            useFade={t.transition === 'fade'}
+          />
+        </div>
+      )}
+
       {/* Image slides also bypass auto-fit: they should fill the screen
           edge-to-edge (letterboxed if aspect doesn't match), centered,
           regardless of the theme's text alignment. object-contain
@@ -287,11 +314,12 @@ export function SlideRenderer({
           it paints above it in document order, and so the flex props
           (items/justify) control alignment of the AutoFitSlide inside
           without interfering with the video's layout. Only text and
-          countdown go through auto-fit; image, pdf-page, and video are
-          handled by their own layers above. */}
+          countdown go through auto-fit; image, pdf-page, pptx-slide, and
+          video are handled by their own layers above. */}
       {!isBlackout &&
         showLive &&
         payload.kind !== 'pdf-page' &&
+        payload.kind !== 'pptx-slide' &&
         payload.kind !== 'image' &&
         payload.kind !== 'video' && (
           <div
@@ -431,6 +459,8 @@ function payloadKey(payload: SlidePayload): string {
   if (payload.kind === 'countdown') return `countdown:${payload.targetTime}:${payload.label}`
   if (payload.kind === 'pdf-page')
     return `pdf:${payload.pdfPath}#${payload.pageIndex}`
+  if (payload.kind === 'pptx-slide')
+    return `pptx:${payload.pptxPath}#${payload.slideOrdinal}`
   // video — included for exhaustiveness; video renders outside AutoFitSlide
   return `video:${payload.videoPath}`
 }
@@ -637,10 +667,17 @@ function SlideContent({
     )
   }
 
-  if (payload.kind === 'pdf-page' || payload.kind === 'video') {
-    // Defensive: AutoFitSlide is bypassed for pdf-page and video at the
-    // SlideRenderer level, so these branches don't render in practice.
-    // Kept for exhaustiveness and as a safety net.
+  if (
+    payload.kind === 'pdf-page' ||
+    payload.kind === 'video' ||
+    payload.kind === 'pptx-slide'
+  ) {
+    // Defensive: AutoFitSlide is bypassed for pdf-page, video, and
+    // pptx-slide at the SlideRenderer level (see isFullBleedMedia / the
+    // content-layer guard above) — each has its own full-bleed layer
+    // (PdfPageView, VideoSlide, PptxSlideView) that renders instead, so
+    // these branches don't run in practice. Kept for exhaustiveness and
+    // as a safety net if that guard is ever loosened.
     return <></>
   }
 

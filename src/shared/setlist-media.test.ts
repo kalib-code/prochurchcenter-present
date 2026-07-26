@@ -77,6 +77,15 @@ const CASES: { [K in Kind]: CaseFor<K> } = {
     item: { kind: 'deck', id: 'item-7', pdfPath: '/media/slides.pdf', pageCount: 12 },
     expectedPath: '/media/slides.pdf',
     expectedRelinkKind: 'pdf'
+  },
+  // Added because the mapped type below refused to compile without it when
+  // live PowerPoint projection merged in — which is the whole point of the
+  // guard. A pptx carries a real path, so a moved .pptx must surface in
+  // pre-flight and offer RELINK exactly like a moved .pdf does.
+  pptx: {
+    item: { kind: 'pptx', id: 'item-8', pptxPath: '/media/sermon.pptx', slideCount: 9 },
+    expectedPath: '/media/sermon.pptx',
+    expectedRelinkKind: 'pptx'
   }
 }
 
@@ -88,12 +97,26 @@ describe('mediaPathOf', () => {
     expect(mediaPathOf(item)).toBe(expectedPath)
   })
 
-  it('covers exactly the seven kinds declared on SetlistItem', () => {
+  it('covers exactly the eight kinds declared on SetlistItem', () => {
     // Belt-and-suspenders runtime check alongside the compile-time guard
     // above: if CASES and the union ever disagree, at least one of the
     // two enforcement mechanisms catches it.
+    //
+    // Both fired when live PowerPoint projection merged in — the mapped
+    // type refused to compile, and this list refused to match. Keep the
+    // literals spelled out rather than derived from the union: deriving
+    // them would make this assert nothing.
     expect(ALL_KINDS.sort()).toEqual(
-      ['countdown', 'deck', 'image', 'scripture', 'section-divider', 'song', 'video'].sort()
+      [
+        'countdown',
+        'deck',
+        'image',
+        'pptx',
+        'scripture',
+        'section-divider',
+        'song',
+        'video'
+      ].sort()
     )
   })
 

@@ -53,8 +53,10 @@ import {
 } from '@dnd-kit/sortable'
 import type { Setlist, SetlistItem } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
+import type { CanvaImportResult } from '@shared/canva'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
+import { useCanvaStore } from '../stores/useCanvaStore'
 import { useAutosave } from '../hooks/useAutosave'
 import { useMediaCheck } from '../hooks/useMediaCheck'
 import { computeSchedule } from '../lib/serviceClock'
@@ -69,6 +71,7 @@ import { Segmented } from '../components/ui/Segmented'
 import { GapInsert } from '../components/ui/GapInsert'
 import { formatServiceDate } from '../lib/setlist-helpers'
 import { probePdfPageCount } from '../lib/pdfLoader'
+import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
 
 interface Draft {
   name: string
@@ -108,11 +111,13 @@ export function SetlistEditor(): JSX.Element {
   const navigate = useNavigate()
   const { setlists, load: loadSetlists, update, remove, getById } = useSetlistStore()
   const { songs, load: loadLibrary } = useLibraryStore()
+  const checkStale = useCanvaStore((s) => s.checkStale)
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [insertAt, setInsertAt] = useState<InsertAt>(null)
-  const [pickerView, setPickerView] = useState<'grid' | 'song'>('grid')
+  const [pickerView, setPickerView] = useState<'grid' | 'song' | 'canva'>('grid')
   const [density, setDensity] = useState<'detail' | 'compact'>('detail')
+  const [staleDesignIds, setStaleDesignIds] = useState<string[]>([])
 
   useEffect(() => {
     if (setlists.length === 0) loadSetlists()
@@ -125,6 +130,47 @@ export function SetlistEditor(): JSX.Element {
     const s = getById(id)
     if (s) setDraft(setlistToDraft(s))
   }, [id, draft, setlists, getById])
+
+  // Background staleness check: which Canva-sourced decks in this setlist
+  // have changed in Canva since import. Deliberately fire-and-forget and
+  // silent on failure — this app is offline-first, so an unreachable
+  // Canva is a normal condition, not an error to surface. See
+  // useCanvaStore's `checkStale` for how it avoids painting the shared
+  // error banner.
+  //
+  // `canvaCheckKey` is a primitive summary (design id + updated-at pairs)
+  // of the setlist's Canva decks, not the `draft` object itself. `draft`
+  // is a fresh object on every keystroke (autosave patches it constantly
+  // while the operator edits), so depending on it directly would refire
+  // this check on every edit. The key only changes when a Canva deck is
+  // added/removed/refreshed, which is what should actually trigger a
+  // recheck — plus `id`, so switching setlists (if this component were
+  // ever reused across ids) always keys the check to the right one.
+  const canvaCheckItems = draft
+    ? draft.items.flatMap((item) =>
+        item.kind === 'deck' && item.canva
+          ? [{ designId: item.canva.designId, designUpdatedAt: item.canva.designUpdatedAt }]
+          : []
+      )
+    : []
+  const canvaCheckKey = canvaCheckItems.length > 0 ? JSON.stringify(canvaCheckItems) : ''
+
+  useEffect(() => {
+    if (!canvaCheckKey) return
+    const items = JSON.parse(canvaCheckKey) as { designId: string; designUpdatedAt: string }[]
+
+    let cancelled = false
+    void checkStale(items).then((ids) => {
+      // Guards against a late response applying to a setlist the
+      // operator has since navigated away from, or to items that have
+      // since changed (e.g. the deck was refreshed while the check was
+      // in flight).
+      if (!cancelled) setStaleDesignIds(ids)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [id, canvaCheckKey, checkStale])
 
   const { status, error } = useAutosave<Draft | null>({
     value: draft,
@@ -277,6 +323,77 @@ export function SetlistEditor(): JSX.Element {
     }
   }
 
+  const addPptx = async (): Promise<void> => {
+    const picked = await window.api.dialog.pickFile('pptx')
+    if (!picked) {
+      closePicker()
+      return
+    }
+    try {
+      // Evict any stale cached parse for this exact path BEFORE probing.
+      // Without this, re-picking the same file (the operator's expected
+      // "fix a typo, re-import" workflow — this feature has no export
+      // step) would silently serve the pre-edit parse forever: loadPptxDeck
+      // caches by absolute path, so an edited file at the same path would
+      // return the OLD slide count/content with no way to force a refresh
+      // short of quitting the app. See pptxLoader.ts for why eviction only
+      // clears this (operator) window's cache, not the projector's.
+      evictPptxDeck(picked)
+      const slideCount = await probeVisibleSlideCount(picked)
+      if (slideCount === 0) {
+        // Never create an item that cannot render (see spec). A deck
+        // whose every slide is hidden would insert successfully here but
+        // then vanish from the running order when slideify drops it —
+        // silently, with no error, discovered only on Sunday.
+        window.alert(
+          'Every slide in that PowerPoint file is marked hidden, so there is nothing to project. Unhide at least one slide in PowerPoint and try again.'
+        )
+        closePicker()
+        return
+      }
+      const title =
+        picked.split(/[/\\]/).pop()?.replace(/\.pptx$/i, '') ?? 'PowerPoint'
+      insertItem({
+        kind: 'pptx',
+        id: genItemId(),
+        pptxPath: picked,
+        slideCount,
+        title
+      })
+    } catch (err) {
+      console.error('[SetlistEditor] failed to open pptx', picked, err)
+      window.alert(
+        'Could not open that PowerPoint file. Make sure it is a .pptx (not an older .ppt), or export it to PDF from PowerPoint (File → Export → Create PDF/XPS) and add it as a PDF deck instead.'
+      )
+      closePicker()
+    }
+  }
+
+  const addCanvaDeck = async (result: CanvaImportResult, designId: string): Promise<void> => {
+    try {
+      // Derive pageCount from the file itself, exactly as the manual deck
+      // flow does. Canva's page_count is ignored — it is optional for some
+      // design types, and this path is always correct.
+      const pageCount = await probePdfPageCount(result.pdfPath)
+      insertItem({
+        kind: 'deck',
+        id: genItemId(),
+        pdfPath: result.pdfPath,
+        pageCount,
+        title: result.title,
+        canva: {
+          designId,
+          designUpdatedAt: result.designUpdatedAt,
+          importedAt: new Date().toISOString()
+        }
+      })
+    } catch (err) {
+      console.error('[SetlistEditor] failed to open Canva PDF', result.pdfPath, err)
+      window.alert('Present could not open the PDF Canva produced. Please try importing again.')
+      closePicker()
+    }
+  }
+
   const addCountdown = (): void => {
     insertItem({
       kind: 'countdown',
@@ -299,8 +416,11 @@ export function SetlistEditor(): JSX.Element {
     onAddImage: () => void addImage(),
     onAddVideo: () => void addVideo(),
     onAddDeck: () => void addDeck(),
+    onAddPptx: () => void addPptx(),
     onAddCountdown: addCountdown,
-    onAddDivider: addDivider
+    onAddDivider: addDivider,
+    onOpenCanva: () => setPickerView('canva'),
+    onImportCanva: (result: CanvaImportResult, designId: string) => void addCanvaDeck(result, designId)
   }
 
   /** The signal-bordered "INSERT AT POSITION n" / "ADD TO THE END" panel. */
@@ -484,6 +604,7 @@ export function SetlistEditor(): JSX.Element {
                         onChange={(next) => updateItem(item.id, next)}
                         onDelete={() => deleteItem(item.id)}
                         onDuplicate={() => duplicateItem(item.id)}
+                        staleDesignIds={staleDesignIds}
                       />
                     </li>
                   ))}

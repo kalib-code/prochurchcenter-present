@@ -10,10 +10,10 @@
  * from the running clock), so they shouldn't visually compete with the
  * actual items.
  *
- * Inline editing: scripture fields, countdown target, deck title — all
- * editable inline. Images and decks use the native file picker. Song
- * items show the resolved song title from the library (read-only; edit
- * the actual song in the library editor).
+ * Inline editing: scripture fields, countdown target, deck/pptx title — all
+ * editable inline. Images, decks, and pptx items use the native file
+ * picker. Song items show the resolved song title from the library
+ * (read-only; edit the actual song in the library editor).
  *
  * Timing: the leading rail shows this item's computed clock time (from
  * `computeSchedule`, passed down as `at`); the trailing rail holds the
@@ -30,11 +30,13 @@
 import { useEffect, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { SetlistItem, Song } from '@shared/types'
+import type { CanvaOrigin, SetlistItem, Song } from '@shared/types'
 import { relinkKindOf } from '@shared/setlist-media'
-import { probePdfPageCount } from '../lib/pdfLoader'
+import { evictPdfDocument, probePdfPageCount } from '../lib/pdfLoader'
+import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
 import { MediaPreview } from './MediaPreview'
 import { useBibleStore } from '../stores/useBibleStore'
+import { useCanvaStore } from '../stores/useCanvaStore'
 import { itemKindCode } from './ItemKindIcon'
 import { cn } from '../lib/utils'
 import { Badge } from './ui/Badge'
@@ -52,6 +54,10 @@ interface SetlistItemCardProps {
   onChange: (patch: SetlistItem) => void
   onDelete: () => void
   onDuplicate: () => void
+  /** Design ids the staleness check found newer in Canva than what was
+   * imported. Only meaningful for deck items carrying a `canva` origin —
+   * everything else ignores it. */
+  staleDesignIds?: string[]
 }
 
 export function SetlistItemCard({
@@ -62,7 +68,8 @@ export function SetlistItemCard({
   density,
   onChange,
   onDelete,
-  onDuplicate
+  onDuplicate,
+  staleDesignIds
 }: SetlistItemCardProps): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id })
@@ -116,9 +123,9 @@ export function SetlistItemCard({
   }
 
   // Which kinds get a visual thumbnail instead of a flat kind-code box?
-  // Media items (image, video, PDF deck) show their real preview once a
-  // file is chosen; everything else — and media items before a file has
-  // been picked — falls back to the flat code box.
+  // Media items (image, video, PDF deck, PowerPoint) show their real
+  // preview once a file is chosen; everything else — and media items
+  // before a file has been picked — falls back to the flat code box.
   const previewSource = getPreviewSource(item)
   const relinkKind = relinkKindOf(item)
 
@@ -235,7 +242,14 @@ export function SetlistItemCard({
           )}
         </div>
 
-        {detail && <ItemBody item={item} songsById={songsById} onChange={onChange} />}
+        {detail && (
+          <ItemBody
+            item={item}
+            songsById={songsById}
+            onChange={onChange}
+            staleDesignIds={staleDesignIds}
+          />
+        )}
 
         {detail && missing && relinkKind && (
           <div className="mt-2.5 flex items-center gap-2.5 border border-signal/50 bg-signal/[0.08] px-[11px] py-2">
@@ -255,6 +269,7 @@ export function SetlistItemCard({
             </Button>
           </div>
         )}
+
       </div>
 
       {/* Trailing rail: duration + duplicate/delete. */}
@@ -312,7 +327,12 @@ export function SetlistItemCard({
  */
 function getPreviewSource(
   item: SetlistItem
-): { kind: 'image'; path: string } | { kind: 'video'; path: string } | { kind: 'deck'; pdfPath: string } | null {
+):
+  | { kind: 'image'; path: string }
+  | { kind: 'video'; path: string }
+  | { kind: 'deck'; pdfPath: string }
+  | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
+  | null {
   if (item.kind === 'image' && item.imagePath) {
     return { kind: 'image', path: item.imagePath }
   }
@@ -321,6 +341,11 @@ function getPreviewSource(
   }
   if (item.kind === 'deck' && item.pdfPath) {
     return { kind: 'deck', pdfPath: item.pdfPath }
+  }
+  if (item.kind === 'pptx' && item.pptxPath) {
+    // Ordinal 1 — first visible slide, same "cover thumbnail" convention
+    // as the deck case defaulting to PDF page 1.
+    return { kind: 'pptx', pptxPath: item.pptxPath, slideOrdinal: 1 }
   }
   return null
 }
@@ -340,6 +365,8 @@ function rowTitle(item: SetlistItem, songsById: Map<string, Song>): string {
       return item.title?.trim() || 'Video'
     case 'deck':
       return item.title?.trim() || 'PDF deck'
+    case 'pptx':
+      return item.title?.trim() || 'PowerPoint'
     case 'countdown':
       return item.label.trim() || 'Countdown'
     case 'section-divider':
@@ -361,6 +388,12 @@ function sourceLineFor(item: SetlistItem, songsById: Map<string, Song>): string 
     case 'deck':
       return item.pdfPath
         ? `${displayFileName(item.pdfPath)} · ${item.pageCount} page${item.pageCount === 1 ? '' : 's'}`
+        : null
+    case 'pptx':
+      // "slides", not "pages" — slideCount counts VISIBLE slides only,
+      // matching how PowerPoint itself presents the deck.
+      return item.pptxPath
+        ? `${displayFileName(item.pptxPath)} · ${item.slideCount} slide${item.slideCount === 1 ? '' : 's'}`
         : null
     case 'song': {
       const song = songsById.get(item.songId)
@@ -385,6 +418,8 @@ function slideCountLabel(item: SetlistItem, songsById: Map<string, Song>): strin
     }
     case 'deck':
       return `${item.pageCount} SLIDE${item.pageCount === 1 ? '' : 'S'}`
+    case 'pptx':
+      return `${item.slideCount} SLIDE${item.slideCount === 1 ? '' : 'S'}`
     case 'scripture': {
       const text = item.text.trim()
       if (!text) return null
@@ -403,11 +438,13 @@ function slideCountLabel(item: SetlistItem, songsById: Map<string, Song>): strin
 function ItemBody({
   item,
   songsById,
-  onChange
+  onChange,
+  staleDesignIds
 }: {
   item: SetlistItem
   songsById: Map<string, Song>
   onChange: (patch: SetlistItem) => void
+  staleDesignIds?: string[]
 }): JSX.Element {
   if (item.kind === 'song') {
     const song = songsById.get(item.songId)
@@ -507,49 +544,11 @@ function ItemBody({
   }
 
   if (item.kind === 'deck') {
-    const handlePick = async (): Promise<void> => {
-      const picked = await window.api.dialog.pickFile('pdf')
-      if (!picked) return
-      try {
-        const pageCount = await probePdfPageCount(picked)
-        onChange({
-          ...item,
-          pdfPath: picked,
-          pageCount,
-          title: item.title || defaultDeckTitle(picked)
-        })
-      } catch (err) {
-        console.error('[deck] failed to probe PDF', picked, err)
-        window.alert(
-          `Could not open that PDF. Try re-exporting from PowerPoint (File → Export → Create PDF/XPS).`
-        )
-      }
-    }
-
-    return (
-      <div className="flex flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={() => void handlePick()}
-          className="w-fit border border-border bg-background px-2.5 py-1 text-[11px] text-soft hover:border-dim"
-        >
-          {item.pdfPath ? 'Change PDF…' : 'Choose PDF…'}
-        </button>
-        <input
-          type="text"
-          value={item.title ?? ''}
-          onChange={(e) => onChange({ ...item, title: e.target.value })}
-          placeholder="Deck title (e.g. Sermon — Romans 12)"
-          className="w-full border border-border bg-background px-2 py-1.5 text-[13.5px] text-foreground outline-none focus:border-signal/50"
-        />
-        {!item.pdfPath && (
-          <p className="text-[11px] text-muted-foreground/80">
-            Export your PowerPoint, Keynote, or Google Slides to PDF first,
-            then pick it here. Each PDF page becomes one slide.
-          </p>
-        )}
-      </div>
-    )
+    // Pulled out into its own component (same reason as ScriptureEditor
+    // below) — the in-flight `refreshing` guard needs a `useState`, and
+    // ItemBody's if/else switch cannot host a hook that only some
+    // branches would call.
+    return <DeckEditor item={item} onChange={onChange} staleDesignIds={staleDesignIds} />
   }
 
   if (item.kind === 'countdown') {
@@ -576,10 +575,280 @@ function ItemBody({
     )
   }
 
+  if (item.kind === 'pptx') {
+    const handlePick = async (): Promise<void> => {
+      const picked = await window.api.dialog.pickFile('pptx')
+      if (!picked) return
+      try {
+        // Evict before probing — re-picking the SAME path (fix a typo,
+        // re-import) must see the edited file, not a cached pre-edit
+        // parse. See the matching comment in SetlistEditor.tsx / the
+        // note in pptxLoader.ts for why this only clears the operator
+        // window's cache.
+        evictPptxDeck(picked)
+        const slideCount = await probeVisibleSlideCount(picked)
+        if (slideCount === 0) {
+          // Never leave the item pointed at a deck that cannot render —
+          // see the matching check in SetlistEditor.tsx's addPptx.
+          window.alert(
+            'Every slide in that PowerPoint file is marked hidden, so there is nothing to project. Unhide at least one slide in PowerPoint and try again.'
+          )
+          return
+        }
+        onChange({
+          ...item,
+          pptxPath: picked,
+          slideCount,
+          title: item.title || defaultPptxTitle(picked)
+        })
+      } catch (err) {
+        console.error('[pptx] failed to probe PowerPoint file', picked, err)
+        window.alert(
+          'Could not open that PowerPoint file. Make sure it is a .pptx (not an older .ppt), or export it to PDF from PowerPoint (File → Export → Create PDF/XPS) and add it as a PDF deck instead.'
+        )
+      }
+    }
+
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handlePick}
+            className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
+          >
+            {item.pptxPath ? 'Change PowerPoint…' : 'Choose PowerPoint…'}
+          </button>
+          {item.pptxPath && (
+            <>
+              <span
+                className="truncate text-[11px] text-muted-foreground"
+                title={item.pptxPath}
+              >
+                {displayFileName(item.pptxPath)}
+              </span>
+              <span className="text-[11px] text-muted-foreground/70">
+                · {item.slideCount} slide{item.slideCount === 1 ? '' : 's'}
+              </span>
+            </>
+          )}
+        </div>
+        <input
+          type="text"
+          value={item.title ?? ''}
+          onChange={(e) => onChange({ ...item, title: e.target.value })}
+          placeholder="PowerPoint title (optional)"
+          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
+        />
+        {!item.pptxPath && (
+          <p className="text-[11px] text-muted-foreground/80">
+            Projects directly — no PDF export needed. Only .pptx files work
+            (not the older .ppt format).
+          </p>
+        )}
+      </div>
+    )
+  }
+
   // Exhaustiveness check — if you add a new SetlistItem kind and forget
   // to add a branch above, TypeScript complains here.
   const _exhaustive: never = item
   return <div>{_exhaustive}</div>
+}
+
+// ─── Deck editor ─────────────────────────────────────────────────────
+//
+// Pulled out of ItemBody's if/else switch for the same reason as
+// ScriptureEditor further down: it needs a `useState` (the in-flight
+// `refreshing` guard below), and a hook can only live in a component
+// that calls it on every render — not in one branch of a switch that
+// other item kinds skip.
+
+type DeckItem = Extract<SetlistItem, { kind: 'deck' }>
+
+function DeckEditor({
+  item,
+  onChange,
+  staleDesignIds
+}: {
+  item: DeckItem
+  onChange: (next: DeckItem) => void
+  staleDesignIds?: string[]
+}): JSX.Element {
+  const handlePick = async (): Promise<void> => {
+    const picked = await window.api.dialog.pickFile('pdf')
+    if (!picked) return
+    try {
+      const pageCount = await probePdfPageCount(picked)
+      // Drop `canva`: a hand-picked PDF has no Canva provenance. Keeping
+      // the old key here would lie about where this file came from — the
+      // card would keep showing "From Canva", the background staleness
+      // check would keep polling a design this deck no longer contains,
+      // and Refresh would silently overwrite the operator's deliberate
+      // manual choice with a re-pull from Canva.
+      const { canva: _discard, ...rest } = item
+      onChange({
+        ...rest,
+        pdfPath: picked,
+        pageCount,
+        title: item.title || defaultDeckTitle(picked)
+      })
+    } catch (err) {
+      console.error('[deck] failed to probe PDF', picked, err)
+      window.alert(
+        `Could not open that PDF. Try re-exporting from PowerPoint (File → Export → Create PDF/XPS).`
+      )
+    }
+  }
+
+  // `item.canva`'s presence is the sole trigger for any Canva UI on
+  // this card — a hand-picked PDF deck has no `canva` key and must
+  // show no badge and no Refresh button.
+  const origin: CanvaOrigin | undefined = item.canva
+  const isStale = origin ? (staleDesignIds ?? []).includes(origin.designId) : false
+
+  // In-flight guard: a refresh is a full network round trip (export job
+  // + poll + download), seconds wide, not a native dialog like
+  // handlePick. Without this, an operator who thinks a click didn't
+  // register can double-click, and two overlapping refreshes both
+  // capture the same `previousPath` — the loser's freshly downloaded
+  // PDF is then referenced by nothing (never evicted, never deleted): a
+  // leaked cache entry plus a leaked file per double-click. This is
+  // per-card local state (not store state) so multiple Canva decks in
+  // one setlist stay independently refreshable.
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Every Canva call here goes through useCanvaStore, never
+  // window.api.canva directly — same reason as CanvaPicker: a revoked
+  // grant must flip connection state via the store's wrapCanvaCall, or
+  // this button would keep offering a retry that can never succeed.
+  // getState() is used (not the `useCanvaStore()` hook) because this
+  // only runs inside an event handler, not during render.
+  const handleRefresh = async (): Promise<void> => {
+    if (!origin || refreshing) return
+    setRefreshing(true)
+    try {
+      const previousPath = item.pdfPath
+
+      // importDesign() never throws — wrapCanvaCall catches internally
+      // and records the failure in the store, returning null. Nothing
+      // has been touched yet, so a null result is a clean no-op abort.
+      const result = await useCanvaStore
+        .getState()
+        .importDesign(origin.designId, item.title ?? '')
+      if (!result) {
+        window.alert(
+          useCanvaStore.getState().error ??
+            'Could not refresh that design from Canva.'
+        )
+        return
+      }
+
+      // The refreshed PDF is on disk under a brand-new path (the import
+      // pipeline timestamps filenames precisely so refreshes never reuse
+      // a path). Probe it before touching the item at all — if pdf.js
+      // can't open it, the existing deck must keep working exactly as
+      // it did before this refresh was attempted.
+      let pageCount: number
+      try {
+        pageCount = await probePdfPageCount(result.pdfPath)
+      } catch (err) {
+        console.error('[deck] failed to probe refreshed PDF', result.pdfPath, err)
+        window.alert(
+          'Downloaded the refreshed design, but could not open the PDF. Keeping the previous version.'
+        )
+        return
+      }
+
+      // Only now — after the replacement is confirmed good — swap the
+      // item over to it.
+      onChange({
+        ...item,
+        pdfPath: result.pdfPath,
+        pageCount,
+        canva: {
+          ...origin,
+          designUpdatedAt: result.designUpdatedAt,
+          importedAt: new Date().toISOString()
+        }
+      })
+
+      // Release pdf.js's cached handle on the superseded file BEFORE
+      // asking main to delete it: on Windows an open file cannot be
+      // removed, so skipping this leaks one PDF per refresh.
+      evictPdfDocument(previousPath)
+      const deleted = await useCanvaStore.getState().deletePdf(previousPath)
+      if (!deleted) {
+        // The live deck is already correct at this point — this is not
+        // surfaced to the operator, just left as a trace for whoever
+        // debugs disk growth before the startup sweep cleans it up.
+        console.warn('[deck] failed to delete superseded PDF (will be swept later):', previousPath)
+      }
+    } finally {
+      // Cleared on every exit path — null-import abort, probe-failure
+      // abort, and success alike — via `finally` rather than duplicating
+      // the reset at each `return`, so the button can never stay
+      // permanently disabled.
+      setRefreshing(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handlePick}
+          className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
+        >
+          {item.pdfPath ? 'Change PDF…' : 'Choose PDF…'}
+        </button>
+        {item.pdfPath && (
+          <>
+            <span
+              className="truncate text-[11px] text-muted-foreground"
+              title={item.pdfPath}
+            >
+              {displayFileName(item.pdfPath)}
+            </span>
+            <span className="text-[11px] text-muted-foreground/70">
+              · {item.pageCount} page{item.pageCount === 1 ? '' : 's'}
+            </span>
+          </>
+        )}
+        {origin && (
+          <>
+            <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              From Canva
+            </span>
+            {isStale && (
+              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] text-brand">
+                Updated in Canva
+              </span>
+            )}
+            <button
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border disabled:opacity-60"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </>
+        )}
+      </div>
+      <input
+        type="text"
+        value={item.title ?? ''}
+        onChange={(e) => onChange({ ...item, title: e.target.value })}
+        placeholder="Deck title (e.g. Sermon — Romans 12)"
+        className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
+      />
+      {!item.pdfPath && (
+        <p className="text-[11px] text-muted-foreground/80">
+          Export your PowerPoint, Keynote, or Google Slides to PDF first,
+          then pick it here. Each PDF page becomes one slide.
+        </p>
+      )}
+    </div>
+  )
 }
 
 function displayFileName(path: string): string {
@@ -590,6 +859,11 @@ function displayFileName(path: string): string {
 function defaultDeckTitle(path: string): string {
   const base = displayFileName(path)
   return base.replace(/\.pdf$/i, '').replace(/\.[^.]+$/, '')
+}
+
+function defaultPptxTitle(path: string): string {
+  const base = displayFileName(path)
+  return base.replace(/\.pptx$/i, '')
 }
 
 // ─── Scripture editor ────────────────────────────────────────────────

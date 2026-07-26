@@ -31,6 +31,7 @@ import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { shortcutFromLabel, slideifySetlist } from '../lib/slideify'
 import { mergeThemeOverride } from '../lib/themeOverride'
+import { loadPptxDeck } from '../lib/pptxLoader'
 import { OutputMirror } from '../components/OutputMirror'
 import { SlideCard } from '../components/SlideCard'
 import { KeyCheatSheet } from '../components/KeyCheatSheet'
@@ -41,11 +42,15 @@ import { MonoLabel } from '../components/ui/MonoLabel'
 import { Segmented, type SegmentedOption } from '../components/ui/Segmented'
 import { StatusDot } from '../components/ui/StatusDot'
 import { TitleDot } from '../components/ui/TitleDot'
+import { WarningBanner, type WarningItem } from '../components/ui/WarningBanner'
+import type { PptxThumbError } from '../components/MediaPreview'
+import type { PptxSlideErrorKind } from '../components/PptxSlideView'
 import { useKeyboard } from '../hooks/useKeyboard'
 import type { Song } from '@shared/types'
 import type {
   LowerThirdsContent,
   OutputMode,
+  SlidePayload,
   VideoControl,
   VideoTimeUpdate
 } from '@shared/ipc-contract'
@@ -257,14 +262,15 @@ interface GridEntry {
   shortcut: string
   lines: string[]
   /**
-   * Optional media thumbnail preview source. Populated for image,
-   * video, and pdf-page slides so the grid shows visual content
+   * Optional media thumbnail preview source. Populated for image, video,
+   * pdf-page, and pptx-slide slides so the grid shows visual content
    * instead of "(image)" placeholder text.
    */
   preview?:
     | { kind: 'image'; path: string }
     | { kind: 'video'; path: string }
     | { kind: 'deck'; pdfPath: string; pageIndex: number }
+    | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
 }
 
 /** "≈ N MIN" for a known duration, or an em dash when the operator never set one. */
@@ -575,8 +581,23 @@ function RunningView({
   // message per keystroke is negligible.
   useEffect(() => {
     const slides = currentItem?.slides ?? []
-    const nextSlideForStage =
-      state.slideIndex + 1 < slides.length ? slides[state.slideIndex + 1] : null
+    // Cross the item boundary rather than stopping at the current item's
+    // last slide: when the operator is sitting on the last slide of item
+    // N, "next" is the FIRST slide of item N+1, not null. This matters
+    // beyond the stage monitor's "Up Next" panel — it's also the one
+    // piece of lookahead the output/stage windows get for warming a
+    // PowerPoint deck's parse before the operator actually advances into
+    // it (see the warm effects in OutputView/StageView). Stopping at the
+    // item boundary would make that lookahead go null at exactly the
+    // moment it matters most: the transition ONTO a new pptx deck.
+    //
+    // Named ...ForStage, NOT `nextSlide`: that identifier is already the
+    // store's advance ACTION in this scope, and shadowing it here would
+    // silently break SPACE.
+    const nextSlideForStage: SlidePayload | null =
+      state.slideIndex + 1 < slides.length
+        ? slides[state.slideIndex + 1]
+        : (state.items[state.itemIndex + 1]?.slides[0] ?? null)
     void window.api.output.setStageContext({
       currentSlide: currentSlide ?? null,
       nextSlide: nextSlideForStage,
@@ -585,7 +606,7 @@ function RunningView({
       totalSlides: slides.length,
       notes: liveNotes
     })
-  }, [currentItem, currentSlide, state.slideIndex, liveNotes])
+  }, [currentItem, currentSlide, state.items, state.itemIndex, state.slideIndex, liveNotes])
   // Pulled directly from the store rather than prop-drilled — the parent
   // baseTheme is still pulled because the slide grid cards below
   // need it to render per-card preview themes. The confidence
@@ -594,6 +615,140 @@ function RunningView({
   // projector's actual rendered pixels are what the operator sees,
   // not an independent re-render.
   const baseTheme = useThemeStore((s) => s.theme)
+
+  // ── PowerPoint deck warnings ────────────────────────────────────────
+  // Operator-facing only — RunningView is the ServiceMode component tree,
+  // which renders inside the operator's own window. It is never reached
+  // by OutputView or StageView (the projector / stage-monitor windows),
+  // so nothing pushed into this list can end up on a screen the
+  // congregation can see.
+  //
+  // Keyed by `${pptxPath}::${bucket}` — NOT by the human-readable reason
+  // text — rather than an array of composed strings. Two mechanisms feed
+  // this: the warm-on-entry preload below (one shot, whole-file) and
+  // reportPptxError (one call per failing slide's PptxThumb — see
+  // MediaPreview.tsx). The grid is unvirtualized, so a single broken deck
+  // can fail on all N of its slides at once; without this keying, that
+  // produces N near-identical banner lines (plus a 41st from preload)
+  // instead of the one line the operator actually needs.
+  //
+  // `bucket` is PptxSlideErrorKind — a stable classification assigned at
+  // the throw site in PptxSlideView, not derived from the message text.
+  // That distinction matters: a totally-unreadable file's message happens
+  // not to vary per slide, so keying on raw reason text "works" for that
+  // one case — but an out-of-range ordinal's message embeds the ordinal
+  // itself ("Slide 7 is missing..."), so every failing slide would
+  // produce a distinct reason string and none would collapse. Keying on
+  // the bucket instead of the text means a deck failing for the SAME
+  // underlying cause from both mechanisms (the common case: a
+  // missing/renamed file classifies as 'file-unreadable' whether caught
+  // here or inside PptxSlideView) collapses to one entry regardless of
+  // which mechanism reports it first, while genuinely different failure
+  // kinds for the same deck still get distinct, honest lines.
+  interface DeckWarning {
+    kind: 'preload' | 'render'
+    message: string
+    /** Distinct slide ordinals counted so far (render kind only) — lets
+     *  the message grow "N slides failed" without re-counting a slide
+     *  that reports again (StrictMode's dev-mode double effect-invoke,
+     *  or a card re-mounting after a scroll). */
+    ordinals: Set<number>
+  }
+  const [deckWarnings, setDeckWarnings] = useState<Record<string, DeckWarning>>({})
+
+  // Warm every PowerPoint deck referenced by this service up front. Two
+  // reasons: it removes any stall on the first advance onto a pptx item,
+  // and it surfaces a missing or corrupt file NOW — while the operator
+  // can still fix it — instead of on slide 12 mid-service. loadPptxDeck
+  // caches its parse promise per path, so this is a cheap no-op if a
+  // grid thumbnail (below) already triggered the same parse.
+  useEffect(() => {
+    const paths = [
+      ...new Set(
+        state.items.flatMap((item) =>
+          item.slides
+            .filter(
+              (s): s is Extract<SlidePayload, { kind: 'pptx-slide' }> =>
+                s.kind === 'pptx-slide'
+            )
+            .map((s) => s.pptxPath)
+        )
+      )
+    ]
+    for (const path of paths) {
+      void loadPptxDeck(path).catch((err) => {
+        console.error('[ServiceMode] deck failed to preload', path, err)
+        const fileName = path.split(/[/\\]/).pop() ?? path
+        // A preload failure can only mean the file itself couldn't be
+        // read/parsed — there's no ordinal involved, so it always
+        // classifies as 'file-unreadable'.
+        const bucket: PptxSlideErrorKind = 'file-unreadable'
+        // Unconditional overwrite (not a merge) — a whole-file preload
+        // failure is always the clearest framing for this key, whether
+        // it arrives before or after any per-slide render failures that
+        // share the same (path, bucket).
+        setDeckWarnings((prev) => ({
+          ...prev,
+          [`${path}::${bucket}`]: {
+            kind: 'preload',
+            message: `${fileName} could not be opened. Its slides will not project.`,
+            ordinals: new Set()
+          }
+        }))
+      })
+    }
+  }, [state.items])
+
+  // Stable across every render and every grid card — required because
+  // this callback is threaded down into PptxSlideView's onError, which
+  // sits in that component's effect dependency array. A fresh identity
+  // per render would cancel and restart the in-flight slide render on
+  // every unrelated ServiceMode re-render (video ticks, timer updates,
+  // keystrokes), repeatedly, mid-service.
+  const reportPptxError = useCallback(({ pptxPath, slideOrdinal, kind }: PptxThumbError) => {
+    setDeckWarnings((prev) => {
+      const key = `${pptxPath}::${kind}`
+      const existing = prev[key]
+      // A whole-deck preload failure already covers every slide in this
+      // file for this same bucket — a per-slide render failure on top
+      // of it is the same root cause, not new information.
+      if (existing?.kind === 'preload') return prev
+      const ordinals = new Set(existing?.ordinals)
+      if (ordinals.has(slideOrdinal)) return prev
+      ordinals.add(slideOrdinal)
+      const fileName = pptxPath.split(/[/\\]/).pop() ?? pptxPath
+      const n = ordinals.size
+      const slides = `${n} slide${n === 1 ? '' : 's'}`
+      // A partial render must not be reported as a failure. The slide DID
+      // draw; some shape or image inside it did not. Telling a volunteer
+      // "4 slides failed to render" minutes before a service, when the
+      // slides are fine apart from one missing image each, reads as "this
+      // deck is broken, pull it" — a false alarm that costs more than the
+      // missing image does.
+      const message =
+        kind === 'partial-render'
+          ? `${fileName} — ${slides} may be missing part of their content.`
+          : `${fileName} — ${slides} failed to render.`
+      return {
+        ...prev,
+        [key]: { kind: 'render', message, ordinals }
+      }
+    })
+  }, [])
+
+  const dismissDeckWarning = useCallback((key: string) => {
+    setDeckWarnings((prev) => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }, [])
+
+  const deckWarningItems: WarningItem[] = Object.entries(deckWarnings).map(([key, w]) => ({
+    id: key,
+    message: w.message
+  }))
 
   // Flatten every slide of every item into one grid feed. Section label
   // and shortcut are derived here because the SlidePayload type (shared
@@ -646,6 +801,19 @@ function RunningView({
             shortcut: '▶',
             lines: [],
             preview: { kind: 'video', path: slide.videoPath }
+          })
+        } else if (slide.kind === 'pptx-slide') {
+          out.push({
+            itemIndex: itemIdx,
+            slideIndex: slideIdx,
+            sectionLabel: item.label,
+            shortcut: `${slide.slideOrdinal}`,
+            lines: [],
+            preview: {
+              kind: 'pptx',
+              pptxPath: slide.pptxPath,
+              slideOrdinal: slide.slideOrdinal
+            }
           })
         } else {
           // countdown
@@ -724,6 +892,7 @@ function RunningView({
         shortcut={entry.shortcut}
         lines={entry.lines}
         preview={entry.preview}
+        onPreviewError={reportPptxError}
         theme={cardTheme}
         active={active}
         style={active ? { scrollMarginTop: activeCardScrollMargin } : undefined}
@@ -820,6 +989,12 @@ function RunningView({
           </Button>
         </div>
       </header>
+
+      {/* Deck warnings — preload failures at entry + per-slide render
+          failures during the service, both routed through
+          reportPptxError/deckWarnings above. Operator-only: see
+          WarningBanner.tsx for why this can never reach the projector. */}
+      <WarningBanner items={deckWarningItems} onDismiss={dismissDeckWarning} />
 
       {/* Main: three-panel layout
           ┌─ items list ─┬──── slide grid ────┬─ confidence ─┐

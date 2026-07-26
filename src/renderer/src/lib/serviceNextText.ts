@@ -51,6 +51,8 @@ export function slidePreviewText(slide: SlidePayload): string {
       return 'Video'
     case 'pdf-page':
       return `PDF page ${slide.pageIndex}`
+    case 'pptx-slide':
+      return `PowerPoint slide ${slide.slideOrdinal}`
     case 'countdown':
       return 'Countdown'
     default: {

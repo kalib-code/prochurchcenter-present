@@ -63,6 +63,25 @@ export function getFontsIndexPath(): string {
 }
 
 /**
+ * Canva-imported PDFs. A subdirectory of media/ rather than a sibling so
+ * `addDirToZip` picks it up in backups with no changes to backup.ts —
+ * it already recurses, and restore already handles nested paths.
+ */
+export function getCanvaMediaDir(): string {
+  return join(getMediaDir(), 'canva')
+}
+
+/**
+ * Encrypted Canva OAuth tokens. Not in settings.json: a refresh token is
+ * a standing grant to an entire Canva account, so it is written through
+ * Electron's safeStorage rather than the plain-JSON pattern used by
+ * every other file in this directory.
+ */
+export function getCanvaTokensPath(): string {
+  return join(root(), 'canva-tokens.enc')
+}
+
+/**
  * Bible cache root — one subdirectory per translation, files keyed by
  * `{book}-{chapter}.json`. Translation/book metadata caches live next
  * to the per-chapter files in their respective translation dirs (or in
@@ -95,6 +114,7 @@ export function ensureDirectories(): void {
     getSetlistsDir(),
     getThemesDir(),
     getMediaDir(),
+    getCanvaMediaDir(),
     getBibleCacheDir(),
     getFontsDir()
   ]

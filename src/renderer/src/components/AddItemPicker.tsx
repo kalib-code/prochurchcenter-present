@@ -22,8 +22,10 @@
 
 import { useEffect } from 'react'
 import type { Song } from '@shared/types'
+import type { CanvaImportResult } from '@shared/canva'
 import { itemKindCode, itemKindLabel } from './ItemKindIcon'
 import { SongPicker } from './SongPicker'
+import { CanvaPicker } from './CanvaPicker'
 import { Badge } from './ui/Badge'
 import { MonoLabel } from './ui/MonoLabel'
 import { HairlineGrid } from './ui/HairlineGrid'
@@ -34,28 +36,40 @@ interface Handlers {
   onAddImage: () => void
   onAddVideo: () => void
   onAddDeck: () => void
+  onAddPptx: () => void
   onAddCountdown: () => void
   onAddDivider: () => void
+  /** Opens the Canva sub-view. Mirrors the "song" two-step interaction. */
+  onOpenCanva: () => void
+  /** Fired once a Canva design has been downloaded as a PDF. */
+  onImportCanva: (result: CanvaImportResult, designId: string) => void
 }
 
 interface Props extends Handlers {
   songs: Song[]
-  /** Controls which sub-view is showing: the grid or the song sublist. */
-  view: 'grid' | 'song'
-  setView: (view: 'grid' | 'song') => void
+  /** Controls which sub-view is showing: the grid, the song sublist, or Canva. */
+  view: 'grid' | 'song' | 'canva'
+  setView: (view: 'grid' | 'song' | 'canva') => void
   /** Called when the user dismisses the picker (ESC). */
   onClose: () => void
 }
 
 interface KindCardSpec {
+  /**
+   * Includes 'canva', which is an import *source* rather than an item kind
+   * — a Canva import lands as a `deck`. It sits in the same grid because
+   * that is where an operator looks for "get content into the setlist".
+   */
   kind:
     | 'song'
     | 'scripture'
     | 'image'
     | 'video'
     | 'deck'
+    | 'pptx'
     | 'countdown'
     | 'section-divider'
+    | 'canva'
   hint: string
 }
 
@@ -65,8 +79,10 @@ const KIND_CARDS: KindCardSpec[] = [
   { kind: 'image', hint: 'Full-screen photo' },
   { kind: 'video', hint: 'Plays with sound' },
   { kind: 'deck', hint: 'Import a PDF' },
+  { kind: 'pptx', hint: 'Import PowerPoint' },
   { kind: 'countdown', hint: 'Pre-service timer' },
-  { kind: 'section-divider', hint: 'Grouping only' }
+  { kind: 'section-divider', hint: 'Grouping only' },
+  { kind: 'canva', hint: 'From your Canva account' }
 ]
 
 export function AddItemPicker(props: Props): JSX.Element {
@@ -80,8 +96,11 @@ export function AddItemPicker(props: Props): JSX.Element {
     onAddImage,
     onAddVideo,
     onAddDeck,
+    onAddPptx,
     onAddCountdown,
-    onAddDivider
+    onAddDivider,
+    onOpenCanva,
+    onImportCanva
   } = props
 
   // ESC closes the picker — keyboard operators shouldn't have to chase
@@ -111,11 +130,17 @@ export function AddItemPicker(props: Props): JSX.Element {
       case 'deck':
         onAddDeck()
         return
+      case 'pptx':
+        onAddPptx()
+        return
       case 'countdown':
         onAddCountdown()
         return
       case 'section-divider':
         onAddDivider()
+        return
+      case 'canva':
+        onOpenCanva()
         return
     }
   }
@@ -135,6 +160,26 @@ export function AddItemPicker(props: Props): JSX.Element {
         </div>
         <div className="p-3">
           <SongPicker songs={songs} onPick={onPickSong} />
+        </div>
+      </div>
+    )
+  }
+
+  if (view === 'canva') {
+    return (
+      <div>
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setView('grid')}
+            className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-white"
+          >
+            ← BACK
+          </button>
+          <MonoLabel tone="dim">IMPORT FROM CANVA</MonoLabel>
+        </div>
+        <div className="p-3">
+          <CanvaPicker onImported={onImportCanva} />
         </div>
       </div>
     )

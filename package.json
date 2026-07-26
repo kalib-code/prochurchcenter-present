@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:canva-stub": "node scripts/canva-stub-server.mjs",
     "build": "pnpm run typecheck && pnpm run test && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "setup:electron": "node node_modules/electron/install.js",
@@ -23,6 +24,7 @@
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
+    "@aiden0z/pptx-renderer": "^1.2.4",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -50,6 +52,7 @@
     "electron": "^34.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^3.0.0",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.3",
     "prettier": "^3.5.1",
     "sharp": "^0.34.5",

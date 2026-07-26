@@ -289,6 +289,29 @@ function slideifyItem(
     }
   }
 
+  if (item.kind === 'pptx') {
+    // Expand into N pptx-slide payloads, one per VISIBLE slide. slideCount was
+    // recorded at add-time (via probeVisibleSlideCount) so this stays a pure
+    // synchronous fan-out, exactly like the deck branch above. A deck with 0
+    // slides (unreadable / all-hidden) is dropped rather than shown broken.
+    if (!item.pptxPath || item.slideCount <= 0) return null
+    const slides: SlidePayload[] = []
+    for (let i = 1; i <= item.slideCount; i++) {
+      slides.push({
+        kind: 'pptx-slide',
+        pptxPath: item.pptxPath,
+        slideOrdinal: i,
+        slideCount: item.slideCount
+      })
+    }
+    return {
+      id: item.id,
+      kind: 'pptx',
+      label: item.title?.trim() || 'PowerPoint',
+      slides
+    }
+  }
+
   // Exhaustiveness — TypeScript forces a new branch above if a kind is added
   const _never: never = item
   return _never

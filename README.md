@@ -2,6 +2,8 @@
 
 A PH-first church presenter. Deliberately minimal. Offline-first. Built for the Sunday-morning volunteer.
 
+Pull slide decks straight from a connected Canva account into a setlist — exported as PDF and cached locally, so a service still runs if the internet drops mid-Sunday.
+
 ## For church volunteers — installing the app
 
 👉 **[Read the installation guide (INSTALL.md)](./INSTALL.md)** — step-by-step instructions for Windows, macOS, and Linux, including how to get past the "unrecognized app" security warnings you'll see on first launch. (We're not code-signed yet; the guide explains exactly what to click.)
@@ -54,7 +56,11 @@ This runs `node node_modules/electron/install.js` directly and downloads the Ele
 
 ## Stack
 
-Electron 34 · electron-vite · React 18 · TypeScript · Tailwind v3 · in-house KLB design system · Zustand · react-router
+Electron 34 · electron-vite · React 18 · TypeScript · Tailwind v3 · in-house KLB design system · Zustand · react-router · @aiden0z/pptx-renderer (live .pptx projection)
+
+PowerPoint decks project directly — pick a `.pptx` when adding a setlist item, and it projects with no PDF export step.
+Only `.pptx` is supported; for `.ppt`, `.key`, or Google Slides, export to PDF
+and add it as a PDF deck.
 
 ## License
 

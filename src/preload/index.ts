@@ -18,6 +18,7 @@ import {
   type StageContext,
   type BackupImportMode
 } from '@shared/ipc-contract'
+import type { CanvaImportProgress } from '@shared/canva'
 import type { Theme, ThemeOverride } from '@shared/types'
 
 /**
@@ -105,6 +106,23 @@ const api: PresentApi = {
       ipcRenderer.invoke(CHANNELS.bible.getChapter, translationId, bookId, chapter),
     lookup: (translationId: string, reference: string) =>
       ipcRenderer.invoke(CHANNELS.bible.lookup, translationId, reference)
+  },
+  canva: {
+    getState: () => ipcRenderer.invoke(CHANNELS.canva.getState),
+    connect: () => ipcRenderer.invoke(CHANNELS.canva.connect),
+    disconnect: () => ipcRenderer.invoke(CHANNELS.canva.disconnect),
+    listDesigns: (query: string | null, continuation: string | null) =>
+      ipcRenderer.invoke(CHANNELS.canva.listDesigns, query, continuation),
+    importDesign: (designId: string, title: string) =>
+      ipcRenderer.invoke(CHANNELS.canva.importDesign, designId, title),
+    checkStale: (items: { designId: string; designUpdatedAt: string }[]) =>
+      ipcRenderer.invoke(CHANNELS.canva.checkStale, items),
+    deletePdf: (absPath: string) => ipcRenderer.invoke(CHANNELS.canva.deletePdf, absPath),
+    onImportProgress: (callback: (p: CanvaImportProgress) => void): (() => void) => {
+      const listener = (_: IpcRendererEvent, p: CanvaImportProgress): void => callback(p)
+      ipcRenderer.on(CHANNELS.canva.eventImportProgress, listener)
+      return () => ipcRenderer.removeListener(CHANNELS.canva.eventImportProgress, listener)
+    }
   },
   output: {
     setSlide: (payload: SlidePayload) =>

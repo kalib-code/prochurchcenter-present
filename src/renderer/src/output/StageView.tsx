@@ -33,6 +33,7 @@ import type { Theme, ThemeOverride } from '@shared/types'
 import { SlideRenderer } from '../components/SlideRenderer'
 import { useThemeStore } from '../stores/useThemeStore'
 import { mergeThemeOverride } from '../lib/themeOverride'
+import { loadPptxDeck } from '../lib/pptxLoader'
 
 export function StageView(): JSX.Element {
   const [context, setContext] = useState<StageContext>({
@@ -69,6 +70,26 @@ export function StageView(): JSX.Element {
     const off = window.api.theme.onChange((next) => setFromBroadcast(next))
     return off
   }, [load, setFromBroadcast])
+
+  // Warm PowerPoint decks ahead of time. Same rationale as OutputView's
+  // matching effect: this is a SEPARATE BrowserWindow with its own
+  // pptxLoader cache, invisible to whatever ServiceMode warmed in the
+  // operator window. `context.nextSlide` gives one slide of lookahead —
+  // including across setlist item boundaries (see ServiceMode.tsx) — so
+  // a deck's parse can be in flight before the operator actually
+  // advances onto its first slide, instead of racing it live in the
+  // "Up Next" panel and the main "Live" panel at the same moment.
+  // loadPptxDeck dedupes by absolute path, so this is a cheap no-op once
+  // a slide has actually rendered.
+  useEffect(() => {
+    for (const s of [context.currentSlide, context.nextSlide]) {
+      if (s?.kind === 'pptx-slide') {
+        void loadPptxDeck(s.pptxPath).catch((err) => {
+          console.error('[StageView] deck warm failed', s.pptxPath, err)
+        })
+      }
+    }
+  }, [context])
 
   // Stage monitor never plays the theme's background video. Motion
   // behind the lyrics is distracting for the speaker, who needs to

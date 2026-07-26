@@ -68,6 +68,21 @@ export interface Song {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Provenance for a deck imported from a connected Canva account.
+ *
+ * Grouped into one object (rather than three optional fields on the deck
+ * item) so it is wholly present or wholly absent — there is no
+ * representable half-state holding a design id with nothing to compare
+ * it against.
+ */
+export interface CanvaOrigin {
+  designId: string
+  /** Canva's `updated_at` as of import. ISO 8601 — Canva sends Unix seconds. */
+  designUpdatedAt: string
+  importedAt: string
+}
+
+/**
  * Planned duration in whole minutes, used by the setlist editor's running
  * clock. Absent means "not yet estimated" and contributes 0. Section
  * dividers are always 0 — they occupy no service time because they never
@@ -77,6 +92,12 @@ export interface SetlistItemTiming {
   durationMinutes?: number
 }
 
+/**
+ * The union is parenthesised before the `&` so the timing field lands on
+ * EVERY variant. Without the parentheses the intersection would bind to
+ * the last member alone and the rest would silently lack it. Narrowing on
+ * `kind` is unaffected.
+ */
 export type SetlistItem = (
   | { kind: 'song'; id: string; songId: string }
   | {
@@ -129,6 +150,31 @@ export type SetlistItem = (
       id: string
       pdfPath: string
       pageCount: number
+      /** Optional display name shown in the operator upcoming list */
+      title?: string
+      /**
+       * Present only when this deck was pulled from a connected Canva
+       * account. Its presence is the sole trigger for the refresh
+       * affordance — a hand-picked PDF deck has no `canva` key at all.
+       */
+      canva?: CanvaOrigin
+    }
+  /**
+   * PowerPoint deck rendered live — no PDF export step. The operator picks a
+   * .pptx and we render each slide in the projector via @aiden0z/pptx-renderer.
+   *
+   * slideCount counts VISIBLE slides only (PowerPoint skips slides marked
+   * hidden when presenting, so we do too). It is cached at add-time for the
+   * same reason deck.pageCount is: slideify expands items synchronously.
+   *
+   * Only .pptx is supported — the renderer parses Office Open XML, so legacy
+   * binary .ppt, .key, and .odp are not accepted by the file picker.
+   */
+  | {
+      kind: 'pptx'
+      id: string
+      pptxPath: string
+      slideCount: number
       /** Optional display name shown in the operator upcoming list */
       title?: string
     }

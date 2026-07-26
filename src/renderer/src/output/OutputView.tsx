@@ -28,6 +28,7 @@ import type { Theme, ThemeOverride } from '@shared/types'
 import { SlideRenderer } from '../components/SlideRenderer'
 import { useThemeStore } from '../stores/useThemeStore'
 import { mergeThemeOverride } from '../lib/themeOverride'
+import { loadPptxDeck } from '../lib/pptxLoader'
 
 export function OutputView(): JSX.Element {
   const [slide, setSlide] = useState<SlidePayload | null>(null)
@@ -65,6 +66,38 @@ export function OutputView(): JSX.Element {
     const off = window.api.theme.onChange((next) => setFromBroadcast(next))
     return off
   }, [load, setFromBroadcast])
+
+  // Warm PowerPoint decks ahead of time. This window has its own JS heap
+  // and its own pptxLoader module-level cache — a deck warmed by
+  // ServiceMode's preload effect in the OPERATOR window is invisible
+  // here (see pptxLoader.ts's module doc comment). Without this, the
+  // first advance onto a pptx slide pays the full cold cost (chunk load
+  // + file fetch + parse) live, and PptxSlideView leaves the DOM
+  // untouched while that's in flight — the congregation sees whatever
+  // was already on screen (often black/logo), which reads as a dropped
+  // keypress.
+  //
+  // stageContext is the one piece of lookahead this window gets: it
+  // carries not just the current slide (which onSlide already tells us,
+  // too late to matter — PptxSlideView starts its own load at the exact
+  // same moment) but also `nextSlide`, pushed by ServiceMode a full
+  // slide-change ahead of the operator actually advancing onto it. That
+  // includes crossing from one setlist item into the next (see the
+  // nextSlide computation in ServiceMode.tsx) — exactly the transition
+  // this fix targets. loadPptxDeck dedupes by absolute path, so warming
+  // something already-current or already-warmed is a cheap no-op.
+  useEffect(() => {
+    const off = window.api.output.onStageContext((ctx) => {
+      for (const s of [ctx.currentSlide, ctx.nextSlide]) {
+        if (s?.kind === 'pptx-slide') {
+          void loadPptxDeck(s.pptxPath).catch((err) => {
+            console.error('[OutputView] deck warm failed', s.pptxPath, err)
+          })
+        }
+      }
+    })
+    return off
+  }, [])
 
   // Merge: base theme + item override. mergeThemeOverride filters out
   // null/undefined fields in the override so they inherit from the
