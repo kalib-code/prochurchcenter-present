@@ -171,7 +171,7 @@ export function Settings(): JSX.Element {
           <h2 className="text-[20px] font-extrabold tracking-[-0.02em] text-foreground">
             {activeSection.label}
           </h2>
-          <p className="mb-[22px] mt-1.5 text-[12.5px] leading-[1.6] text-muted-foreground">
+          <p className="mb-[22px] mt-1.5 text-[12.5px] leading-[1.6] text-soft">
             {activeSection.description}
           </p>
 
@@ -884,7 +884,7 @@ function AboutSection(): JSX.Element {
           <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-signal">
             Sunday Task
           </p>
-          <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+          <p className="mt-3 text-[12px] leading-relaxed text-soft">
             A minimal church presenter built for Filipino worship teams.
             Designed to be reliable on Sunday morning, editable on Saturday
             night, and learnable in one rehearsal.
@@ -914,7 +914,7 @@ function Row({
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-semibold text-foreground">{label}</div>
         {hint && (
-          <div className="mt-[3px] text-[11.5px] leading-[1.55] text-muted-foreground">
+          <div className="mt-[3px] text-[11.5px] leading-[1.55] text-soft">
             {hint}
           </div>
         )}
