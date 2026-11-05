@@ -8,10 +8,6 @@
  *
  * Warnings are amber (`warn`), never orange or red: red is reserved for
  * ON AIR, orange for selection/brand.
- *
- * PreflightBanner is the next-service card's one-line nudge — it shows
- * only the FIRST warning, with its remedy button, because the card has
- * room for one line and the checklist below carries the rest.
  */
 
 import type { PreflightCheck, PreflightReport } from '@shared/ipc-contract'
@@ -25,41 +21,6 @@ export function preflightSummaryText(checks: PreflightCheck[]): string {
   const { okCount, warningCount } = summarize(checks)
   if (warningCount === 0) return `${okCount} ready`
   return `${okCount} ready · ${warningCount} need${warningCount === 1 ? 's' : ''} attention`
-}
-
-export function PreflightBanner({
-  check,
-  count,
-  onAct
-}: {
-  check: PreflightCheck
-  count: number
-  onAct: (check: PreflightCheck) => void
-}): JSX.Element {
-  const more = count - 1
-  return (
-    <div
-      role="status"
-      className="flex items-center gap-3 rounded-lg bg-warn/10 py-2 pl-3 pr-2 ring-1 ring-inset ring-warn/20"
-    >
-      <AlertIcon size={16} className="shrink-0 text-warn" />
-      <span className="min-w-0 flex-1 truncate text-[13px] text-bone">
-        <span className="font-medium text-foreground">{check.name}</span>
-        <span className="text-soft"> needs attention</span>
-        {more > 0 && (
-          <span className="text-muted-foreground">
-            {' '}
-            · {more} more below
-          </span>
-        )}
-      </span>
-      {check.remedy && (
-        <Button size="sm" variant="secondary" onClick={() => onAct(check)} className="shrink-0">
-          {check.remedy.label}
-        </Button>
-      )}
-    </div>
-  )
 }
 
 export function PreflightPanel({

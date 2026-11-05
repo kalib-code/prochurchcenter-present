@@ -179,3 +179,40 @@ export function songDeleteConfirmText(title: string, usedIn: Setlist[]): string 
     usedIn.length === 1 ? 'It will be removed from that service.' : 'It will be removed from these services.'
   return `${head}\n\nUsed in: ${names}\n${tail}`
 }
+
+/**
+ * Home's "Other setlists", split by date. Upcoming is soonest first (what
+ * the operator works on next); past is newest first (what they look back
+ * at). `excludeId` is the next-service card's setlist, shown separately.
+ * Today's services count as upcoming.
+ */
+export function splitByDate(
+  setlists: Setlist[],
+  excludeId: string | null,
+  today: string = todayISO()
+): { upcoming: Setlist[]; past: Setlist[] } {
+  const rest = setlists.filter((s) => s.id !== excludeId)
+  return {
+    upcoming: rest.filter((s) => s.date >= today).sort((a, b) => a.date.localeCompare(b.date)),
+    past: rest.filter((s) => s.date < today).sort((a, b) => b.date.localeCompare(a.date))
+  }
+}
+
+export type ItemIssue = 'missing-song' | 'missing-media'
+
+/**
+ * What is wrong with one item, for the service-plan preview. `songsById`
+ * must be loaded (an empty map would flag every song). `exists` comes
+ * from files.checkExists; a path absent from it is still being checked
+ * and is not flagged yet.
+ */
+export function itemIssue(
+  item: SetlistItem,
+  songsById: Map<string, unknown>,
+  exists: Record<string, boolean>,
+  mediaPath: string | null
+): ItemIssue | null {
+  if (item.kind === 'song' && !songsById.has(item.songId)) return 'missing-song'
+  if (mediaPath && exists[mediaPath] === false) return 'missing-media'
+  return null
+}

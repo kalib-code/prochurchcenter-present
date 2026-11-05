@@ -2,27 +2,94 @@
  * NextServiceCard — Home's lead card for the setlist `pickHero` chose
  * (today's service, else the next upcoming one, else the latest past one).
  *
- * Left: name, date · items · slides, the optional pre-flight nudge, then
- * one primary action (Start service) with Edit / Rehearse beside it and
- * Clone last Sunday / Delete as quiet ghost actions underneath.
+ * Left: a live countdown ("Starts in 1h 52m"), name, date · start–end ·
+ * items · slides, then one primary action (Start service) with Edit /
+ * Rehearse beside it and Clone last Sunday / Delete as quiet ghost
+ * actions underneath.
  * Right: the service plan — the first five items, kind badges neutral.
+ * Items with a problem (deleted song, moved media file) get an amber
+ * badge in place of their kind, and problems past row five are counted
+ * in the footer, so nothing broken hides behind "+N more".
  */
 
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Setlist, SetlistItem, Song } from '@shared/types'
-import { formatServiceDate, isToday } from '../../lib/setlist-helpers'
+import { mediaPathOf } from '@shared/setlist-media'
+import { formatServiceDate, itemIssue, type ItemIssue } from '../../lib/setlist-helpers'
+import { serviceCountdown, type CountdownPhase } from '../../lib/serviceCountdown'
 import { slideifySetlist } from '../../lib/slideify'
+import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { StatusDot } from '../ui/StatusDot'
 import { itemKindLabel } from '../ItemKindIcon'
-import { CopyIcon, PlayIcon, TrashIcon } from '../icons'
+import { AlertIcon, CopyIcon, PlayIcon, TrashIcon } from '../icons'
+
+const ISSUE_LABEL: Record<ItemIssue, string> = {
+  'missing-song': 'Song deleted',
+  'missing-media': 'File missing'
+}
+
+/** The current time, refreshed every minute on the minute. */
+function useMinuteClock(): Date {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined
+    const tick = (): void => setNow(new Date())
+    const timeout = setTimeout(() => {
+      tick()
+      interval = setInterval(tick, 60_000)
+    }, 60_000 - (Date.now() % 60_000))
+    return () => {
+      clearTimeout(timeout)
+      if (interval) clearInterval(interval)
+    }
+  }, [])
+  return now
+}
+
+/**
+ * Which media files in the setlist are missing. Re-checks when the set
+ * of paths changes. A path absent from the result is still unchecked.
+ */
+function useMediaExists(items: SetlistItem[]): Record<string, boolean> {
+  const key = useMemo(
+    () => [...new Set(items.map(mediaPathOf).filter((p): p is string => !!p))].sort().join('\n'),
+    [items]
+  )
+  const [exists, setExists] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    if (!key) return
+    let cancelled = false
+    window.api.files
+      .checkExists(key.split('\n'))
+      .then((r) => {
+        if (!cancelled) setExists(r)
+      })
+      .catch(() => {
+        // Pre-flight still reports media; the plan just shows no badges.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [key])
+  return exists
+}
+
+/** Green dot on the day of the service; it pulses while it's running. */
+const PHASE_DOT: Record<CountdownPhase, boolean | 'pulse'> = {
+  today: true,
+  running: 'pulse',
+  tomorrow: false,
+  later: false,
+  ended: false
+}
 
 export function NextServiceCard({
   setlist,
   songsById,
-  preflightNudge,
+  songsLoaded,
   onDelete,
   onCloneLast,
   canCloneLast,
@@ -30,7 +97,8 @@ export function NextServiceCard({
 }: {
   setlist: Setlist
   songsById: Map<string, Song>
-  preflightNudge: ReactNode
+  /** False until the library has loaded — until then no song is "deleted". */
+  songsLoaded: boolean
   onDelete: () => void
   onCloneLast: () => void
   canCloneLast: boolean
@@ -44,7 +112,24 @@ export function NextServiceCard({
 
   const rendered = useMemo(() => slideifySetlist(setlist, songsById), [setlist, songsById])
   const slideCount = rendered.reduce((sum, item) => sum + item.slides.length, 0)
-  const today = isToday(setlist)
+  const countdown = serviceCountdown(setlist, useMinuteClock())
+  const dot = PHASE_DOT[countdown.phase]
+
+  const exists = useMediaExists(setlist.items)
+  const issues = useMemo(() => {
+    const m = new Map<string, ItemIssue>()
+    for (const item of setlist.items) {
+      const issue = itemIssue(
+        item,
+        songsLoaded ? songsById : ALL_SONGS,
+        exists,
+        mediaPathOf(item)
+      )
+      if (issue) m.set(item.id, issue)
+    }
+    return m
+  }, [setlist.items, songsById, songsLoaded, exists])
+  const hiddenIssues = setlist.items.slice(planRows.length).filter((i) => issues.has(i.id)).length
 
   return (
     <section
@@ -54,8 +139,12 @@ export function NextServiceCard({
       {/* ── Left: headline + actions ─────────────────────────── */}
       <div className="flex min-w-0 flex-col">
         <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-soft">
-          {today && <StatusDot tone="ok" />}
-          {today ? 'Today' : 'Next service'}
+          {dot && <StatusDot tone="ok" pulse={dot === 'pulse'} />}
+          {countdown.phase === 'later' || countdown.phase === 'tomorrow'
+            ? `Next service · ${countdown.label}`
+            : countdown.phase === 'ended' && countdown.label === 'Past service'
+              ? 'Most recent service'
+              : countdown.label}
         </div>
 
         <h2 className="truncate text-[34px] font-semibold leading-tight tracking-[-0.025em] text-foreground">
@@ -65,12 +154,13 @@ export function NextServiceCard({
         <p className="mt-1.5 text-[14px] tabular-nums text-soft">
           {formatServiceDate(setlist.date)}
           <Sep />
+          {countdown.startsAt}
+          {countdown.endsAt && ` – ${countdown.endsAt}`}
+          <Sep />
           {itemCount} item{itemCount === 1 ? '' : 's'}
           <Sep />
           {slideCount} slide{slideCount === 1 ? '' : 's'}
         </p>
-
-        {preflightNudge && <div className="mt-5">{preflightNudge}</div>}
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
           <Button variant="primary" size="lg" asChild>
@@ -111,9 +201,16 @@ export function NextServiceCard({
       <div className="flex min-w-0 flex-col self-start rounded-lg bg-panel/70 p-2">
         <div className="flex items-baseline justify-between px-2.5 pb-2 pt-1.5">
           <span className="text-[13px] font-medium text-quiet">Service plan</span>
-          <span className="text-[12px] tabular-nums text-muted-foreground">
-            {itemCount} item{itemCount === 1 ? '' : 's'}
-          </span>
+          {issues.size > 0 ? (
+            <span className="flex items-center gap-1.5 text-[12px] text-warn">
+              <AlertIcon size={13} />
+              {issues.size} need{issues.size === 1 ? 's' : ''} fixing
+            </span>
+          ) : (
+            <span className="text-[12px] tabular-nums text-muted-foreground">
+              {itemCount} item{itemCount === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
 
         {planRows.length === 0 ? (
@@ -122,31 +219,64 @@ export function NextServiceCard({
           </p>
         ) : (
           <ol className="flex flex-col">
-            {planRows.map((item, i) => (
-              <li
-                key={item.id}
-                className="flex h-10 items-center gap-3 rounded-md px-2.5"
-              >
-                <span className="w-4 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">
-                  {i + 1}
-                </span>
-                <span
-                  className={
-                    item.kind === 'section-divider'
-                      ? 'min-w-0 flex-1 truncate text-[13px] font-medium text-quiet'
-                      : 'min-w-0 flex-1 truncate text-[13.5px] text-bone'
-                  }
-                >
-                  {previewLabel(item, songsById)}
-                </span>
-                <Badge tone="neutral" className="shrink-0">
-                  {itemKindLabel(item.kind)}
-                </Badge>
-              </li>
-            ))}
+            {planRows.map((item, i) => {
+              const issue = issues.get(item.id)
+              const row = (
+                <>
+                  <span className="w-4 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">
+                    {i + 1}
+                  </span>
+                  <span
+                    className={
+                      item.kind === 'section-divider'
+                        ? 'min-w-0 flex-1 truncate text-[13px] font-medium text-quiet'
+                        : 'min-w-0 flex-1 truncate text-[13.5px] text-bone'
+                    }
+                  >
+                    {previewLabel(item, songsById)}
+                  </span>
+                  {issue ? (
+                    <Badge tone="warn" className="shrink-0">
+                      <AlertIcon size={12} />
+                      {ISSUE_LABEL[issue]}
+                    </Badge>
+                  ) : (
+                    <Badge tone="neutral" className="shrink-0">
+                      {itemKindLabel(item.kind)}
+                    </Badge>
+                  )}
+                </>
+              )
+              const rowClass = 'flex h-10 items-center gap-3 rounded-md px-2.5'
+              return (
+                <li key={item.id}>
+                  {issue ? (
+                    // A broken row opens the editor, where Relink lives.
+                    <Link
+                      to={`/setlists/${setlist.id}`}
+                      title="Open the setlist to fix this"
+                      className={cn(
+                        rowClass,
+                        'transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70'
+                      )}
+                    >
+                      {row}
+                    </Link>
+                  ) : (
+                    <div className={rowClass}>{row}</div>
+                  )}
+                </li>
+              )
+            })}
             {hiddenCount > 0 && (
               <li className="px-2.5 pb-1 pt-1.5 text-[12.5px] text-muted-foreground">
                 + {hiddenCount} more
+                {hiddenIssues > 0 && (
+                  <span className="text-warn">
+                    {' '}
+                    · {hiddenIssues} need{hiddenIssues === 1 ? 's' : ''} fixing
+                  </span>
+                )}
               </li>
             )}
           </ol>
@@ -155,6 +285,9 @@ export function NextServiceCard({
     </section>
   )
 }
+
+/** Stand-in library before songs load: claims every id, so none is flagged. */
+const ALL_SONGS = { has: () => true } as unknown as Map<string, unknown>
 
 function Sep(): JSX.Element {
   return (

@@ -6,46 +6,49 @@
  * "New setlist" button.
  *
  * Next service card (`rounded-xl bg-raised`):
- *   - Left pane  : "Next service" / "Today" label, setlist name, date ·
- *                  items · slides meta, an amber one-line pre-flight
- *                  nudge (if any check needs attention), Start service /
+ *   - Left pane  : a live countdown ("Starts in 1h 52m"), setlist name,
+ *                  date · start–end · items · slides, Start service /
  *                  Edit / Rehearse, and quiet Clone / Delete actions.
- *   - Right pane : Service plan — the first five items with neutral kind
- *                  badges, so the operator sees AT A GLANCE what the
- *                  service looks like without opening it.
+ *   - Right pane : Service plan — the first five items, with an amber
+ *                  badge on any item whose song or file is gone.
  *
- * Below the card: the pre-flight checklist (checked on launch and on
- * demand — never polled), then the other saved setlists as a card grid.
+ * Below the card, in order: the pre-flight checklist (checked on launch
+ * and on demand — never polled), upcoming setlists, song rotation hints,
+ * and past setlists (collapsed — they pile up week after week).
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { PreflightCheck, PreflightReport } from '@shared/ipc-contract'
-import type { Song } from '@shared/types'
+import type { Setlist, Song } from '@shared/types'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import {
   nextSundayISO,
   pickCloneSource,
   pickHero,
-  suggestCloneDefaults
+  splitByDate,
+  suggestCloneDefaults,
+  todayISO
 } from '../lib/setlist-helpers'
-import { summarize } from '../lib/preflight'
+import { songRotation } from '../lib/songRotation'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PageHeader } from '../components/ui/PageHeader'
-import { PreflightBanner, PreflightPanel } from '../components/PreflightPanel'
+import { PreflightPanel } from '../components/PreflightPanel'
 import { NextServiceCard } from '../components/home/NextServiceCard'
 import { SetlistCard } from '../components/home/SetlistCard'
+import { SongRotationPanel } from '../components/home/SongRotationPanel'
 import { CalendarIcon, PlusIcon } from '../components/icons'
 
 export function Home(): JSX.Element {
   const navigate = useNavigate()
   const { setlists, loading, error, load, create, remove, clone } = useSetlistStore()
-  const { songs, load: loadSongs } = useLibraryStore()
+  const { songs, loaded: songsLoaded, load: loadSongs } = useLibraryStore()
   const [busy, setBusy] = useState(false)
   const [preflight, setPreflight] = useState<PreflightReport | null>(null)
   const [preflightBusy, setPreflightBusy] = useState(false)
+  const [showPast, setShowPast] = useState(false)
 
   useEffect(() => {
     load()
@@ -61,8 +64,16 @@ export function Home(): JSX.Element {
   }, [songs])
 
   const heroSetlist = pickHero(setlists)
-  const otherSetlists = setlists.filter((s) => s.id !== heroSetlist?.id)
   const heroId = heroSetlist?.id ?? null
+  const { upcoming, past } = useMemo(() => splitByDate(setlists, heroId), [setlists, heroId])
+
+  // History up to the next service, so a song already planned for it
+  // counts toward its streak.
+  const rotation = useMemo(() => {
+    const today = todayISO()
+    const upTo = heroSetlist && heroSetlist.date > today ? heroSetlist.date : today
+    return songRotation(setlists, songs, upTo)
+  }, [setlists, songs, heroSetlist])
 
   // Pre-flight is checked once we know which setlist to check against
   // (heroId starts null until setlists finish loading, then settles),
@@ -133,16 +144,6 @@ export function Home(): JSX.Element {
     await remove(id)
   }
 
-  const preflightSummary = preflight ? summarize(preflight.checks) : null
-  const preflightNudge =
-    preflightSummary && preflightSummary.firstWarning ? (
-      <PreflightBanner
-        check={preflightSummary.firstWarning}
-        count={preflightSummary.warningCount}
-        onAct={handlePreflightRemedy}
-      />
-    ) : null
-
   return (
     <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       <PageHeader title="Home" />
@@ -166,7 +167,7 @@ export function Home(): JSX.Element {
             <NextServiceCard
               setlist={heroSetlist}
               songsById={songsById}
-              preflightNudge={preflightNudge}
+              songsLoaded={songsLoaded}
               onDelete={() => handleDelete(heroSetlist.id, heroSetlist.name)}
               onCloneLast={handleCloneLast}
               canCloneLast={setlists.length > 0}
@@ -196,33 +197,83 @@ export function Home(): JSX.Element {
             busy={preflightBusy}
           />
 
-          {/* Other setlists */}
-          {otherSetlists.length > 0 && (
-            <section aria-labelledby="other-setlists-heading">
-              <div className="mb-3 flex items-baseline gap-3">
-                <h2
-                  id="other-setlists-heading"
-                  className="text-[16px] font-semibold text-foreground"
+          {upcoming.length > 0 && (
+            <SetlistSection id="upcoming-heading" title="Upcoming" count={`${upcoming.length} planned`}>
+              <SetlistGrid setlists={upcoming} onDelete={handleDelete} />
+            </SetlistSection>
+          )}
+
+          <SongRotationPanel rotation={rotation} />
+
+          {past.length > 0 && (
+            <SetlistSection
+              id="past-heading"
+              title="Past services"
+              count={`${past.length}`}
+              action={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPast((v) => !v)}
+                  aria-expanded={showPast}
+                  aria-controls="past-setlists"
                 >
-                  Other setlists
-                </h2>
-                <span className="text-[13px] tabular-nums text-muted-foreground">
-                  {otherSetlists.length} saved
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {otherSetlists.map((s) => (
-                  <SetlistCard
-                    key={s.id}
-                    setlist={s}
-                    onDelete={() => handleDelete(s.id, s.name)}
-                  />
-                ))}
-              </div>
-            </section>
+                  {showPast ? 'Hide' : `Show ${past.length}`}
+                </Button>
+              }
+            >
+              {showPast && (
+                <div id="past-setlists">
+                  <SetlistGrid setlists={past} onDelete={handleDelete} />
+                </div>
+              )}
+            </SetlistSection>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function SetlistSection({
+  id,
+  title,
+  count,
+  action,
+  children
+}: {
+  id: string
+  title: string
+  count: string
+  action?: ReactNode
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <section aria-labelledby={id}>
+      <div className="mb-3 flex items-center gap-3">
+        <h2 id={id} className="text-[16px] font-semibold text-foreground">
+          {title}
+        </h2>
+        <span className="text-[13px] tabular-nums text-muted-foreground">{count}</span>
+        {action && <div className="ml-auto">{action}</div>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function SetlistGrid({
+  setlists,
+  onDelete
+}: {
+  setlists: Setlist[]
+  onDelete: (id: string, name: string) => void
+}): JSX.Element {
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {setlists.map((s) => (
+        <SetlistCard key={s.id} setlist={s} onDelete={() => onDelete(s.id, s.name)} />
+      ))}
     </div>
   )
 }

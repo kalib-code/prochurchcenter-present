@@ -5,6 +5,9 @@
  * Replaces the per-page "← HOME" links: Home, Songs and Settings are
  * always one click away, and upcoming services are listed so the
  * operator can jump straight into next Sunday's setlist.
+ *
+ * Also owns the ⌘K / Ctrl+K quick-search palette, so it works on every
+ * screen here and never in Service Mode.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -12,7 +15,8 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { cn } from '../lib/utils'
 import { nextSundayISO, todayISO } from '../lib/setlist-helpers'
 import { useSetlistStore } from '../stores/useSetlistStore'
-import { CalendarIcon, HomeIcon, MusicIcon, PlusIcon, SettingsIcon } from './icons'
+import { CalendarIcon, HomeIcon, MusicIcon, PlusIcon, SearchIcon, SettingsIcon } from './icons'
+import { CommandPalette, PALETTE_SHORTCUT } from './CommandPalette'
 
 const NAV = [
   { to: '/', label: 'Home', icon: HomeIcon, end: true },
@@ -32,6 +36,18 @@ export function AppShell(): JSX.Element {
   const load = useSetlistStore((s) => s.load)
   const create = useSetlistStore((s) => s.create)
   const [busy, setBusy] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useEffect(() => {
     if (setlists.length === 0) void load()
@@ -83,6 +99,18 @@ export function AppShell(): JSX.Element {
           New setlist
         </button>
 
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(true)}
+          className="mb-1 flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium text-soft transition-colors hover:bg-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+        >
+          <SearchIcon size={17} />
+          Search
+          <kbd className="ml-auto rounded border border-border px-1.5 py-px text-[11px] font-normal text-muted-foreground">
+            {PALETTE_SHORTCUT}
+          </kbd>
+        </button>
+
         <nav className="flex flex-col gap-0.5" aria-label="Main">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink
@@ -131,6 +159,12 @@ export function AppShell(): JSX.Element {
       <main className="my-2 mr-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-panel">
         <Outlet />
       </main>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNewSetlist={() => void handleNew()}
+      />
     </div>
   )
 }
