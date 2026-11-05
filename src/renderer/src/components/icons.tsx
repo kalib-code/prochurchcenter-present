@@ -99,3 +99,12 @@ export const CloseIcon = (p: IconProps): JSX.Element => (
 export const ClockIcon = (p: IconProps): JSX.Element => (
   <Icon {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></Icon>
 )
+export const SparkleIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z" /><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" /></Icon>
+)
+export const ChevronDownIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><path d="m6 9 6 6 6-6" /></Icon>
+)
+export const ChevronRightIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><path d="m9 6 6 6-6 6" /></Icon>
+)

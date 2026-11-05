@@ -122,12 +122,12 @@ export function slideifySetlist(
  * Shared by the setlist path (enforceMaxLines) and the editor preview
  * (previewSongSlides) so both always split identically.
  */
-export function splitBalanced(lines: string[], maxLines: number): string[][] {
+export function splitBalanced<T>(lines: T[], maxLines: number): T[][] {
   if (lines.length <= maxLines) return [lines]
   const chunkCount = Math.ceil(lines.length / maxLines)
   const base = Math.floor(lines.length / chunkCount)
   const remainder = lines.length % chunkCount
-  const out: string[][] = []
+  const out: T[][] = []
   let start = 0
   for (let i = 0; i < chunkCount; i++) {
     const size = base + (i < remainder ? 1 : 0)
@@ -158,7 +158,7 @@ function enforceMaxLines(slides: SlidePayload[], maxLines: number): SlidePayload
   return out
 }
 
-function clampMaxLines(value: number | undefined): number {
+export function clampMaxLines(value: number | undefined): number {
   if (!value || !Number.isFinite(value)) return 4
   // Clamp to a safe range — 1 is too restrictive (one-word slides),
   // 20 is functionally unlimited and will re-trigger the auto-fit
