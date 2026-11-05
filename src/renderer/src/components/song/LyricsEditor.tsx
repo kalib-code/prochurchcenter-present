@@ -72,7 +72,7 @@ const QUICK_KINDS: SectionKind[] = ['verse', 'chorus']
 const MORE_KINDS = SECTION_KINDS.filter((k) => !QUICK_KINDS.includes(k.kind))
 
 const toolbarButton =
-  'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-raised px-2.5 text-[12.5px] font-medium text-quiet transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70'
+  'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-raised px-2.5 text-[12.5px] font-medium text-quiet transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:pointer-events-none disabled:opacity-40'
 
 export const LyricsEditor = forwardRef<
   LyricsEditorHandle,
@@ -175,7 +175,9 @@ export const LyricsEditor = forwardRef<
     applyTidy(tidyLyrics(text), 0, value.length)
   }
 
-  const rows = value.split('\n')
+  // Same normalisation as layoutLyrics and the textarea itself: a song
+  // saved with bare \r line endings must not shift the gutter numbers.
+  const rows = value.replace(/\r\n?/g, '\n').split('\n')
   const empty = value.trim() === ''
 
   return (

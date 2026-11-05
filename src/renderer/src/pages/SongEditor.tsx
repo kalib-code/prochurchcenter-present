@@ -426,7 +426,12 @@ function AddToNextService({ songId }: { songId: string }): JSX.Element | null {
   const hero = pickHero(setlists)
   if (!hero) return null
   const isMember = hero.items.some((i) => i.kind === 'song' && i.songId === songId)
-  const name = hero.name || 'next service'
+  // Name plus date: two services can share a name ("New Service").
+  const [y, m, d] = hero.date.split('-').map(Number)
+  const day = y && m && d
+    ? new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : ''
+  const name = [hero.name || 'next service', day].filter(Boolean).join(' · ')
 
   const toggle = async (): Promise<void> => {
     const items: SetlistItem[] = isMember

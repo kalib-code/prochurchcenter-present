@@ -31,6 +31,7 @@ export function MenuButton({
   const [active, setActive] = useState(0)
   const root = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -51,6 +52,7 @@ export function MenuButton({
   return (
     <div ref={root} className="relative">
       <button
+        ref={trigger}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -67,7 +69,11 @@ export function MenuButton({
           role="menu"
           tabIndex={-1}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') setOpen(false)
+            if (e.key === 'Escape') {
+              // Give keyboard focus back to the button that opened the menu.
+              setOpen(false)
+              trigger.current?.focus()
+            }
             else if (e.key === 'ArrowDown') setActive((i) => (i + 1) % items.length)
             else if (e.key === 'ArrowUp') setActive((i) => (i - 1 + items.length) % items.length)
             else if (e.key === 'Enter') pick(items[active].id)
