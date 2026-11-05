@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { THEME_FIELDS, formatFieldValue } from './themeFields'
 
 describe('THEME_FIELDS', () => {
-  it('covers the twelve overridable fields', () => {
-    expect(THEME_FIELDS).toHaveLength(12)
+  it('covers the fourteen overridable fields', () => {
+    expect(THEME_FIELDS).toHaveLength(14)
+  })
+
+  it('stores weight as a number and labels it by name', () => {
+    const weight = THEME_FIELDS.find((f) => f.key === 'fontWeight')!
+    expect(weight.kind === 'select' && weight.numeric).toBe(true)
+    expect(formatFieldValue(weight, 700)).toBe('Bold')
+    expect(formatFieldValue(weight, 600)).toBe('Semibold')
   })
 
   it('has a unique key per field', () => {
