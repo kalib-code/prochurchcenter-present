@@ -46,6 +46,7 @@ import { WarningBanner, type WarningItem } from '../components/ui/WarningBanner'
 import type { PptxThumbError } from '../components/MediaPreview'
 import type { PptxSlideErrorKind } from '../components/PptxSlideView'
 import { useKeyboard } from '../hooks/useKeyboard'
+import { isPlaybackExpected, PLAYBACK_STALL_MS } from '../lib/videoPlayback'
 import type { Song } from '@shared/types'
 import type {
   LowerThirdsContent,
@@ -114,8 +115,20 @@ export function ServiceMode(): JSX.Element {
   const toggleCheatSheet = useServiceStore((s) => s.toggleCheatSheet)
   const jumpTo = useServiceStore((s) => s.jumpTo)
 
+  // The ONE exit path, shared by Esc and the EXIT button. Navigating away
+  // is load-bearing, not cosmetic: exit() alone drops the store to
+  // 'idle' while this page stays mounted, and the start effect below
+  // then sees a loaded setlist and calls start() again — projector jumps
+  // back to item 1 slide 1 and the timer resets.
+  const confirmExit = useCallback((): void => {
+    const ok = window.confirm('Exit service mode?')
+    if (!ok) return
+    exit()
+    navigate('/')
+  }, [exit, navigate])
+
   // Keyboard handler — active whenever running
-  useKeyboard({ enabled: state.mode === 'running' })
+  useKeyboard({ enabled: state.mode === 'running', onExit: confirmExit })
 
   // Load deps once
   useEffect(() => {
@@ -237,12 +250,7 @@ export function ServiceMode(): JSX.Element {
       toggleLogo={toggleLogo}
       toggleCheatSheet={toggleCheatSheet}
       durationById={durationById}
-      onExit={() => {
-        const ok = window.confirm('Exit service mode?')
-        if (!ok) return
-        exit()
-        navigate('/')
-      }}
+      onExit={confirmExit}
     />
   )
 }
@@ -334,18 +342,9 @@ function RunningView({
   })
   const isVideoSlide = currentSlide?.kind === 'video'
 
-  // Authoritative playback position broadcast FROM the output window's
-  // <video> element, fed into <VideoRunway> below. Only trusted when it
-  // names the same file as the slide currently on screen — otherwise a
-  // stale update from the PREVIOUS video could flash briefly on the new
-  // one before the first fresh broadcast arrives.
-  const [videoTimeUpdate, setVideoTimeUpdate] = useState<VideoTimeUpdate | null>(null)
-  useEffect(() => {
-    const off = window.api.output.onVideoTimeUpdate((update) => {
-      setVideoTimeUpdate(update)
-    })
-    return off
-  }, [])
+  // The output window's playback-position broadcast (~4×/s) is NOT held
+  // here: state on RunningView re-rendered the whole slide grid on every
+  // tick of a playing video. <LiveVideoRunway> below owns it instead.
 
   // Reset + broadcast whenever the active slide changes. Fires for every
   // navigation, not just video → video transitions, so the broadcast is
@@ -354,7 +353,6 @@ function RunningView({
   useEffect(() => {
     const fresh: VideoControl = { paused: false, muted: false }
     setVideoControl(fresh)
-    setVideoTimeUpdate(null)
     void window.api.output.setVideoControl(fresh)
   }, [state.itemIndex, state.slideIndex])
 
@@ -388,6 +386,9 @@ function RunningView({
           return
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      // The cheat sheet swallows every key but ?/Esc (see useKeyboard).
+      const live = useServiceStore.getState().state
+      if (live.mode === 'running' && live.showCheatSheet) return
       if (e.key === 'p' || e.key === 'P') {
         e.preventDefault()
         togglePause()
@@ -410,7 +411,9 @@ function RunningView({
   // currentSlideRef bridges the long-lived subscription with the
   // ever-changing currentSlide value: subscribe-on-mount means the
   // listener closure would otherwise capture a stale slide reference.
-  const nextSlide = useServiceStore((s) => s.nextSlide)
+  // autoAdvance, not nextSlide: a video ending on the very last slide
+  // must not end the service on its own (see the store action).
+  const autoAdvance = useServiceStore((s) => s.autoAdvance)
   const currentSlideRef = useRef(currentSlide)
   useEffect(() => {
     currentSlideRef.current = currentSlide
@@ -419,11 +422,11 @@ function RunningView({
     const off = window.api.output.onVideoEnded((payload) => {
       const active = currentSlideRef.current
       if (active?.kind === 'video' && active.videoPath === payload.videoPath) {
-        nextSlide()
+        autoAdvance()
       }
     })
     return off
-  }, [nextSlide])
+  }, [autoAdvance])
 
   // ── Lower thirds (auto-follow mode) ───────────────────────────────
   // The lower thirds window AUTO-FOLLOWS the active setlist item:
@@ -591,9 +594,9 @@ function RunningView({
     // item boundary would make that lookahead go null at exactly the
     // moment it matters most: the transition ONTO a new pptx deck.
     //
-    // Named ...ForStage, NOT `nextSlide`: that identifier is already the
-    // store's advance ACTION in this scope, and shadowing it here would
-    // silently break SPACE.
+    // Named ...ForStage, NOT `nextSlide`: that is the store's advance
+    // ACTION's name, and reusing it for a payload invites confusing the
+    // two (it used to be in scope here, where shadowing broke SPACE).
     const nextSlideForStage: SlidePayload | null =
       state.slideIndex + 1 < slides.length
         ? slides[state.slideIndex + 1]
@@ -930,20 +933,6 @@ function RunningView({
   }
 
   const mirrorCut = state.displayMode !== 'live'
-  // Feed <VideoRunway> the latest broadcast IF it names the slide
-  // that's actually on screen right now; otherwise show a fresh-slide
-  // default rather than a stale reading from the previous video.
-  const videoUpdateForCurrent: VideoTimeUpdate | null =
-    currentSlide?.kind === 'video'
-      ? videoTimeUpdate && videoTimeUpdate.videoPath === currentSlide.videoPath
-        ? videoTimeUpdate
-        : {
-            videoPath: currentSlide.videoPath,
-            currentTime: 0,
-            duration: NaN,
-            paused: videoControl.paused
-          }
-      : null
 
   return (
     <div className="relative flex h-screen w-screen flex-col bg-background text-foreground">
@@ -1199,10 +1188,14 @@ function RunningView({
             {/* Video playback runway — only visible while a video slide
                 is active. Pause and mute mirror the projector and the
                 keyboard shortcuts (P / M). */}
-            {isVideoSlide && currentSlide?.kind === 'video' && videoUpdateForCurrent && (
-              <VideoRunway
-                update={videoUpdateForCurrent}
+            {isVideoSlide && currentSlide?.kind === 'video' && (
+              <LiveVideoRunway
+                // Keyed per slide so a new slide (even the same file
+                // twice in a row) starts with no stale reading.
+                key={`${state.itemIndex}-${state.slideIndex}`}
+                videoPath={currentSlide.videoPath}
                 loop={currentSlide.loop ?? true}
+                live={state.displayMode === 'live'}
                 paused={videoControl.paused}
                 muted={videoControl.muted}
                 onTogglePause={togglePause}
@@ -1340,6 +1333,75 @@ interface PanelWidthHandle {
    *   - 'left':  drag-left grows the panel  (right-anchored panel)
    */
   startResize: (direction: 'left' | 'right') => (e: React.MouseEvent) => void
+}
+
+/**
+ * <VideoRunway> fed from the output window's playback broadcast. Owns
+ * that ~4×/s state itself so a playing video re-renders only this
+ * strip, not RunningView and its whole slide grid.
+ *
+ * Also the operator's only warning that the projector's video failed:
+ * the projector renders black on a decode/load error (an error panel
+ * there would be read by the congregation), and the confidence monitor
+ * mirrors those black pixels. When playback updates are expected but
+ * none arrive for PLAYBACK_STALL_MS, say so here.
+ */
+function LiveVideoRunway({
+  videoPath,
+  loop,
+  live,
+  paused,
+  muted,
+  onTogglePause,
+  onToggleMute
+}: {
+  videoPath: string
+  loop: boolean
+  live: boolean
+  paused: boolean
+  muted: boolean
+  onTogglePause: () => void
+  onToggleMute: () => void
+}): JSX.Element {
+  // Only trusted when it names this slide's file — otherwise a stale
+  // update from the PREVIOUS video could flash on the new one.
+  const [update, setUpdate] = useState<VideoTimeUpdate | null>(null)
+  useEffect(() => {
+    const off = window.api.output.onVideoTimeUpdate((u) => {
+      if (u.videoPath === videoPath) setUpdate(u)
+    })
+    return off
+  }, [videoPath])
+
+  // Re-armed by every update: the timer only fires if the projector
+  // goes quiet while it should be playing.
+  const expected = isPlaybackExpected(live, paused, update)
+  const [stalled, setStalled] = useState(false)
+  useEffect(() => {
+    setStalled(false)
+    if (!expected) return
+    const id = setTimeout(() => setStalled(true), PLAYBACK_STALL_MS)
+    return () => clearTimeout(id)
+  }, [expected, update])
+
+  return (
+    <>
+      <VideoRunway
+        update={update ?? { videoPath, currentTime: 0, duration: NaN, paused }}
+        loop={loop}
+        paused={paused}
+        muted={muted}
+        onTogglePause={onTogglePause}
+        onToggleMute={onToggleMute}
+      />
+      {stalled && (
+        <div role="alert" className="mt-2 border border-signal px-[13px] py-[9px] text-[11px] text-signal">
+          Not playing on the projector. The file may be missing or in a format the player
+          can&apos;t decode — re-export it as H.264 (8-bit). The congregation sees black.
+        </div>
+      )}
+    </>
+  )
 }
 
 function usePanelWidth({

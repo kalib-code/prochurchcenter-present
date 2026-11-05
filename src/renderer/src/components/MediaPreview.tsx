@@ -35,9 +35,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../lib/utils'
 import { loadPdfDocument } from '../lib/pdfLoader'
 import PptxSlideView, { type PptxSlideErrorKind } from './PptxSlideView'
+import { toMediaUrl } from '@shared/mediaUrl'
 
 function fileUrl(path: string): string {
-  return `present-media://local${encodeURI(path)}`
+  // Shared encoder: encodeURI left `#`/`?` raw, breaking "Song #2.mp4".
+  return toMediaUrl(path)
 }
 
 type Source =

@@ -33,6 +33,7 @@
 
 import type { PptxSlideMeta } from '@shared/pptxSlides'
 import { visibleSlideCount } from '@shared/pptxSlides'
+import { toMediaUrl } from '@shared/mediaUrl'
 
 export interface PptxDeck {
   /** Every slide part in the file, in file order, with its hidden flag. */
@@ -89,7 +90,8 @@ export async function parsePptxBuffer(buf: ArrayBuffer): Promise<PptxDeck> {
 }
 
 function mediaUrl(absPath: string): string {
-  return `present-media://local${encodeURI(absPath)}`
+  // Shared encoder: encodeURI left `#`/`?` raw, breaking "Deck #2.pptx".
+  return toMediaUrl(absPath)
 }
 
 // Module-level cache of parse promises keyed by absolute path. We store the

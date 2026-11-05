@@ -35,6 +35,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 // worker scope FIRST, then loads the pdf.js worker code. Vite bundles
 // this as a standalone Worker module via `?worker`.
 import PdfWorker from './pdfWorkerEntry?worker'
+import { toMediaUrl } from '@shared/mediaUrl'
 
 let workerInitialized = false
 
@@ -50,7 +51,8 @@ function ensureWorker(): void {
 const docCache = new Map<string, Promise<PDFDocumentProxy>>()
 
 function mediaUrl(absPath: string): string {
-  return `present-media://local${encodeURI(absPath)}`
+  // Shared encoder: encodeURI left `#`/`?` raw and broke Windows paths.
+  return toMediaUrl(absPath)
 }
 
 /**
