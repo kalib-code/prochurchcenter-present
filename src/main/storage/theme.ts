@@ -12,7 +12,8 @@ import { join } from 'path'
 import type { Theme } from '@shared/types'
 import type { UpdateThemePatch } from '@shared/ipc-contract'
 import { getThemesDir } from './paths'
-import { atomicWriteJson } from './atomic'
+import { atomicWriteJson, withFileLock } from './atomic'
+import { assertSafeId } from './safePath'
 
 export const DEFAULT_THEME: Theme = {
   id: 'default',
@@ -46,7 +47,9 @@ function withThemeDefaults(stored: Partial<Theme> & { id: string }): Theme {
 }
 
 function themePath(id: string): string {
-  return join(getThemesDir(), `${id}.json`)
+  // Ids come from the renderer over IPC — reject anything that could
+  // traverse out of the themes dir (e.g. `../settings`).
+  return join(getThemesDir(), `${assertSafeId(id)}.json`)
 }
 
 /**
@@ -91,9 +94,14 @@ export async function getTheme(id: string): Promise<Theme | null> {
 }
 
 export async function updateTheme(id: string, patch: UpdateThemePatch): Promise<Theme> {
-  const existing = await getTheme(id)
-  if (!existing) throw new Error(`Theme not found: ${id}`)
-  const updated: Theme = { ...existing, ...patch, id: existing.id }
-  await atomicWriteJson(themePath(id), updated)
-  return updated
+  const path = themePath(id)
+  // Lock across read AND write so overlapping patches (e.g. rapid
+  // slider changes) can't drop each other's fields.
+  return withFileLock(path, async () => {
+    const existing = await getTheme(id)
+    if (!existing) throw new Error(`Theme not found: ${id}`)
+    const updated: Theme = { ...existing, ...patch, id: existing.id }
+    await atomicWriteJson(path, updated)
+    return updated
+  })
 }

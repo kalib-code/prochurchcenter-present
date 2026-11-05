@@ -7,7 +7,11 @@ export default defineConfig({
     // this glob was widened, a test file under src/renderer was created and
     // then silently skipped — which is why slideify.ts went untested for so
     // long, and why serviceClock / serviceNext / preflight needed it fixed.
-    include: ['src/shared/**/*.test.ts', 'src/renderer/**/*.test.ts'],
+    //
+    // src/main is included for pure storage helpers (path guards, backup
+    // rotation). Main tests must not need a real Electron runtime — stub
+    // `electron` with vi.mock when a module imports it at load time.
+    include: ['src/shared/**/*.test.ts', 'src/renderer/**/*.test.ts', 'src/main/**/*.test.ts'],
     // Default stays node — it is faster and catches accidental DOM
     // dependencies in shared code. The one test that parses a real .pptx
     // opts into jsdom with a `// @vitest-environment jsdom` docblock.

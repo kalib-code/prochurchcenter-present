@@ -63,6 +63,7 @@
 import { app, dialog } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { getOperatorWindow } from './windows'
+import { isNewerVersion } from './versionCompare'
 
 const FIRST_CHECK_DELAY_MS = 5_000
 
@@ -193,8 +194,12 @@ export async function manualCheckForUpdates(): Promise<ManualCheckResult> {
     const newVersion = result.updateInfo.version
     // electron-updater returns a non-null result even when you're on
     // the latest — the result carries `updateInfo` for the release
-    // it checked against. Compare versions to decide the status.
-    if (newVersion === currentVersion) {
+    // it checked against. Order the versions properly: a plain `!==`
+    // reported an OLDER feed version (a pulled release, a prerelease
+    // build running locally) as "update available". Also honour the
+    // updater's own verdict (staged rollout, min OS version), since it
+    // won't download anything it considers unavailable.
+    if (result.isUpdateAvailable === false || !isNewerVersion(newVersion, currentVersion)) {
       return { status: 'up-to-date', currentVersion }
     }
     return { status: 'update-available', currentVersion, newVersion }

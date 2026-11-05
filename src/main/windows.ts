@@ -66,6 +66,45 @@ export function getOutputWindow(): BrowserWindow | null {
   return outputWindow
 }
 
+/**
+ * Output-window recreation.
+ *
+ * Why: the output window is frameless, but it can still be closed
+ * (Cmd+W / Alt+F4 while it has focus, or the OS tearing it down). Before
+ * this, nothing ever recreated it — every slide broadcast silently went
+ * nowhere for the rest of the service. main/index.ts registers how to
+ * build one (it owns the BrowserWindow recipe); IPC paths that need the
+ * output call {@link ensureOutputWindow}, and the projector replay on
+ * did-finish-load brings the new window up on the current slide.
+ */
+let outputWindowFactory: ((displayId?: number | null) => BrowserWindow) | null = null
+let appQuitting = false
+
+export function setOutputWindowFactory(
+  factory: (displayId?: number | null) => BrowserWindow
+): void {
+  outputWindowFactory = factory
+}
+
+/** Called from `before-quit` so closing windows during quit aren't resurrected. */
+export function markAppQuitting(): void {
+  appQuitting = true
+}
+
+/**
+ * Return the live output window, recreating it if it was closed.
+ * `displayId` (when given) targets that display; otherwise the factory
+ * uses the saved setting. Never recreates while quitting or once the
+ * operator window is gone — the output must not outlive its operator.
+ */
+export function ensureOutputWindow(displayId?: number | null): BrowserWindow | null {
+  if (outputWindow && !outputWindow.isDestroyed()) return outputWindow
+  if (appQuitting || !outputWindowFactory) return null
+  if (!operatorWindow || operatorWindow.isDestroyed()) return null
+  console.warn('[windows] output window was closed — recreating it')
+  return outputWindowFactory(displayId)
+}
+
 export function getStageMonitorWindow(): BrowserWindow | null {
   return stageMonitorWindow
 }

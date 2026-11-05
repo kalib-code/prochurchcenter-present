@@ -11,10 +11,13 @@ import { randomUUID } from 'crypto'
 import type { Setlist } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
 import { getSetlistsDir } from './paths'
-import { atomicWriteJson } from './atomic'
+import { atomicWriteJson, withFileLock } from './atomic'
+import { assertSafeId } from './safePath'
 
 function setlistPath(id: string): string {
-  return join(getSetlistsDir(), `${id}.json`)
+  // Ids come from the renderer over IPC — reject anything that could
+  // traverse out of the setlists dir (e.g. `../../settings`).
+  return join(getSetlistsDir(), `${assertSafeId(id)}.json`)
 }
 
 function nowIso(): string {
@@ -22,8 +25,29 @@ function nowIso(): string {
 }
 
 export async function listSetlists(): Promise<Setlist[]> {
+  return (await readAllSetlists()).setlists
+}
+
+/**
+ * Like {@link listSetlists}, but also reports what could NOT be read.
+ *
+ * listSetlists() silently drops unreadable files, which is right for the
+ * library UI but wrong for anything that deletes data based on what
+ * setlists reference: the startup Canva orphan-PDF sweep would treat a
+ * corrupt (or briefly locked) setlist's PDFs as unreferenced and delete
+ * them. `failed` lists every file that failed to read/parse — or the
+ * directory itself if it couldn't be listed — so such callers can bail.
+ */
+export async function readAllSetlists(): Promise<{ setlists: Setlist[]; failed: string[] }> {
   const dir = getSetlistsDir()
-  const files = await readdir(dir).catch(() => [] as string[])
+  let files: string[]
+  try {
+    files = await readdir(dir)
+  } catch (error) {
+    console.error('[setlists] Failed to list setlists dir:', error)
+    return { setlists: [], failed: [dir] }
+  }
+  const failed: string[] = []
   const setlists = await Promise.all(
     files
       .filter((f) => f.endsWith('.json') && !f.endsWith('.tmp.json'))
@@ -33,11 +57,12 @@ export async function listSetlists(): Promise<Setlist[]> {
           return JSON.parse(content) as Setlist
         } catch (error) {
           console.error(`[setlists] Failed to read ${f}:`, error)
+          failed.push(f)
           return null
         }
       })
   )
-  return setlists.filter((s): s is Setlist => s !== null)
+  return { setlists: setlists.filter((s): s is Setlist => s !== null), failed }
 }
 
 export async function getSetlist(id: string): Promise<Setlist | null> {
@@ -65,6 +90,12 @@ export async function createSetlist(input: { name: string; date: string }): Prom
 }
 
 export async function updateSetlist(id: string, patch: UpdateSetlistPatch): Promise<Setlist> {
+  // Hold the per-file lock across read AND write so overlapping patches
+  // (autosave racing a drag-reorder, say) can't drop each other's fields.
+  return withFileLock(setlistPath(id), () => updateSetlistLocked(id, patch))
+}
+
+async function updateSetlistLocked(id: string, patch: UpdateSetlistPatch): Promise<Setlist> {
   const existing = await getSetlist(id)
   if (!existing) throw new Error(`Setlist not found: ${id}`)
 
@@ -80,9 +111,13 @@ export async function updateSetlist(id: string, patch: UpdateSetlistPatch): Prom
 }
 
 export async function deleteSetlist(id: string): Promise<void> {
-  await unlink(setlistPath(id)).catch(() => {
-    /* ignore missing */
-  })
+  const path = setlistPath(id)
+  // Locked so an in-flight update can't re-create the file just deleted.
+  await withFileLock(path, () =>
+    unlink(path).catch(() => {
+      /* ignore missing */
+    })
+  )
 }
 
 /**
