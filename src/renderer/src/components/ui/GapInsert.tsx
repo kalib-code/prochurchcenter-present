@@ -1,10 +1,3 @@
-/**
- * GapInsert — the "+ INSERT HERE" affordance between setlist items.
- *
- * A centred mono label flanked by two hairlines. Dim until hovered or
- * active; signal when its picker is open. Design L420-424.
- */
-
 import { cn } from '../../lib/utils'
 
 interface GapInsertProps {
@@ -13,27 +6,27 @@ interface GapInsertProps {
   onClick: () => void
 }
 
-export function GapInsert({
-  active = false,
-  label = '+ INSERT HERE',
-  onClick
-}: GapInsertProps): JSX.Element {
+/**
+ * Insert-between-rows affordance. Invisible until the pointer (or focus)
+ * reaches the gap, so a long run of show isn't striped with
+ * "insert here" lines.
+ */
+export function GapInsert({ active = false, label = 'Insert here', onClick }: GapInsertProps): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group flex h-6 w-full items-center"
+      aria-label={label}
+      className={cn(
+        'group flex h-5 w-full items-center transition-opacity focus-visible:outline-none',
+        active ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-visible:opacity-100'
+      )}
     >
-      <span className={cn('h-px flex-1 transition-colors', active ? 'bg-signal/50' : 'bg-rule')} />
-      <span
-        className={cn(
-          'px-2.5 font-mono text-[9px] font-semibold uppercase leading-none tracking-[0.1em] transition-colors',
-          active ? 'text-signal' : 'text-border group-hover:text-signal'
-        )}
-      >
-        {label}
+      <span className="h-px flex-1 bg-accent/40" />
+      <span className="mx-2 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium leading-none text-accent">
+        + {label}
       </span>
-      <span className={cn('h-px flex-1 transition-colors', active ? 'bg-signal/50' : 'bg-rule')} />
+      <span className="h-px flex-1 bg-accent/40" />
     </button>
   )
 }

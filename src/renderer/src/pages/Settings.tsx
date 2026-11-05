@@ -149,7 +149,7 @@ export function Settings(): JSX.Element {
   const activeSection = SECTIONS.find((s) => s.id === section)!
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       <PageHeader
         eyebrow="Workspace"
         title="Settings"
@@ -998,7 +998,7 @@ function Row({
 
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       <PageHeader eyebrow="Workspace" title="Settings" back={{ to: '/', label: 'Home' }} />
       <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         {children}

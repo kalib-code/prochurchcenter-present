@@ -1,16 +1,18 @@
 /**
- * MonoLabel — the KLB eyebrow.
+ * MonoLabel — section / column / caption label.
  *
- * The design uses `600 9.5px 'JetBrains Mono', letter-spacing .14em,
- * uppercase` for roughly eighty section headers, column headers, and
- * status captions. Centralising it here is what keeps the tracking
- * identical everywhere; hand-written `tracking-[0.14em]` drifts.
+ * Despite the historical name it is no longer mono caps: the redesign
+ * uses small sentence-case labels in the UI font, which read far better
+ * on a dark screen than 9px tracked capitals. Write label text in
+ * sentence case ("Run of show", not "RUN OF SHOW").
+ *
+ * Kept under the old name so ~100 call sites convert in one place.
  */
 
 import type { HTMLAttributes } from 'react'
 import { cn } from '../../lib/utils'
 
-type Tone = 'muted' | 'signal' | 'dim' | 'soft'
+type Tone = 'muted' | 'signal' | 'accent' | 'dim' | 'soft' | 'warn' | 'live' | 'ok'
 type Size = 'xs' | 'sm'
 
 interface MonoLabelProps extends HTMLAttributes<HTMLSpanElement> {
@@ -20,15 +22,18 @@ interface MonoLabelProps extends HTMLAttributes<HTMLSpanElement> {
 
 const TONES: Record<Tone, string> = {
   muted: 'text-muted-foreground',
-  signal: 'text-signal',
+  signal: 'text-accent',
+  accent: 'text-accent',
   dim: 'text-dim',
-  soft: 'text-soft'
+  soft: 'text-soft',
+  warn: 'text-warn',
+  live: 'text-live',
+  ok: 'text-ok'
 }
 
-// xs is the chip//column-header size; sm is the section-header size.
 const SIZES: Record<Size, string> = {
-  xs: 'text-[9px] tracking-[0.12em]',
-  sm: 'text-[9.5px] tracking-[0.14em]'
+  xs: 'text-[11px]',
+  sm: 'text-[12px]'
 }
 
 export function MonoLabel({
@@ -39,12 +44,7 @@ export function MonoLabel({
 }: MonoLabelProps): JSX.Element {
   return (
     <span
-      className={cn(
-        'font-mono font-semibold uppercase leading-none',
-        TONES[tone],
-        SIZES[size],
-        className
-      )}
+      className={cn('font-medium leading-tight', TONES[tone], SIZES[size], className)}
       {...rest}
     />
   )

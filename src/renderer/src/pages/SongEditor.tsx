@@ -179,7 +179,7 @@ export function SongEditor(): JSX.Element {
 
   if (!id) {
     return (
-      <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+      <div className="flex h-full w-full min-h-0 flex-col text-foreground">
         <BackLink />
         <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           No song id in URL.
@@ -190,7 +190,7 @@ export function SongEditor(): JSX.Element {
 
   if (!draft) {
     return (
-      <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+      <div className="flex h-full w-full min-h-0 flex-col text-foreground">
         <BackLink />
         <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Reading from disk…
@@ -271,7 +271,7 @@ export function SongEditor(): JSX.Element {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       {/* ── Header ──────────────────────────────────────────────── */}
       <header className="flex shrink-0 items-center justify-between border-b border-border bg-card px-6 py-4">
         <div className="min-w-0">

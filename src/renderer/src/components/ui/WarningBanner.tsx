@@ -47,13 +47,13 @@ export function WarningBanner({
     <div
       role="alert"
       className={cn(
-        'flex flex-col gap-1 border-b border-rose-500/30 bg-rose-950/40 px-4 py-2',
+        'flex flex-col gap-1 border-b border-warn/25 bg-warn/10 px-4 py-2',
         className
       )}
     >
       {items.map((item) => (
-        <div key={item.id} className="flex items-start gap-2 text-xs text-rose-200">
-          <span aria-hidden="true" className="mt-0.5 shrink-0">
+        <div key={item.id} className="flex items-start gap-2 text-[13px] text-bone">
+          <span aria-hidden="true" className="mt-0.5 shrink-0 text-warn">
             ⚠
           </span>
           <span className="min-w-0 flex-1 leading-relaxed">{item.message}</span>
@@ -61,7 +61,7 @@ export function WarningBanner({
             <button
               type="button"
               onClick={() => onDismiss(item.id)}
-              className="shrink-0 text-rose-300/70 hover:text-rose-100"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
               aria-label="Dismiss warning"
             >
               ✕

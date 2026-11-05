@@ -94,7 +94,7 @@ export function SongLibrary(): JSX.Element {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       <PageHeader
         back={{ to: '/', label: 'HOME' }}
         eyebrow="LIBRARY"

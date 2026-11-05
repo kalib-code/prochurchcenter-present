@@ -479,7 +479,7 @@ export function SetlistEditor(): JSX.Element {
   const endOpen = insertAt === draft.items.length
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       {/* ── Top bar ──────────────────────────────────────────────── */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-6">
         <div className="flex items-center gap-4">

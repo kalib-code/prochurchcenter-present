@@ -139,7 +139,7 @@ export function Home(): JSX.Element {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="flex h-full w-full min-h-0 flex-col text-foreground">
       {/* ── Header ─────────────────────────────────────────────────── */}
       <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-border bg-card px-6">
         <div className="flex items-baseline gap-3">
