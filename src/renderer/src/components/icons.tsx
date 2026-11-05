@@ -64,3 +64,38 @@ export const TrashIcon = (p: IconProps): JSX.Element => (
 export const GripIcon = (p: IconProps): JSX.Element => (
   <Icon {...p}><circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" /></Icon>
 )
+
+// ── Settings section nav ────────────────────────────────────────────────
+export const TextLinesIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="M7.5 10h9M9 14h6" /></Icon>
+)
+export const PaletteIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}>
+    <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z" />
+    <circle cx="7.5" cy="11" r="1" /><circle cx="10" cy="7" r="1" /><circle cx="14.5" cy="7" r="1" />
+  </Icon>
+)
+export const ProjectorIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><rect x="2.5" y="4" width="19" height="12.5" rx="2" /><path d="M8 20h8M12 16.5V20" /></Icon>
+)
+export const ArchiveIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><rect x="3" y="4" width="18" height="4.5" rx="1" /><path d="M5 8.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8.5M10 12.5h4" /></Icon>
+)
+export const InfoCircleIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5M12 7.5v.01" /></Icon>
+)
+export const RefreshCwIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><path d="M20 11a8 8 0 0 0-14.8-3.5M4 4v4h4" /><path d="M4 13a8 8 0 0 0 14.8 3.5M20 20v-4h-4" /></Icon>
+)
+export const LinkChainIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></Icon>
+)
+export const CopyIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></Icon>
+)
+export const CloseIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><path d="M6 6l12 12M18 6 6 18" /></Icon>
+)
+export const ClockIcon = (p: IconProps): JSX.Element => (
+  <Icon {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></Icon>
+)

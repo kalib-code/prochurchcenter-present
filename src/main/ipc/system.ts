@@ -35,7 +35,7 @@ async function checkDisplay(): Promise<PreflightCheck> {
       name: 'Output display',
       detail:
         'Only one display detected. The projector window will cover this screen — plug in the projector before the service.',
-      remedy: { label: 'OPEN SETTINGS', kind: 'in-app', target: '/settings' }
+      remedy: { label: 'Open settings', kind: 'in-app', target: '/settings' }
     }
   }
 
@@ -46,7 +46,7 @@ async function checkDisplay(): Promise<PreflightCheck> {
       name: 'Output display',
       detail:
         'The display this was pointed at is no longer connected. Output will fall back to the primary screen.',
-      remedy: { label: 'PICK A DISPLAY', kind: 'in-app', target: '/settings' }
+      remedy: { label: 'Pick a display', kind: 'in-app', target: '/settings' }
     }
   }
 
@@ -77,7 +77,7 @@ function checkScreenRecording(): PreflightCheck | null {
     return {
       id: 'screenRecording',
       status: 'ready',
-      name: 'Screen Recording',
+      name: 'Screen recording',
       detail: 'Granted — the confidence monitor can mirror the projector.'
     }
   }
@@ -85,11 +85,11 @@ function checkScreenRecording(): PreflightCheck | null {
   return {
     id: 'screenRecording',
     status: 'warning',
-    name: 'Screen Recording',
+    name: 'Screen recording',
     detail:
       'macOS permission is off, so your confidence monitor will be black. System Settings → Privacy & Security → Screen Recording.',
     remedy: {
-      label: 'SHOW ME HOW',
+      label: 'Show me how',
       kind: 'external',
       target:
         'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
@@ -158,7 +158,7 @@ async function checkMedia(setlistId: string | null): Promise<PreflightCheck | nu
       status: 'warning',
       name: 'Media files',
       detail: `${found} of ${allPaths.size} found. ${moved} — open the setlist to relink.`,
-      remedy: { label: 'OPEN SETLIST', kind: 'in-app', target: `/setlists/${setlistId}` }
+      remedy: { label: 'Open setlist', kind: 'in-app', target: `/setlists/${setlistId}` }
     }
   }
   return {
@@ -166,7 +166,7 @@ async function checkMedia(setlistId: string | null): Promise<PreflightCheck | nu
     status: 'warning',
     name: 'Media files',
     detail: `${found} of ${allPaths.size} found. ${moved} — a theme background or logo is missing; pick it again in Settings.`,
-    remedy: { label: 'OPEN SETTINGS', kind: 'in-app', target: '/settings' }
+    remedy: { label: 'Open settings', kind: 'in-app', target: '/settings' }
   }
 }
 
@@ -205,7 +205,7 @@ async function checkBackup(): Promise<PreflightCheck> {
       status: 'warning',
       name: 'Backup',
       detail: 'No backups yet. One bad restore and the library is gone.',
-      remedy: { label: 'BACK UP NOW', kind: 'in-app', target: '/settings' }
+      remedy: { label: 'Back up now', kind: 'in-app', target: '/settings' }
     }
   }
 
@@ -220,7 +220,7 @@ async function checkBackup(): Promise<PreflightCheck> {
       status: 'warning',
       name: 'Backup',
       detail: `Last backup ${ago}. Auto-backup may not be running.`,
-      remedy: { label: 'BACK UP NOW', kind: 'in-app', target: '/settings' }
+      remedy: { label: 'Back up now', kind: 'in-app', target: '/settings' }
     }
   }
 

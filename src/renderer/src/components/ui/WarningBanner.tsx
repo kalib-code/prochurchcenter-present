@@ -3,10 +3,8 @@
  * detects but can't (and shouldn't) fix silently: a PowerPoint deck that
  * failed to parse at entry, or a slide that failed to render mid-service.
  *
- * Rose/red, deliberately NOT amber: ServiceMode's items sidebar already uses
- * `bg-amber-400/10 text-amber-200` to mean "this is the active upcoming
- * item" (see ServiceMode.tsx). Reusing amber here would make a warning read
- * as "currently playing" instead of "something is wrong."
+ * Amber (`warn`): in the redesign amber means "needs attention" and red is
+ * reserved for ON AIR, so a warning can never be mistaken for live state.
  *
  * Operator-only by construction: this component only exists in the
  * ServiceMode module tree, which renders inside the operator's own

@@ -14,12 +14,12 @@ import type { ThemeOverride } from '@shared/types'
 import type { PickFileKind } from '@shared/ipc-contract'
 
 export type ThemeFieldGroup =
-  | 'TYPE'
-  | 'BACKDROP'
-  | 'PLACEMENT'
-  | 'LEGIBILITY'
-  | 'MOTION'
-  | 'STANDBY'
+  | 'Type'
+  | 'Backdrop'
+  | 'Placement'
+  | 'Legibility'
+  | 'Motion'
+  | 'Standby'
 
 interface FieldBase {
   key: keyof ThemeOverride
@@ -60,7 +60,7 @@ export type ThemeFieldDef =
 export const THEME_FIELDS: ThemeFieldDef[] = [
   {
     key: 'fontFamily',
-    group: 'TYPE',
+    group: 'Type',
     label: 'Font',
     hint: 'built-in, uploaded or system',
     kind: 'select',
@@ -79,7 +79,7 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
   },
   {
     key: 'fontSizePercent',
-    group: 'TYPE',
+    group: 'Type',
     label: 'Size',
     hint: 'scales the auto-fit baseline',
     kind: 'step',
@@ -92,31 +92,31 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
   },
   {
     key: 'textColor',
-    group: 'TYPE',
+    group: 'Type',
     label: 'Text colour',
     hint: 'lyrics and scripture',
     kind: 'swatch',
     options: [
-      { value: '#FFFFFF', label: 'WHITE' },
-      { value: '#ECE9E4', label: 'BONE' },
-      { value: '#E23C0F', label: 'SIGNAL' }
+      { value: '#FFFFFF', label: 'White' },
+      { value: '#ECE9E4', label: 'Bone' },
+      { value: '#E23C0F', label: 'Orange' }
     ]
   },
   {
     key: 'backgroundColor',
-    group: 'BACKDROP',
+    group: 'Backdrop',
     label: 'Background colour',
     hint: 'base layer',
     kind: 'swatch',
     options: [
-      { value: '#000000', label: 'BLACK' },
-      { value: '#101822', label: 'NAVY' },
-      { value: '#1A0F0B', label: 'EMBER' }
+      { value: '#000000', label: 'Black' },
+      { value: '#101822', label: 'Navy' },
+      { value: '#1A0F0B', label: 'Ember' }
     ]
   },
   {
     key: 'backgroundImagePath',
-    group: 'BACKDROP',
+    group: 'Backdrop',
     label: 'Background media',
     hint: 'image or ambient video',
     kind: 'file',
@@ -126,69 +126,69 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
   },
   {
     key: 'textAlign',
-    group: 'PLACEMENT',
+    group: 'Placement',
     label: 'Horizontal',
     hint: '',
     kind: 'seg',
     options: [
-      { value: 'left', label: 'LEFT' },
-      { value: 'center', label: 'CENTER' },
-      { value: 'right', label: 'RIGHT' }
+      { value: 'left', label: 'Left' },
+      { value: 'center', label: 'Center' },
+      { value: 'right', label: 'Right' }
     ]
   },
   {
     key: 'textPosition',
-    group: 'PLACEMENT',
+    group: 'Placement',
     label: 'Vertical',
     hint: '',
     kind: 'seg',
     // The 'center' value is TextPosition's real union member; the design
     // labels it MIDDLE. Label and value are deliberately different here.
     options: [
-      { value: 'top', label: 'TOP' },
-      { value: 'center', label: 'MIDDLE' },
-      { value: 'bottom', label: 'BOTTOM' }
+      { value: 'top', label: 'Top' },
+      { value: 'center', label: 'Middle' },
+      { value: 'bottom', label: 'Bottom' }
     ]
   },
   {
     key: 'textEffect',
-    group: 'LEGIBILITY',
+    group: 'Legibility',
     label: 'Text effect',
     hint: 'against busy backgrounds',
     kind: 'seg',
     options: [
-      { value: 'none', label: 'NONE' },
-      { value: 'shadow', label: 'SHADOW' },
-      { value: 'outline', label: 'OUTLINE' },
-      { value: 'highlight', label: 'HIGHLIGHT' }
+      { value: 'none', label: 'None' },
+      { value: 'shadow', label: 'Shadow' },
+      { value: 'outline', label: 'Outline' },
+      { value: 'highlight', label: 'Highlight' }
     ]
   },
   {
     key: 'highlightColor',
-    group: 'LEGIBILITY',
+    group: 'Legibility',
     label: 'Highlight colour',
     hint: 'used by the highlight effect',
     kind: 'swatch',
     options: [
-      { value: '#E23C0F', label: 'SIGNAL' },
-      { value: '#111111', label: 'INK' },
-      { value: '#ECE9E4', label: 'BONE' }
+      { value: '#E23C0F', label: 'Orange' },
+      { value: '#111111', label: 'Ink' },
+      { value: '#ECE9E4', label: 'Bone' }
     ]
   },
   {
     key: 'transition',
-    group: 'MOTION',
+    group: 'Motion',
     label: 'Transition',
     hint: '',
     kind: 'seg',
     options: [
-      { value: 'fade', label: 'FADE' },
-      { value: 'instant', label: 'INSTANT' }
+      { value: 'fade', label: 'Fade' },
+      { value: 'instant', label: 'Instant' }
     ]
   },
   {
     key: 'transitionDurationMs',
-    group: 'MOTION',
+    group: 'Motion',
     label: 'Fade duration',
     hint: '',
     kind: 'step',
@@ -199,7 +199,7 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
   },
   {
     key: 'logoPath',
-    group: 'STANDBY',
+    group: 'Standby',
     label: 'Standby image',
     hint: 'shown when you press L',
     kind: 'file',

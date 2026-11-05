@@ -14,7 +14,7 @@ describe('THEME_FIELDS', () => {
   it('groups fields into the design’s six sections', () => {
     const groups = new Set(THEME_FIELDS.map((f) => f.group))
     expect(groups).toEqual(
-      new Set(['TYPE', 'BACKDROP', 'PLACEMENT', 'LEGIBILITY', 'MOTION', 'STANDBY'])
+      new Set(['Type', 'Backdrop', 'Placement', 'Legibility', 'Motion', 'Standby'])
     )
   })
 
@@ -49,7 +49,7 @@ describe('formatFieldValue', () => {
 
   it('shows the option label rather than the raw value for seg fields', () => {
     const align = THEME_FIELDS.find((f) => f.key === 'textAlign')!
-    expect(formatFieldValue(align, 'center')).toBe('CENTER')
+    expect(formatFieldValue(align, 'center')).toBe('Center')
   })
 
   it('renders a null file path as an em dash', () => {
@@ -71,7 +71,7 @@ describe('formatFieldValue', () => {
 
   it('shows the option label for a swatch field that matches a preset', () => {
     const textColor = THEME_FIELDS.find((f) => f.key === 'textColor')!
-    expect(formatFieldValue(textColor, '#FFFFFF')).toBe('WHITE')
+    expect(formatFieldValue(textColor, '#FFFFFF')).toBe('White')
   })
 
   it('falls back to the raw hex for a swatch field outside its presets', () => {
