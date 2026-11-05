@@ -17,6 +17,9 @@ import type { CreateSongInput, UpdateSongPatch } from '@shared/ipc-contract'
 
 interface LibraryState {
   songs: Song[]
+  /** True once the first list() has succeeded — lets UI tell "song not
+   * loaded yet" apart from "song was deleted" (both are a by-id miss). */
+  loaded: boolean
   loading: boolean
   error: string | null
 
@@ -31,6 +34,7 @@ interface LibraryState {
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   songs: [],
+  loaded: false,
   loading: false,
   error: null,
 
@@ -40,7 +44,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const songs = await window.api.songs.list()
       // Sort client-side by title so the list is stable regardless of fs order
       songs.sort((a, b) => a.title.localeCompare(b.title))
-      set({ songs, loading: false })
+      set({ songs, loaded: true, loading: false })
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) })
     }

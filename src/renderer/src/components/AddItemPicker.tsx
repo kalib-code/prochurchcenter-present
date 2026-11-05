@@ -23,6 +23,7 @@
 import { useEffect } from 'react'
 import type { Song } from '@shared/types'
 import type { CanvaImportResult } from '@shared/canva'
+import { FEATURES } from '@shared/features'
 import { itemKindCode, itemKindLabel } from './ItemKindIcon'
 import { SongPicker } from './SongPicker'
 import { CanvaPicker } from './CanvaPicker'
@@ -82,7 +83,8 @@ const KIND_CARDS: KindCardSpec[] = [
   { kind: 'pptx', hint: 'Import PowerPoint' },
   { kind: 'countdown', hint: 'Pre-service timer' },
   { kind: 'section-divider', hint: 'Grouping only' },
-  { kind: 'canva', hint: 'From your Canva account' }
+  // Canva is hidden behind a feature flag for now (see shared/features.ts).
+  ...(FEATURES.canva ? [{ kind: 'canva' as const, hint: 'From your Canva account' }] : [])
 ]
 
 export function AddItemPicker(props: Props): JSX.Element {
@@ -165,7 +167,9 @@ export function AddItemPicker(props: Props): JSX.Element {
     )
   }
 
-  if (view === 'canva') {
+  // `&& FEATURES.canva` so a stale 'canva' view can't open the picker
+  // while the feature is hidden.
+  if (view === 'canva' && FEATURES.canva) {
     return (
       <div>
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">

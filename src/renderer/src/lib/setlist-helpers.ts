@@ -8,7 +8,7 @@
  * around timezones.
  */
 
-import type { Setlist } from '@shared/types'
+import type { Setlist, SetlistItem } from '@shared/types'
 
 /** Today's local date as ISO YYYY-MM-DD. Not UTC — Sunday is local. */
 export function todayISO(): string {
@@ -113,11 +113,69 @@ export function pickHero(setlists: Setlist[]): Setlist | null {
   const todayOne = setlists.find(isToday)
   if (todayOne) return todayOne
 
-  const todayIso = new Date().toISOString().slice(0, 10)
+  // Local date, same as isToday(). A UTC date here made Monday-morning
+  // users east of UTC (e.g. Manila, UTC+8) see yesterday's setlist as
+  // "upcoming" until 08:00.
+  const todayIso = todayISO()
   const upcoming = setlists
     .filter((s) => s.date >= todayIso)
     .sort((a, b) => a.date.localeCompare(b.date))
   if (upcoming[0]) return upcoming[0]
 
-  return setlists[0] ?? null
+  // Most recent past setlist — don't rely on the caller's ordering.
+  const past = [...setlists].sort((a, b) => b.date.localeCompare(a.date))
+  return past[0] ?? null
+}
+
+/**
+ * Source for "Clone last Sunday": the most recent setlist dated on or
+ * before `today`. The store sorts newest-first, so `setlists[0]` is a
+ * pre-built FUTURE service whenever one exists — cloning that would
+ * copy next month's plan instead of the one just used.
+ * Falls back to the nearest upcoming setlist when every one is in the
+ * future (still the closest thing to "last Sunday"); null when empty.
+ */
+export function pickCloneSource(setlists: Setlist[], today: string = todayISO()): Setlist | null {
+  let best: Setlist | null = null
+  for (const s of setlists) {
+    if (s.date <= today && (!best || s.date > best.date)) best = s
+  }
+  if (best) return best
+  for (const s of setlists) {
+    if (!best || s.date < best.date) best = s
+  }
+  return best
+}
+
+/**
+ * Setlists with at least one item pointing at `songId`, oldest service
+ * first. Used before deleting a song: main's deleteSong only unlinks the
+ * file, and slideify drops song items whose song is gone, so without this
+ * the song would silently vanish from every service that used it.
+ */
+export function setlistsUsingSong(setlists: Setlist[], songId: string): Setlist[] {
+  return setlists
+    .filter((s) => s.items.some((i) => i.kind === 'song' && i.songId === songId))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/** `items` with every song item referencing `songId` removed. */
+export function itemsWithoutSong(items: SetlistItem[], songId: string): SetlistItem[] {
+  return items.filter((i) => !(i.kind === 'song' && i.songId === songId))
+}
+
+/**
+ * Confirm text for deleting a song, naming the services that use it, e.g.
+ *   Delete "Amazing Grace"?
+ *
+ *   Used in: Sunday Worship (Sunday, November 9), Youth Night (…)
+ *   It will be removed from these services.
+ */
+export function songDeleteConfirmText(title: string, usedIn: Setlist[]): string {
+  const head = `Delete "${title}"?`
+  if (usedIn.length === 0) return head
+  const names = usedIn.map((s) => `${s.name} (${formatServiceDate(s.date)})`).join(', ')
+  const tail =
+    usedIn.length === 1 ? 'It will be removed from that service.' : 'It will be removed from these services.'
+  return `${head}\n\nUsed in: ${names}\n${tail}`
 }

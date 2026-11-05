@@ -27,6 +27,7 @@ import {
   formatServiceDate,
   isToday,
   nextSundayISO,
+  pickCloneSource,
   pickHero,
   suggestCloneDefaults
 } from '../lib/setlist-helpers'
@@ -117,7 +118,9 @@ export function Home(): JSX.Element {
 
   const handleCloneLast = async (): Promise<void> => {
     if (busy) return
-    const source = setlists[0]
+    // Not setlists[0]: that's the newest by date, which may be a
+    // pre-built future service rather than the one just used.
+    const source = pickCloneSource(setlists)
     if (!source) return
     setBusy(true)
     try {

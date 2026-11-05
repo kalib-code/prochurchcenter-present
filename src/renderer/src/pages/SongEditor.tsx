@@ -53,6 +53,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { Song, SongLanguage, Theme, ThemeOverride } from '@shared/types'
 import type { SlidePayload, UpdateSongPatch } from '@shared/ipc-contract'
 import { useLibraryStore } from '../stores/useLibraryStore'
+import { useSetlistStore } from '../stores/useSetlistStore'
+import {
+  itemsWithoutSong,
+  setlistsUsingSong,
+  songDeleteConfirmText
+} from '../lib/setlist-helpers'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { useAutosave } from '../hooks/useAutosave'
@@ -112,7 +118,7 @@ function draftToPatch(draft: Draft): UpdateSongPatch {
     author: draft.author.trim() || null,
     ccli: draft.ccli.trim() || null,
     copyright: draft.copyright.trim() || null,
-    year: draft.year.trim() ? Number(draft.year.trim()) : null,
+    year: parseYear(draft.year),
     language: draft.language,
     categories: draft.categories
       .split(',')
@@ -122,6 +128,17 @@ function draftToPatch(draft: Draft): UpdateSongPatch {
     notes: draft.notes,
     themeOverride: draft.themeOverride
   }
+}
+
+/**
+ * Free-text year → integer in a plausible range, else null. `Number()`
+ * alone let "abc" through as NaN and "1999.5" / "20250" through as-is.
+ */
+function parseYear(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!/^\d{1,4}$/.test(trimmed)) return null
+  const n = Number(trimmed)
+  return n >= 1000 && n <= 2100 ? n : null
 }
 
 export function SongEditor(): JSX.Element {
@@ -152,7 +169,7 @@ export function SongEditor(): JSX.Element {
   }, [id, draft, songs, getById])
 
   // Autosave — only runs once draft is seeded
-  const { status, error } = useAutosave<Draft | null>({
+  const { status, error, cancel } = useAutosave<Draft | null>({
     value: draft,
     onSave: async (value) => {
       if (!value || !id) return
@@ -220,9 +237,36 @@ export function SongEditor(): JSX.Element {
       }
 
   const handleDelete = async (): Promise<void> => {
-    const ok = window.confirm(`Delete "${draft.title}"?`)
+    // main's deleteSong only unlinks the file and slideify drops song
+    // items whose song is gone, so deleting a song silently removed it
+    // from every service using it. Re-read setlists from disk (an editor
+    // may have just autosaved), name them in the confirm, and remove the
+    // song's items from them before deleting the song itself.
+    const setlistStore = useSetlistStore.getState()
+    await setlistStore.load()
+    const { setlists, error: loadError } = useSetlistStore.getState()
+    if (loadError) {
+      window.alert(`Couldn't check which services use this song: ${loadError}`)
+      return
+    }
+    const usedIn = setlistsUsingSong(setlists, id)
+    const ok = window.confirm(songDeleteConfirmText(draft.title.trim() || 'Untitled Song', usedIn))
     if (!ok) return
-    await remove(id)
+    try {
+      for (const s of usedIn) {
+        await setlistStore.update(s.id, { items: itemsWithoutSong(s.items, id) })
+      }
+      // Drop any pending autosave so it can't race the delete (or fire on
+      // unmount) and write the song back to disk.
+      cancel()
+      await remove(id)
+    } catch (err) {
+      console.error('[SongEditor] delete failed', err)
+      window.alert(
+        `Couldn't delete the song: ${err instanceof Error ? err.message : String(err)}`
+      )
+      return
+    }
     navigate('/library')
   }
 

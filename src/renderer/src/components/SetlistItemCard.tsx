@@ -27,10 +27,11 @@
  * removed.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { CanvaOrigin, SetlistItem, Song } from '@shared/types'
+import { FEATURES } from '@shared/features'
 import { relinkKindOf } from '@shared/setlist-media'
 import { evictPdfDocument, probePdfPageCount } from '../lib/pdfLoader'
 import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
@@ -42,6 +43,24 @@ import { cn } from '../lib/utils'
 import { Badge } from './ui/Badge'
 import { MonoLabel } from './ui/MonoLabel'
 import { Button } from './ui/Button'
+import { isoToLocalInput, localInputToIso } from '../lib/datetimeLocal'
+import { packScripture } from '../lib/scriptureSlides'
+import { useSettingsStore } from '../stores/useSettingsStore'
+import { useLibraryStore } from '../stores/useLibraryStore'
+
+/**
+ * The most recently rendered value, readable after an `await`. Async
+ * handlers below (file pickers, PDF probes, Canva refresh, Bible lookup)
+ * must build their onChange payload from THIS, not from the `item` their
+ * closure captured — otherwise any edit made to the same item while the
+ * await was in flight (e.g. typing a title during a Canva refresh) is
+ * reverted when the handler writes the stale copy back.
+ */
+function useLatest<T>(value: T): { readonly current: T } {
+  const ref = useRef(value)
+  ref.current = value
+  return ref
+}
 
 interface SetlistItemCardProps {
   item: SetlistItem
@@ -73,6 +92,11 @@ export function SetlistItemCard({
 }: SetlistItemCardProps): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id })
+  const latest = useLatest(item)
+  // Hooks stay above the section-divider early return (rules of hooks).
+  // Same max-lines setting the live slides use, so the badge matches the service.
+  const maxLines = useSettingsStore((st) => st.settings?.maxLinesPerSlide ?? 4)
+  const libraryLoaded = useLibraryStore((st) => st.loaded)
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -133,21 +157,23 @@ export function SetlistItemCard({
     if (!relinkKind) return
     const picked = await window.api.dialog.pickFile(relinkKind)
     if (!picked) return
-    if (item.kind === 'image') {
-      onChange({ ...item, imagePath: picked })
+    const cur = latest.current
+    if (cur.kind === 'image') {
+      onChange({ ...cur, imagePath: picked })
       return
     }
-    if (item.kind === 'video') {
-      onChange({ ...item, videoPath: picked })
+    if (cur.kind === 'video') {
+      onChange({ ...cur, videoPath: picked })
       return
     }
-    if (item.kind === 'deck') {
+    if (cur.kind === 'deck') {
       // The replacement PDF may have a different page count than the
       // one that went missing — re-probe rather than trust the stale
       // value, or the deck would render the wrong number of slides.
       try {
         const pageCount = await probePdfPageCount(picked)
-        onChange({ ...item, pdfPath: picked, pageCount })
+        const now = latest.current
+        if (now.kind === 'deck') onChange({ ...now, pdfPath: picked, pageCount })
       } catch (err) {
         console.error('[relink] failed to probe PDF', picked, err)
         window.alert(
@@ -159,7 +185,7 @@ export function SetlistItemCard({
 
   const title = rowTitle(item, songsById)
   const sourceLine = sourceLineFor(item, songsById)
-  const slideCount = slideCountLabel(item, songsById)
+  const slideCount = slideCountLabel(item, songsById, maxLines)
   const detail = density === 'detail'
   // COMPACT rows have no room for the full MEDIA MISSING banner (that's
   // the whole point of COMPACT density), but the count in the meta strip
@@ -168,6 +194,12 @@ export function SetlistItemCard({
   // Badge keeps the affected row findable without spending the vertical
   // space a full banner needs.
   const compactMissing = !detail && missing && Boolean(relinkKind)
+  // A song item whose library entry is gone (deleted song): slideify
+  // silently drops it, so flag it loudly here instead. Only once the
+  // library has loaded — before that every song is a by-id miss.
+  const songMissing =
+    item.kind === 'song' && libraryLoaded && !songsById.has(item.songId)
+  const flagged = compactMissing || songMissing
 
   return (
     <div
@@ -176,7 +208,7 @@ export function SetlistItemCard({
       className={cn(
         'flex items-center gap-4 border bg-card transition-colors',
         detail ? 'p-3.5' : 'py-2.5 px-3.5',
-        compactMissing
+        flagged
           ? // Side-specific border colors on every edge (not the general
             // `border-border` utility) — mixing an all-sides border-color
             // class with a side-specific `border-l-*` override on the same
@@ -228,7 +260,7 @@ export function SetlistItemCard({
               <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
                 {title}
               </span>
-              {compactMissing && (
+              {flagged && (
                 <Badge tone="signal" className="flex-none">
                   MISSING
                 </Badge>
@@ -249,6 +281,17 @@ export function SetlistItemCard({
             onChange={onChange}
             staleDesignIds={staleDesignIds}
           />
+        )}
+
+        {detail && songMissing && (
+          <div className="mt-2.5 flex items-center gap-2.5 border border-signal/50 bg-signal/[0.08] px-[11px] py-2">
+            <MonoLabel tone="signal" className="flex-none">
+              SONG MISSING
+            </MonoLabel>
+            <span className="flex-1 text-[11.5px] text-bone">
+              This song was deleted from the library. It will be skipped in service — remove it or add the song again.
+            </span>
+          </div>
         )}
 
         {detail && missing && relinkKind && (
@@ -408,7 +451,11 @@ function sourceLineFor(item: SetlistItem, songsById: Map<string, Song>): string 
 }
 
 /** Compact-mode slide-count readout, or null when a kind has none. */
-function slideCountLabel(item: SetlistItem, songsById: Map<string, Song>): string | null {
+function slideCountLabel(
+  item: SetlistItem,
+  songsById: Map<string, Song>,
+  maxLines: number
+): string | null {
   switch (item.kind) {
     case 'song': {
       const song = songsById.get(item.songId)
@@ -423,7 +470,9 @@ function slideCountLabel(item: SetlistItem, songsById: Map<string, Song>): strin
     case 'scripture': {
       const text = item.text.trim()
       if (!text) return null
-      const n = text.split(/\n\s*\n/).filter((b) => b.trim()).length
+      // Must match slideify's scripture packing, or the badge says
+      // "1 SLIDE" for a chapter the service splits across many.
+      const n = packScripture(text, maxLines).length
       return n > 0 ? `${n} SLIDE${n === 1 ? '' : 'S'}` : null
     }
     case 'image':
@@ -446,11 +495,18 @@ function ItemBody({
   onChange: (patch: SetlistItem) => void
   staleDesignIds?: string[]
 }): JSX.Element {
+  const latest = useLatest(item)
+
   if (item.kind === 'song') {
     const song = songsById.get(item.songId)
     return (
       <div>
-        <div className="text-[13.5px] font-medium text-foreground">
+        <div
+          className={cn(
+            'text-[13.5px] font-medium',
+            song ? 'text-foreground' : 'text-signal'
+          )}
+        >
           {song ? song.title : '(missing song)'}
         </div>
         {song?.author && (
@@ -472,7 +528,8 @@ function ItemBody({
   if (item.kind === 'image') {
     const handlePick = async (): Promise<void> => {
       const picked = await window.api.dialog.pickFile('image')
-      if (picked) onChange({ ...item, imagePath: picked })
+      const cur = latest.current
+      if (picked && cur.kind === 'image') onChange({ ...cur, imagePath: picked })
     }
 
     return (
@@ -498,11 +555,12 @@ function ItemBody({
   if (item.kind === 'video') {
     const handlePick = async (): Promise<void> => {
       const picked = await window.api.dialog.pickFile('video')
-      if (!picked) return
+      const cur = latest.current
+      if (!picked || cur.kind !== 'video') return
       onChange({
-        ...item,
+        ...cur,
         videoPath: picked,
-        title: item.title || defaultDeckTitle(picked)
+        title: cur.title || defaultDeckTitle(picked)
       })
     }
     // `loop` defaults to true — undefined means "I haven't been
@@ -552,8 +610,10 @@ function ItemBody({
   }
 
   if (item.kind === 'countdown') {
-    // HTML datetime-local wants "YYYY-MM-DDTHH:mm" — slice the ISO.
-    const localValue = item.targetTime ? item.targetTime.slice(0, 16) : ''
+    // datetime-local is wall-clock LOCAL time; targetTime is a UTC ISO.
+    // Convert both ways via local date parts (slicing the ISO showed UTC,
+    // so every edit shifted the target by the zone offset — 8h in Manila).
+    const localValue = isoToLocalInput(item.targetTime)
     return (
       <div className="flex flex-col gap-1.5">
         <input
@@ -566,9 +626,12 @@ function ItemBody({
         <input
           type="datetime-local"
           value={localValue}
-          onChange={(e) =>
-            onChange({ ...item, targetTime: new Date(e.target.value).toISOString() })
-          }
+          onChange={(e) => {
+            // Cleared / partial input → null; ignore it rather than throw
+            // (new Date('').toISOString() is a RangeError) or save garbage.
+            const iso = localInputToIso(e.target.value)
+            if (iso) onChange({ ...item, targetTime: iso })
+          }}
           className="w-full border border-border bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
         />
       </div>
@@ -595,11 +658,13 @@ function ItemBody({
           )
           return
         }
+        const cur = latest.current
+        if (cur.kind !== 'pptx') return
         onChange({
-          ...item,
+          ...cur,
           pptxPath: picked,
           slideCount,
-          title: item.title || defaultPptxTitle(picked)
+          title: cur.title || defaultPptxTitle(picked)
         })
       } catch (err) {
         console.error('[pptx] failed to probe PowerPoint file', picked, err)
@@ -674,23 +739,26 @@ function DeckEditor({
   onChange: (next: DeckItem) => void
   staleDesignIds?: string[]
 }): JSX.Element {
+  const latest = useLatest(item)
+
   const handlePick = async (): Promise<void> => {
     const picked = await window.api.dialog.pickFile('pdf')
     if (!picked) return
     try {
       const pageCount = await probePdfPageCount(picked)
+      const cur = latest.current
       // Drop `canva`: a hand-picked PDF has no Canva provenance. Keeping
       // the old key here would lie about where this file came from — the
       // card would keep showing "From Canva", the background staleness
       // check would keep polling a design this deck no longer contains,
       // and Refresh would silently overwrite the operator's deliberate
       // manual choice with a re-pull from Canva.
-      const { canva: _discard, ...rest } = item
+      const { canva: _discard, ...rest } = cur
       onChange({
         ...rest,
         pdfPath: picked,
         pageCount,
-        title: item.title || defaultDeckTitle(picked)
+        title: cur.title || defaultDeckTitle(picked)
       })
     } catch (err) {
       console.error('[deck] failed to probe PDF', picked, err)
@@ -702,8 +770,10 @@ function DeckEditor({
 
   // `item.canva`'s presence is the sole trigger for any Canva UI on
   // this card — a hand-picked PDF deck has no `canva` key and must
-  // show no badge and no Refresh button.
-  const origin: CanvaOrigin | undefined = item.canva
+  // show no badge and no Refresh button. With Canva feature-flagged off
+  // (shared/features.ts) an imported deck is treated as a plain PDF deck:
+  // the `canva` key stays on the item, but no Canva badge/Refresh shows.
+  const origin: CanvaOrigin | undefined = FEATURES.canva ? item.canva : undefined
   const isStale = origin ? (staleDesignIds ?? []).includes(origin.designId) : false
 
   // In-flight guard: a refresh is a full network round trip (export job
@@ -762,7 +832,7 @@ function DeckEditor({
       // Only now — after the replacement is confirmed good — swap the
       // item over to it.
       onChange({
-        ...item,
+        ...latest.current,
         pdfPath: result.pdfPath,
         pageCount,
         canva: {
@@ -893,6 +963,7 @@ function ScriptureEditor({
     useBibleStore()
   const [lookupBusy, setLookupBusy] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
+  const latest = useLatest(item)
 
   // Lazy-load the translation list the first time any scripture item
   // mounts. Idempotent inside the store.
@@ -903,9 +974,12 @@ function ScriptureEditor({
   // Default to ENGWEBP (World English Bible) if the operator hasn't
   // chosen a translation yet AND the catalog has loaded. Picking a
   // sensible default matters more than picking the "right" one — they
-  // can swap from the dropdown.
+  // can swap from the dropdown. Also replaces an id the catalog doesn't
+  // know (e.g. 'NIV' from older builds): the <select> would display the
+  // first option while state kept the bogus id, so Lookup always failed.
   useEffect(() => {
-    if (item.translation || translations.length === 0) return
+    if (translations.length === 0) return
+    if (item.translation && translations.some((t) => t.id === item.translation)) return
     const fallback =
       translations.find((t) => t.id === 'ENGWEBP') ??
       translations.find((t) => t.language === 'eng') ??
@@ -919,12 +993,14 @@ function ScriptureEditor({
     setLookupBusy(true)
     setLookupError(null)
     try {
-      const result = await window.api.bible.lookup(
-        item.translation,
-        item.reference
-      )
+      const { translation, reference } = item
+      const result = await window.api.bible.lookup(translation, reference)
       if (result.ok) {
-        onChange({ ...item, text: result.text })
+        // Skip if the reference/translation was edited mid-lookup: the
+        // text belongs to the old query and would mislabel the slide.
+        const cur = latest.current
+        if (cur.reference !== reference || cur.translation !== translation) return
+        onChange({ ...cur, text: result.text })
       } else {
         setLookupError(result.error)
       }

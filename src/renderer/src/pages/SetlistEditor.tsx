@@ -54,6 +54,7 @@ import {
 import type { Setlist, SetlistItem } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
 import type { CanvaImportResult } from '@shared/canva'
+import { FEATURES } from '@shared/features'
 import { useSetlistStore } from '../stores/useSetlistStore'
 import { useLibraryStore } from '../stores/useLibraryStore'
 import { useCanvaStore } from '../stores/useCanvaStore'
@@ -146,7 +147,10 @@ export function SetlistEditor(): JSX.Element {
   // added/removed/refreshed, which is what should actually trigger a
   // recheck — plus `id`, so switching setlists (if this component were
   // ever reused across ids) always keys the check to the right one.
-  const canvaCheckItems = draft
+  //
+  // Skipped entirely while Canva is feature-flagged off: imported decks
+  // still present as plain PDFs, but nothing should call out to Canva.
+  const canvaCheckItems = FEATURES.canva && draft
     ? draft.items.flatMap((item) =>
         item.kind === 'deck' && item.canva
           ? [{ designId: item.canva.designId, designUpdatedAt: item.canva.designUpdatedAt }]
@@ -172,7 +176,7 @@ export function SetlistEditor(): JSX.Element {
     }
   }, [id, canvaCheckKey, checkStale])
 
-  const { status, error } = useAutosave<Draft | null>({
+  const { status, error, flush, cancel } = useAutosave<Draft | null>({
     value: draft,
     onSave: async (value) => {
       if (!value || !id) return
@@ -224,41 +228,52 @@ export function SetlistEditor(): JSX.Element {
     setPickerView('grid')
   }
 
+  // Item mutators below all derive the new list from `prev` (functional
+  // setState) rather than this render's `draft.items`: several callers
+  // run after an `await` (file pickers, PDF probes, Canva refresh, Bible
+  // lookup), and building from the stale closure would silently revert
+  // any edit the operator made while that await was in flight.
+  const updateItems = (fn: (items: SetlistItem[]) => SetlistItem[]): void => {
+    setDraft((prev) => (prev ? { ...prev, items: fn(prev.items) } : prev))
+  }
+
   /** Insert a new item at the pending `insertAt` index. Defaults to append. */
   const insertItem = (newItem: SetlistItem): void => {
-    const at = insertAt ?? draft.items.length
-    const next = [...draft.items]
-    next.splice(at, 0, newItem)
-    patch({ items: next })
+    updateItems((items) => {
+      const next = [...items]
+      next.splice(insertAt ?? items.length, 0, newItem)
+      return next
+    })
     closePicker()
   }
 
   const updateItem = (itemId: string, next: SetlistItem): void => {
-    patch({
-      items: draft.items.map((i) => (i.id === itemId ? next : i))
-    })
+    updateItems((items) => items.map((i) => (i.id === itemId ? next : i)))
   }
 
   const deleteItem = (itemId: string): void => {
-    patch({ items: draft.items.filter((i) => i.id !== itemId) })
+    updateItems((items) => items.filter((i) => i.id !== itemId))
   }
 
   const duplicateItem = (itemId: string): void => {
-    const idx = draft.items.findIndex((i) => i.id === itemId)
-    if (idx < 0) return
-    const copy: SetlistItem = { ...draft.items[idx], id: genItemId() }
-    const next = [...draft.items]
-    next.splice(idx + 1, 0, copy)
-    patch({ items: next })
+    updateItems((items) => {
+      const idx = items.findIndex((i) => i.id === itemId)
+      if (idx < 0) return items
+      const next = [...items]
+      next.splice(idx + 1, 0, { ...items[idx], id: genItemId() })
+      return next
+    })
   }
 
   const handleDragEnd = (e: DragEndEvent): void => {
     const { active, over } = e
     if (!over || active.id === over.id) return
-    const oldIndex = draft.items.findIndex((i) => i.id === active.id)
-    const newIndex = draft.items.findIndex((i) => i.id === over.id)
-    if (oldIndex < 0 || newIndex < 0) return
-    patch({ items: arrayMove(draft.items, oldIndex, newIndex) })
+    updateItems((items) => {
+      const oldIndex = items.findIndex((i) => i.id === active.id)
+      const newIndex = items.findIndex((i) => i.id === over.id)
+      if (oldIndex < 0 || newIndex < 0) return items
+      return arrayMove(items, oldIndex, newIndex)
+    })
   }
 
   const addSong = (songId: string): void => {
@@ -271,7 +286,10 @@ export function SetlistEditor(): JSX.Element {
       id: genItemId(),
       reference: '',
       text: '',
-      translation: 'NIV'
+      // Empty so ScriptureEditor's default-translation effect picks a real
+      // catalog id (ENGWEBP); 'NIV' isn't in the helloao catalog, so the
+      // <select> showed another option while Lookup sent 'NIV' and failed.
+      translation: ''
     })
   }
 
@@ -406,6 +424,9 @@ export function SetlistEditor(): JSX.Element {
   const handleDelete = async (): Promise<void> => {
     const ok = window.confirm(`Delete "${draft.name}"?`)
     if (!ok) return
+    // Drop any pending autosave so it can't race the delete (or fire on
+    // unmount) and write the setlist back to disk.
+    cancel()
     await remove(id)
     navigate('/')
   }
@@ -471,8 +492,15 @@ export function SetlistEditor(): JSX.Element {
           <SaveStatePill status={status} error={error} />
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="signal" size="md" asChild>
-            <Link to={`/service/${id}`}>START SERVICE →</Link>
+          {/* Await the pending autosave before entering service mode, so an
+              edit made in the last 500ms is on disk before the service loads
+              the setlist — otherwise it would run the stale version. */}
+          <Button
+            variant="signal"
+            size="md"
+            onClick={() => void flush().then(() => navigate(`/service/${id}`))}
+          >
+            START SERVICE →
           </Button>
           <Button variant="danger" size="md" onClick={() => void handleDelete()}>
             DELETE
@@ -512,7 +540,12 @@ export function SetlistEditor(): JSX.Element {
             <input
               type="date"
               value={draft.date}
-              onChange={(e) => patch({ date: e.target.value })}
+              // Clearing the native date field yields '' — ignore it and keep
+              // the last valid date, or autosave writes '' and the header
+              // renders "Invalid Date".
+              onChange={(e) => {
+                if (e.target.value) patch({ date: e.target.value })
+              }}
               className="w-full border border-border bg-background px-[13px] py-[11px] font-mono text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
             />
           </label>
