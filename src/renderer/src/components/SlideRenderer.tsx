@@ -38,8 +38,10 @@ import { useLayoutEffect, useRef, useState, useEffect, type CSSProperties } from
 import type { SlidePayload, VideoControl } from '@shared/ipc-contract'
 import type { Theme, TextAlign, TextPosition } from '@shared/types'
 import { formatCountdown } from '../lib/slideify'
+import { shouldRewindLoop } from '../lib/videoPlayback'
 import { loadPdfDocument } from '../lib/pdfLoader'
 import PptxSlideView from './PptxSlideView'
+import { toMediaUrl } from '@shared/mediaUrl'
 
 /**
  * Build a URL the renderer can pass to <img src>/<video src>/CSS url()
@@ -62,7 +64,8 @@ import PptxSlideView from './PptxSlideView'
  * loads the renderer from file:// and could use file:// directly).
  */
 function fileUrl(path: string): string {
-  return `present-media://local${encodeURI(path)}`
+  // Shared encoder: encodeURI left `#`/`?` raw and broke Windows paths.
+  return toMediaUrl(path)
 }
 
 /**
@@ -102,6 +105,12 @@ interface SlideRendererProps {
    * OUTPUT window passes true — the operator confidence monitor
    * (mirror of the same payloads) stays muted so the operator isn't
    * fighting two audio streams.
+   *
+   * Because only the projector passes it, this doubles as the
+   * "congregation is watching" signal: when true, render failures
+   * (PDF page, undecodable video) show black instead of an error
+   * panel. Every audio=false mount (stage monitor, Settings / theme
+   * editor previews) is operator-facing and still shows the message.
    */
   audio?: boolean
   /**
@@ -151,22 +160,25 @@ export function SlideRenderer({
   // Video, when set, renders as an absolutely-positioned <video> element
   // behind the content — see the JSX below. We use inline style for the
   // image background because URL paths aren't known at Tailwind compile time.
-  const containerStyle: CSSProperties = {
-    backgroundColor: isFullBleedMedia ? '#000000' : t.backgroundColor,
-    color: t.textColor,
-    fontFamily: t.fontFamily
-  }
-  if (t.backgroundImagePath && !isFullBleedMedia) {
-    containerStyle.backgroundImage = `url(${fileUrl(t.backgroundImagePath)})`
-    containerStyle.backgroundSize = 'cover'
-    containerStyle.backgroundPosition = 'center'
-  }
-
   // Blackout: skip rendering the video/image too, so the output truly
   // goes dark when the operator presses B. Without this the video would
   // keep playing behind a black-text-on-black slide, visible through any
   // slight transparency.
   const isBlackout = mode === 'black'
+
+  // Blackout also forces the container itself to pure black: previously
+  // a theme with a blue background colour or a background image kept
+  // showing it during "blackout".
+  const containerStyle: CSSProperties = {
+    backgroundColor: isFullBleedMedia || isBlackout ? '#000000' : t.backgroundColor,
+    color: t.textColor,
+    fontFamily: t.fontFamily
+  }
+  if (t.backgroundImagePath && !isFullBleedMedia && !isBlackout) {
+    containerStyle.backgroundImage = `url(${fileUrl(t.backgroundImagePath)})`
+    containerStyle.backgroundSize = 'cover'
+    containerStyle.backgroundPosition = 'center'
+  }
 
   return (
     <div
@@ -252,6 +264,7 @@ export function SlideRenderer({
             animate={animate}
             transitionDurationMs={t.transitionDurationMs}
             useFade={t.transition === 'fade'}
+            showError={!audio}
           />
         </div>
       )}
@@ -298,14 +311,29 @@ export function SlideRenderer({
           window, muted on the confidence monitor. VideoSlide owns a
           ref and applies pause/mute imperatively via useEffect so the
           operator can pause/unmute without remounting the <video>
-          (which would restart playback from 0). */}
-      {!isBlackout && showLive && payload.kind === 'video' && (
-        <div className="absolute inset-0 flex items-center justify-center">
+          (which would restart playback from 0).
+
+          Deliberately NOT gated on mode: B / L only HIDE and pause the
+          video. Unmounting it (the old `!isBlackout && showLive` guard)
+          threw away the decoder, so returning to live replayed the clip
+          from 0:00 in front of the congregation. Pausing on black (rather
+          than letting audio run under a dark screen) is the least
+          surprising behaviour in a service — blackout means "stop" — and
+          resuming picks up exactly where it was. The pause also fires a
+          timeupdate with paused=true, so the operator's runway freezes
+          at the true position instead of drifting. */}
+      {payload?.kind === 'video' && (
+        <div
+          className={`absolute inset-0 flex items-center justify-center ${
+            showLive ? '' : 'invisible'
+          }`}
+        >
           <VideoSlide
             videoPath={payload.videoPath}
             audio={audio}
             control={videoControl}
             loop={payload.loop ?? true}
+            hidden={!showLive}
           />
         </div>
       )}
@@ -809,13 +837,16 @@ function PdfPageView({
   pageIndex,
   animate,
   transitionDurationMs,
-  useFade
+  useFade,
+  showError
 }: {
   pdfPath: string
   pageIndex: number
   animate: boolean
   transitionDurationMs: number
   useFade: boolean
+  /** False on the projector — see SlideRendererProps.audio. */
+  showError: boolean
 }): JSX.Element {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
@@ -943,7 +974,13 @@ function PdfPageView({
       ref={wrapperRef}
       className="relative flex h-full w-full items-center justify-center"
     >
-      {error && (
+      {/* Never on the projector: a red debug panel in front of the
+          congregation is worse than black. The failure is still
+          console.error'd above; the operator's Service Mode grid
+          thumbnail loads the same page through the same pdfLoader and
+          shows a "pdf" placeholder when it fails, and the stage monitor
+          and Settings previews (audio=false) show this message. */}
+      {error && showError && (
         <div className="max-w-md rounded bg-red-900/70 px-3 py-2 text-xs text-white">
           PDF render failed: {error}
         </div>
@@ -991,7 +1028,9 @@ function VideoSlide(props: {
   audio: boolean
   control?: VideoControl
   loop: boolean
-}): JSX.Element {
+  /** Blackout / logo is up: keep the decoder, but pause and hide. */
+  hidden: boolean
+}): JSX.Element | null {
   // Two completely different rendering strategies depending on which
   // window we're in, so we split into sub-components instead of
   // branching inside a single useEffect tangle:
@@ -1010,10 +1049,20 @@ function VideoSlide(props: {
   //                 <OutputMirror> rather than a per-slide instance.
   return props.audio ? (
     <VideoSlideOutput
+      // Keyed by path so every new video gets a fresh instance. Without
+      // it, a decode error on video A leaves the listener effect (deps
+      // [loop, videoPath]) bound to the null ref of the black fallback
+      // when video B mounts — no runway updates, no auto-advance.
+      key={props.videoPath}
       videoPath={props.videoPath}
       control={props.control}
       loop={props.loop}
+      hidden={props.hidden}
     />
+  ) : props.hidden ? (
+    // The pixel mirror has no playback position to lose, so there's no
+    // reason to keep a desktop capture running behind a blackout.
+    null
   ) : (
     <VideoSlideOperator />
   )
@@ -1027,34 +1076,39 @@ function VideoSlide(props: {
 function VideoSlideOutput({
   videoPath,
   control,
-  loop
+  loop,
+  hidden
 }: {
   videoPath: string
   control?: VideoControl
   loop: boolean
+  hidden: boolean
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const paused = control?.paused ?? false
   const muted = !!control?.muted
-  // Decoder error state — set when the <video> fires error event
-  // with MEDIA_ERR_DECODE or MEDIA_ERR_SRC_NOT_SUPPORTED. Surfaces
-  // an inline overlay so the volunteer sees a real error message
-  // instead of a frozen first frame, with concrete next steps
-  // (re-encode the video to browser-compatible H.264 8-bit).
-  const [decodeError, setDecodeError] = useState<string | null>(null)
-  // Reset error state whenever the videoPath changes — a new video
-  // gets a fresh chance to play before we pessimistically assume
-  // it's broken too.
-  useEffect(() => {
-    setDecodeError(null)
-  }, [videoPath])
+  // Set when the <video> fires `error`. The element is swapped for
+  // plain black — this component only ever mounts in the projector
+  // window (audio=true), so any message drawn here would be read by
+  // the congregation, not the operator. The details go to
+  // console.error (piped to the dev terminal), and the operator's
+  // runway in Service Mode flags "not playing" when no playback
+  // updates arrive for the live video.
+  // No reset-on-path-change effect: the caller keys this component by
+  // videoPath, so a new video always starts with failed = false.
+  const [failed, setFailed] = useState(false)
 
+  // `hidden` (blackout / logo) pauses exactly like the operator's P.
+  // An `ended` video is left alone: play() on an ended element restarts
+  // it from 0, which would replay a finished clip the moment the
+  // operator un-blacks.
+  const shouldPause = paused || hidden
   useEffect(() => {
     const v = ref.current
     if (!v) return
-    if (paused) v.pause()
-    else v.play().catch(() => {})
-  }, [paused])
+    if (shouldPause) v.pause()
+    else if (!v.ended) v.play().catch(() => {})
+  }, [shouldPause])
 
   useEffect(() => {
     const v = ref.current
@@ -1062,19 +1116,27 @@ function VideoSlideOutput({
     v.muted = muted
   }, [muted])
 
-  // Loop / advance via `timeupdate` instead of `ended`. The HTML
-  // `ended` event is unreliable on streamed sources (our
-  // present-media:// protocol via net.fetch sometimes doesn't
-  // expose byte-range seeks cleanly enough for Chromium to fire
-  // ended OR to natively loop). Watching `timeupdate` and acting
-  // PRE-EMPTIVELY 0.5s before the actual end sidesteps the entire
-  // broken "ended" path: we never reach the final frame, so we
-  // never get stuck on it.
+  // Loop vs. advance use DIFFERENT end signals:
   //
-  //   loop = true  → seek back to 0 when within 500ms of the end
-  //   loop = false → notify operator (auto-advance) at the same point
+  //   loop = true  → pre-emptive rewind from `timeupdate` near the end
+  //                  (shouldRewindLoop). Native `loop` needs a seek back
+  //                  to 0, which our present-media:// stream (net.fetch)
+  //                  doesn't always serve cleanly; rewinding just before
+  //                  the end never reaches the stuck final frame. Losing
+  //                  up to 0.5s of a loop is invisible.
+  //   loop = false → notify the operator (auto-advance) from the real
+  //                  `ended` event. Firing early here (the old
+  //                  duration-0.5s check) cut off the last half-second —
+  //                  exactly where fade-outs and end title cards live.
+  //                  Reaching the end needs no seek, so `ended` is
+  //                  reliable for a play-once clip, and it also covers
+  //                  very short and unknown-duration videos, which a
+  //                  duration-based check can't.
   //
-  // The `nearEndFired` flag prevents firing multiple times within
+  // `ended` on a LOOPING video means native loop failed to kick in —
+  // rewind manually, same defensive fallback as the background video.
+  //
+  // The `nearEndFired` flag prevents rewinding multiple times within
   // a single cycle (timeupdate fires ~4Hz so without it we'd
   // re-trigger 1–2x per cycle).
   useEffect(() => {
@@ -1106,78 +1168,62 @@ function VideoSlideOutput({
         paused: v.paused
       })
 
-      if (!v.duration || !Number.isFinite(v.duration)) return
-      const nearEnd = v.currentTime >= v.duration - 0.5
+      if (!loop) return
+      const nearEnd = shouldRewindLoop(v.currentTime, v.duration)
       if (nearEnd && !nearEndFired) {
         nearEndFired = true
-        if (loop) {
-          console.log('[fg-video] near end, rewinding (loop=true)')
-          v.currentTime = 0
-          // Some Electron versions need an explicit play() after
-          // a seek when the element was mid-playback near end.
-          if (v.paused) void v.play().catch(() => {})
-        } else {
-          console.log('[fg-video] near end, notifying operator (loop=false)')
-          void window.api.output.setVideoEnded({ videoPath })
-        }
+        console.log('[fg-video] near end, rewinding (loop=true)')
+        v.currentTime = 0
+        // Some Electron versions need an explicit play() after
+        // a seek when the element was mid-playback near end.
+        if (v.paused) void v.play().catch(() => {})
       } else if (!nearEnd && nearEndFired) {
         // Reset the flag once playback has clearly moved away
         // from the end (i.e., we successfully looped back to ~0).
         nearEndFired = false
       }
     }
+    const handleEnded = (): void => {
+      if (loop) {
+        console.log('[fg-video] ended despite loop=true, rewinding')
+        v.currentTime = 0
+        void v.play().catch(() => {})
+        return
+      }
+      console.log('[fg-video] ended, notifying operator (loop=false)')
+      void window.api.output.setVideoEnded({ videoPath })
+    }
     const handleError = (): void => {
       const err = v.error
-      console.error('[fg-video] error', err?.code, err?.message, videoPath)
-      // Map the error code to a human-readable message. The
-      // important distinction for volunteers is "the file is
-      // broken" (decode/source) vs "something else went wrong":
+      // Map the error code to a human-readable hint for the log. The
+      // important distinction is "the file is broken" (decode/source)
+      // vs "something else went wrong":
       //   1 MEDIA_ERR_ABORTED         — user abort, transient
       //   2 MEDIA_ERR_NETWORK         — network/protocol failure
       //   3 MEDIA_ERR_DECODE          — codec/pixel format unsupported
       //   4 MEDIA_ERR_SRC_NOT_SUPPORTED — container/codec not recognized
       const code = err?.code ?? 0
-      if (code === 3 || code === 4) {
-        setDecodeError(
-          'Video format not supported by the player. Re-export the file as H.264 8-bit (yuv420p) — most motion-graphic packs use formats this player can\'t decode. HandBrake with the "Fast 1080p30" preset produces compatible files.'
-        )
-      } else if (code === 2) {
-        setDecodeError(
-          'Could not load the video file. Check that it still exists at the original location and that the file isn\'t corrupted.'
-        )
-      } else if (code !== 0) {
-        setDecodeError(
-          `Video playback failed (error code ${code}). Try re-encoding the file to H.264 8-bit.`
-        )
-      }
+      const hint =
+        code === 3 || code === 4
+          ? 'unsupported format — re-export as H.264 8-bit (yuv420p), e.g. HandBrake "Fast 1080p30"'
+          : code === 2
+            ? 'could not load the file — check it still exists and is not corrupted'
+            : 'playback failed — try re-encoding to H.264 8-bit'
+      console.error('[fg-video] error', code, err?.message, videoPath, '—', hint)
+      if (code !== 0) setFailed(true)
     }
     v.addEventListener('timeupdate', handleTimeUpdate)
+    v.addEventListener('ended', handleEnded)
     v.addEventListener('error', handleError)
     return () => {
       v.removeEventListener('timeupdate', handleTimeUpdate)
+      v.removeEventListener('ended', handleEnded)
       v.removeEventListener('error', handleError)
     }
   }, [loop, videoPath])
 
-  // Decode failure overlay — shown INSTEAD of the <video> element
-  // when the decoder rejected the file. We keep the overlay
-  // bordered + dark so it reads as a clear "this is broken"
-  // signal rather than blending into a slide background. The
-  // operator typically sees this on the confidence monitor first
-  // (because the projector is full-screen black) and can swap the
-  // file or re-encode it without disrupting the service.
-  if (decodeError) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-black">
-        <div className="max-w-2xl rounded-md border border-red-500/40 bg-red-950/40 p-6 text-center text-sm text-red-100">
-          <div className="mb-2 text-base font-semibold">
-            Video can&apos;t be played
-          </div>
-          <p className="leading-relaxed">{decodeError}</p>
-        </div>
-      </div>
-    )
-  }
+  // Failed decode → plain black on the projector (see `failed` above).
+  if (failed) return <div className="h-full w-full bg-black" />
 
   return (
     <video

@@ -19,11 +19,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
-  backupFilename,
+  autoBackupFilename,
   ensureBackupsDir,
   exportLibrary,
   getBackupsDir,
-  rotateBackups
+  rotateBackups,
+  sweepStaleZipTmps
 } from './backup'
 
 // ── Tunables ─────────────────────────────────────────────────────────
@@ -133,12 +134,21 @@ export async function runAutoBackupOnLaunch(): Promise<void> {
   // Small startup delay so we don't fight the window-opening frame.
   await new Promise<void>((r) => setTimeout(r, AUTO_BACKUP_STARTUP_DELAY_MS))
 
+  // Clear zips a crashed export left half-written (they're tmp-named,
+  // so they never showed in Restore, but they do take disk space).
+  await sweepStaleZipTmps().catch((err) => console.warn('[autoBackup] tmp sweep failed:', err))
+
   const state = readAutoBackupState()
   if (!shouldBackupNow(state)) return
 
   try {
     ensureBackupsDir()
-    const path = join(getBackupsDir(), backupFilename())
+    // `auto-` prefix so rotateBackups() deletes only scheduler-written
+    // zips, never a manual "Back up now" one (see AUTO_BACKUP_PREFIX).
+    // exportLibrary builds the zip in a worker thread and renames it
+    // into place only when complete, so this no longer freezes the
+    // operator/output windows or leaves a truncated zip on a crash.
+    const path = join(getBackupsDir(), autoBackupFilename())
     await exportLibrary(path)
     rotateBackups(AUTO_BACKUP_KEEP)
     writeAutoBackupState({

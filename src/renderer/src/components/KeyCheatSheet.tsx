@@ -10,7 +10,7 @@
  * Backdrop is a plain `<div onClick>` (click-outside-to-close), same as
  * before the redesign — this is the standard modal-backdrop pattern,
  * not a stand-in for a real control. The actual dismiss controls are
- * the `?` key (toggles via useKeyboard) and this backdrop click; there
+ * the `?` / Esc keys (via useKeyboard) and this backdrop click; there
  * are no other interactive elements to accidentally nest inside it.
  */
 
@@ -70,8 +70,8 @@ export function KeyCheatSheet({ onClose }: KeyCheatSheetProps): JSX.Element {
           ))}
         </dl>
         <div className="border-t border-border px-[18px] py-[11px] text-center text-[11px] text-muted-foreground">
-          Press <span className="font-mono text-foreground">?</span> again or click outside to
-          close
+          Press <span className="font-mono text-foreground">?</span> again,{' '}
+          <span className="font-mono text-foreground">ESC</span>, or click outside to close
         </div>
       </Panel>
     </div>

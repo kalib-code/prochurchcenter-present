@@ -19,6 +19,7 @@
 
 import { create } from 'zustand'
 import type { CustomFontEntry } from '@shared/ipc-contract'
+import { toMediaUrl } from '@shared/mediaUrl'
 
 /**
  * The minimal shape of a FontData entry returned by
@@ -66,7 +67,8 @@ function injectFontFaces(fonts: CustomFontEntry[]): void {
   }
   styleEl.textContent = fonts
     .map((f) => {
-      const url = `present-media://local${encodeURI(f.absolutePath)}`
+      // Shared encoder: encodeURI left `#`/`?` raw in font filenames.
+      const url = toMediaUrl(f.absolutePath)
       // Quote the family name to handle hyphens / special chars in
       // CSS family identifiers without escaping headaches.
       return `@font-face { font-family: "${f.family}"; src: url("${url}"); font-display: swap; }`

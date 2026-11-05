@@ -24,6 +24,7 @@ import type {
 } from '@shared/types'
 import type { SlidePayload } from '@shared/ipc-contract'
 import { parseSongText } from '@shared/parser'
+import { packScripture } from './scriptureSlides'
 
 export interface RenderableItem {
   /** Matches SetlistItem.id — used as React key and for focused-item UI */
@@ -109,9 +110,37 @@ export function slideifySetlist(
 }
 
 /**
- * Split text slides that exceed `maxLines` into chunks of up to
- * `maxLines` lines each. All chunks inherit the original slide's
- * sectionLabel so "Verse 1" still reads as "Verse 1" on both halves.
+ * Split `lines` into the fewest chunks of at most `maxLines` lines,
+ * balanced so no chunk is a lone widow line: 5 @ 4 → 3+2 (not 4+1),
+ * 9 @ 4 → 3+3+3 (not 4+4+1). A stranded last line on its own slide
+ * reads as a mistake to the congregation and wastes an advance.
+ *
+ * Chunk count = ceil(n / max); the lines are then dealt out evenly,
+ * earlier chunks taking the remainder, so sizes differ by at most one
+ * (7 @ 4 → 4+3, 10 @ 3 → 3+3+2+2). A fixed size of ceil(n / chunks)
+ * is NOT enough: 10 @ 3 would give 3+3+3+1, the very widow this avoids.
+ * Shared by the setlist path (enforceMaxLines) and the editor preview
+ * (previewSongSlides) so both always split identically.
+ */
+export function splitBalanced(lines: string[], maxLines: number): string[][] {
+  if (lines.length <= maxLines) return [lines]
+  const chunkCount = Math.ceil(lines.length / maxLines)
+  const base = Math.floor(lines.length / chunkCount)
+  const remainder = lines.length % chunkCount
+  const out: string[][] = []
+  let start = 0
+  for (let i = 0; i < chunkCount; i++) {
+    const size = base + (i < remainder ? 1 : 0)
+    out.push(lines.slice(start, start + size))
+    start += size
+  }
+  return out
+}
+
+/**
+ * Split text slides that exceed `maxLines` into balanced chunks (see
+ * splitBalanced). All chunks inherit the original slide's sectionLabel
+ * so "Verse 1" still reads as "Verse 1" on both halves.
  *
  * Non-text slides (image, countdown) pass through unchanged.
  */
@@ -122,12 +151,8 @@ function enforceMaxLines(slides: SlidePayload[], maxLines: number): SlidePayload
       out.push(slide)
       continue
     }
-    for (let i = 0; i < slide.lines.length; i += maxLines) {
-      out.push({
-        kind: 'text',
-        lines: slide.lines.slice(i, i + maxLines),
-        sectionLabel: slide.sectionLabel
-      })
+    for (const lines of splitBalanced(slide.lines, maxLines)) {
+      out.push({ kind: 'text', lines, sectionLabel: slide.sectionLabel })
     }
   }
   return out
@@ -191,27 +216,19 @@ function slideifyItem(
   if (item.kind === 'scripture') {
     const text = item.text.trim()
     if (!text) return null
-    // Split verse text on blank lines so a long passage can span multiple
-    // slides if the user separated it that way. A single-paragraph verse
-    // becomes one slide.
-    const blocks = text.split(/\n\s*\n/).map((b) =>
-      b
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-    )
-    const slides: SlidePayload[] = blocks
-      .filter((block) => block.length > 0)
-      .map((lines) => ({
-        kind: 'text',
-        lines,
-        sectionLabel: `${item.reference} (${item.translation})`
-      }))
+    // Packed by character budget, not line count: each line here is a
+    // whole verse, so line-count splitting crammed 4 long verses onto a
+    // slide. Blank lines in the text are still honored as hard breaks.
+    const slides: SlidePayload[] = packScripture(text, maxLines).map((lines) => ({
+      kind: 'text',
+      lines,
+      sectionLabel: `${item.reference} (${item.translation})`
+    }))
     return {
       id: item.id,
       kind: 'scripture',
       label: `${item.reference} · ${item.translation}`,
-      slides: enforceMaxLines(slides, maxLines)
+      slides
     }
   }
 
@@ -429,17 +446,12 @@ export function previewSongSlides(
     const shortcut = slideShortcutFor(section)
     const label = section.label || section.type
 
-    // Apply max-lines splitting to each parser-produced slide
-    const expanded: string[][] = []
-    for (const slide of section.slides) {
-      if (slide.length <= maxLines) {
-        expanded.push(slide)
-        continue
-      }
-      for (let i = 0; i < slide.length; i += maxLines) {
-        expanded.push(slide.slice(i, i + maxLines))
-      }
-    }
+    // Apply max-lines splitting to each parser-produced slide — same
+    // helper as enforceMaxLines so the editor preview never disagrees
+    // with what the projector shows.
+    const expanded: string[][] = section.slides.flatMap((slide) =>
+      splitBalanced(slide, maxLines)
+    )
 
     expanded.forEach((lines, idx) => {
       out.push({
@@ -463,14 +475,20 @@ export function previewSongSlides(
  *   - "15:32"           when under an hour
  *   - "1:02:45"         when over an hour
  *   - "Starting now"    when <= 0
+ *   - "--:--"           when targetISO doesn't parse
+ *
+ * An unparseable target gets a neutral placeholder, NOT "Starting now":
+ * a bad/empty target time on a pre-service countdown would otherwise
+ * tell the room the service is starting when nobody set a time.
  *
  * Pure + cheap so the output window can call it on every 500ms tick
  * without breaking a sweat.
  */
 export function formatCountdown(targetISO: string, now: number = Date.now()): string {
   const target = new Date(targetISO).getTime()
+  if (!Number.isFinite(target)) return '--:--'
   const remainingMs = target - now
-  if (!Number.isFinite(target) || remainingMs <= 0) return 'Starting now'
+  if (remainingMs <= 0) return 'Starting now'
 
   const totalSeconds = Math.floor(remainingMs / 1000)
   const hours = Math.floor(totalSeconds / 3600)

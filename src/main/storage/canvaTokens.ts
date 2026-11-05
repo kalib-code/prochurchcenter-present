@@ -14,10 +14,11 @@
  */
 
 import { safeStorage } from 'electron'
-import { writeFile, readFile, rm } from 'fs/promises'
+import { readFile, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import type { CanvaTokens } from '@shared/canva'
 import { getCanvaTokensPath } from './paths'
+import { atomicWriteFile } from './atomic'
 
 export function isTokenStorageAvailable(): boolean {
   try {
@@ -32,7 +33,10 @@ export async function saveTokens(tokens: CanvaTokens): Promise<void> {
     throw new Error('Encrypted storage is unavailable on this system')
   }
   const encrypted = safeStorage.encryptString(JSON.stringify(tokens))
-  await writeFile(getCanvaTokensPath(), encrypted)
+  // Atomic: a crash mid-write would otherwise leave a truncated blob
+  // that fails to decrypt — read back as "not connected", losing the
+  // (just-rotated, so irreplaceable) refresh token.
+  await atomicWriteFile(getCanvaTokensPath(), encrypted)
 }
 
 /**

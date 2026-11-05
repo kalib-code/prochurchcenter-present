@@ -344,6 +344,9 @@ export async function disconnect(): Promise<void> {
   await clearTokens()
 }
 
+/** The shared in-flight refresh, if any. See getValidAccessToken. */
+let refreshInFlight: Promise<string> | null = null
+
 /**
  * A usable access token, refreshing when near expiry.
  *
@@ -361,6 +364,30 @@ export async function getValidAccessToken(): Promise<string> {
   const tokens = await loadTokens()
   if (!tokens) throw new Error('Canva is not connected')
 
+  if (Date.parse(tokens.expiresAt) - EXPIRY_SKEW_MS > Date.now()) {
+    return tokens.accessToken
+  }
+
+  // Single-flight: every caller that finds the token expired shares ONE
+  // refresh. Canva rotates the refresh token on each use, so a second,
+  // overlapping refresh would present the already-consumed token, get a
+  // 400, and requireReauth() would then clear the fresh tokens the first
+  // refresh just saved — disconnecting the operator for no reason.
+  if (!refreshInFlight) {
+    refreshInFlight = refreshAccessToken().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+async function refreshAccessToken(): Promise<string> {
+  // Re-read inside the flight: a caller that loaded the old tokens just
+  // before a previous refresh finished (and cleared refreshInFlight)
+  // lands here with a stale, already-rotated refresh token. The tokens
+  // on disk are the truth — if they are fresh now, use them.
+  const tokens = await loadTokens()
+  if (!tokens) throw new Error('Canva is not connected')
   if (Date.parse(tokens.expiresAt) - EXPIRY_SKEW_MS > Date.now()) {
     return tokens.accessToken
   }

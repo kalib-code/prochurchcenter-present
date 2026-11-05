@@ -10,14 +10,18 @@
  *   B                  toggleBlack
  *   L                  toggleLogo
  *   ?                  toggleCheatSheet
- *   Esc                confirmExit
+ *   Esc                onExit (confirm + exit + navigate home)
+ *
+ * While the cheat sheet is open, only ? and Esc (both close it) are live;
+ * every other key is swallowed so a volunteer reading the sheet can't
+ * change the projector by accident.
  *
  * Gotcha: we IGNORE key events when the user is typing in an <input>,
  * <textarea>, or contenteditable element. Otherwise pressing Space inside
  * the "Notes" field would advance the slide, which is maddening.
  *
  * Usage:
- *   useKeyboard({ enabled: serviceState.mode === 'running' })
+ *   useKeyboard({ enabled: serviceState.mode === 'running', onExit })
  */
 
 import { useEffect } from 'react'
@@ -25,7 +29,24 @@ import { useServiceStore } from '../stores/useServiceStore'
 
 interface UseKeyboardOptions {
   enabled: boolean
+  /**
+   * Must be the SAME confirm+exit+navigate path as the EXIT button.
+   * Calling the store's exit() alone leaves ServiceMode mounted in
+   * 'idle', and its start effect immediately restarts the service.
+   */
+  onExit: () => void
 }
+
+/** Keys that move the live slide — auto-repeat is ignored for these. */
+const NAV_KEYS = new Set([
+  ' ',
+  'ArrowRight',
+  'ArrowLeft',
+  'ArrowDown',
+  'ArrowUp',
+  'PageDown',
+  'PageUp'
+])
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -35,7 +56,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false
 }
 
-export function useKeyboard({ enabled }: UseKeyboardOptions): void {
+export function useKeyboard({ enabled, onExit }: UseKeyboardOptions): void {
   const {
     nextSlide,
     prevSlide,
@@ -43,8 +64,7 @@ export function useKeyboard({ enabled }: UseKeyboardOptions): void {
     prevItem,
     toggleBlack,
     toggleLogo,
-    toggleCheatSheet,
-    exit
+    toggleCheatSheet
   } = useServiceStore()
 
   useEffect(() => {
@@ -52,6 +72,26 @@ export function useKeyboard({ enabled }: UseKeyboardOptions): void {
 
     const handler = (e: KeyboardEvent): void => {
       if (isEditableTarget(e.target)) return
+
+      // Cheat sheet open: ?/Esc close it, everything else is ignored.
+      // Read live from the store so the check can't go stale between
+      // re-subscriptions.
+      const live = useServiceStore.getState().state
+      if (live.mode === 'running' && live.showCheatSheet) {
+        if (e.key === '?' || e.key === 'Escape') {
+          e.preventDefault()
+          toggleCheatSheet()
+        }
+        return
+      }
+
+      // OS key auto-repeat must never drive navigation: holding SPACE/→
+      // would otherwise race through the setlist and off the end. One
+      // physical press = one slide.
+      if (e.repeat && NAV_KEYS.has(e.key)) {
+        e.preventDefault()
+        return
+      }
 
       // Normalize key — Shift+Space is still ' ' with shiftKey true
       switch (e.key) {
@@ -106,12 +146,10 @@ export function useKeyboard({ enabled }: UseKeyboardOptions): void {
           toggleCheatSheet()
           break
 
-        case 'Escape': {
+        case 'Escape':
           e.preventDefault()
-          const ok = window.confirm('Exit service mode?')
-          if (ok) exit()
+          onExit()
           break
-        }
 
         default:
           break
@@ -129,6 +167,6 @@ export function useKeyboard({ enabled }: UseKeyboardOptions): void {
     toggleBlack,
     toggleLogo,
     toggleCheatSheet,
-    exit
+    onExit
   ])
 }

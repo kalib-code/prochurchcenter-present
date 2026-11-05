@@ -14,9 +14,11 @@ import {
   type PreflightReport
 } from '@shared/ipc-contract'
 import type { Setlist } from '@shared/types'
-import { mediaPathOf } from '@shared/setlist-media'
+import { mediaPathOf, themeMediaPaths } from '@shared/setlist-media'
 import { getSettings } from '../storage/settings'
 import { getSetlist } from '../storage/setlists'
+import { getSong } from '../storage/songs'
+import { getTheme } from '../storage/theme'
 import { listBackups } from '../storage/backup'
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
@@ -106,10 +108,17 @@ async function checkMedia(setlistId: string | null): Promise<PreflightCheck | nu
   }
   if (!setlist) return null
 
-  const paths = setlist.items
+  const itemPaths = setlist.items
     .map(mediaPathOf)
     .filter((p): p is string => p !== null)
-  if (paths.length === 0) {
+
+  // Theme media (background image/video, standby logo) breaks the
+  // projector just as badly as a missing item, but is fixed in Settings
+  // rather than the setlist — so it is counted separately.
+  const themePaths = await collectThemeMediaPaths(setlist)
+
+  const allPaths = new Set([...itemPaths, ...themePaths])
+  if (allPaths.size === 0) {
     return {
       id: 'media',
       status: 'ready',
@@ -118,33 +127,68 @@ async function checkMedia(setlistId: string | null): Promise<PreflightCheck | nu
     }
   }
 
-  let found = 0
-  for (const p of paths) {
+  const missingSet = new Set<string>()
+  for (const p of allPaths) {
     try {
       await access(p)
-      found += 1
     } catch {
-      // counted as missing below
+      missingSet.add(p)
     }
   }
 
-  const missing = paths.length - found
-  if (missing === 0) {
+  if (missingSet.size === 0) {
     return {
       id: 'media',
       status: 'ready',
       name: 'Media files',
-      detail: `All ${paths.length} found.`
+      detail: `All ${allPaths.size} found.`
     }
   }
 
+  const found = allPaths.size - missingSet.size
+  const missingItems = itemPaths.filter((p) => missingSet.has(p)).length
+  const missing = missingSet.size
+  const moved = `${missing === 1 ? 'One file has' : `${missing} files have`} moved`
+
+  // Item files take priority for the remedy: they're per-setlist and the
+  // setlist editor has RELINK buttons. Theme-only misses go to Settings.
+  if (missingItems > 0) {
+    return {
+      id: 'media',
+      status: 'warning',
+      name: 'Media files',
+      detail: `${found} of ${allPaths.size} found. ${moved} — open the setlist to relink.`,
+      remedy: { label: 'OPEN SETLIST', kind: 'in-app', target: `/setlists/${setlistId}` }
+    }
+  }
   return {
     id: 'media',
     status: 'warning',
     name: 'Media files',
-    detail: `${found} of ${paths.length} found. ${missing === 1 ? 'One file has' : `${missing} files have`} moved — open the setlist to relink.`,
-    remedy: { label: 'OPEN SETLIST', kind: 'in-app', target: `/setlists/${setlistId}` }
+    detail: `${found} of ${allPaths.size} found. ${moved} — a theme background or logo is missing; pick it again in Settings.`,
+    remedy: { label: 'OPEN SETTINGS', kind: 'in-app', target: '/settings' }
   }
+}
+
+/** Media paths from the active global theme and any per-song overrides in the setlist. */
+async function collectThemeMediaPaths(setlist: Setlist): Promise<string[]> {
+  const paths: string[] = []
+  try {
+    const settings = await getSettings()
+    paths.push(...themeMediaPaths(await getTheme(settings.activeThemeId)))
+  } catch {
+    // An unreadable theme is reported elsewhere; don't fail pre-flight over it.
+  }
+  for (const item of setlist.items) {
+    if (item.kind !== 'song') continue
+    try {
+      const song = await getSong(item.songId)
+      paths.push(...themeMediaPaths(song?.themeOverride))
+    } catch {
+      // Missing song: the setlist editor already flags it.
+    }
+  }
+  return paths
 }
 
 async function checkBackup(): Promise<PreflightCheck> {
@@ -229,7 +273,9 @@ export function registerSystemHandlers(): void {
  */
 const ALLOWED_EXTERNAL_SCHEMES = ['https:', 'x-apple.systempreferences:']
 
-function isAllowedExternalUrl(url: string): boolean {
+// Exported so main/index.ts's setWindowOpenHandler applies the same
+// allowlist instead of passing renderer-controlled URLs straight through.
+export function isAllowedExternalUrl(url: string): boolean {
   let parsed: URL
   try {
     parsed = new URL(url)

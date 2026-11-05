@@ -2,21 +2,32 @@ import { app, shell, BrowserWindow, protocol, net } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { screen } from 'electron'
 import { ensureDirectories } from './storage/paths'
 import { ensureDefaultTheme } from './storage/theme'
 import { getSettings } from './storage/settings'
-import { listSetlists } from './storage/setlists'
+import { readAllSetlists } from './storage/setlists'
 import { sweepOrphanPdfs } from './canva/import'
 import { registerAllIpcHandlers } from './ipc'
+import { isAllowedExternalUrl } from './ipc/system'
 import { attachOutputReplay } from './ipc/output'
-import { getOperatorWindow, setOperatorWindow, setOutputWindow } from './windows'
+import {
+  getOperatorWindow,
+  markAppQuitting,
+  setOperatorWindow,
+  setOutputWindow,
+  setOutputWindowFactory
+} from './windows'
 import {
   createStageMonitorWindow,
-  createLowerThirdsWindow
+  createLowerThirdsWindow,
+  closeAllProjectorWindows,
+  registerDisplayChangeHandlers,
+  resolveProjectorDisplay
 } from './projectorWindows'
 import { initAutoUpdater } from './updater'
 import { runAutoBackupOnLaunch } from './storage/autoBackup'
+import { fromMediaUrl } from '@shared/mediaUrl'
+import { pendingWriteCount, waitForPendingWrites } from './storage/atomic'
 
 /**
  * Single-instance lock.
@@ -124,6 +135,74 @@ function createWindows(): void {
     }
   })
 
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    operatorWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    operatorWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  operatorWindow.on('ready-to-show', () => {
+    operatorWindow.show()
+    if (is.dev) operatorWindow.webContents.openDevTools()
+  })
+
+  operatorWindow.webContents.setWindowOpenHandler((details) => {
+    // Same scheme allowlist as the system:openExternal IPC handler —
+    // a `window.open`/target=_blank URL is renderer-controlled too, and
+    // shell.openExternal on e.g. `file:` or a custom app scheme can
+    // launch arbitrary local programs.
+    if (isAllowedExternalUrl(details.url)) {
+      shell.openExternal(details.url).catch((err) => {
+        console.error('[window] openExternal failed', err)
+      })
+    } else {
+      console.warn('[window] Blocked window.open for disallowed scheme:', details.url)
+    }
+    return { action: 'deny' }
+  })
+
+  // The operator window is the only one with a frame/close button. When
+  // it goes, take the frameless output / stage / lower-thirds windows
+  // with it — otherwise they stay up with no way to close them, and on
+  // Windows/Linux `window-all-closed` never fires so the app never quits.
+  // On macOS the app stays alive with zero windows and the `activate`
+  // handler recreates the full set, same as any other last-window close.
+  operatorWindow.on('closed', () => {
+    closeAllProjectorWindows()
+  })
+
+  // Register with the global registry so ipc/output.ts can reach the
+  // operator (and so ensureOutputWindow knows the operator is alive).
+  setOperatorWindow(operatorWindow)
+  setOutputWindowFactory(createOutputWindow)
+  createOutputWindow()
+
+  // Restore stage monitor + lower thirds windows if the user had
+  // them enabled in their last session. Created lazily (i.e. on
+  // demand) so the app doesn't pay the cost of spawning two
+  // additional renderers for users who don't use these features.
+  void getSettings().then((settings) => {
+    if (settings.stageMonitorEnabled) {
+      createStageMonitorWindow(settings.stageMonitorDisplayId)
+    }
+    if (settings.lowerThirdsEnabled) {
+      createLowerThirdsWindow(
+        settings.lowerThirdsDisplayId,
+        settings.lowerThirdsChromaKey,
+        settings.lowerThirdsAlignment
+      )
+    }
+  })
+}
+
+/**
+ * Create the output (projector) window and register it. Called at
+ * startup and again by ensureOutputWindow() (windows.ts) if the window
+ * was closed mid-session. `displayId` overrides the saved
+ * `outputDisplayId` (used when the operator picks a display while the
+ * window is closed).
+ */
+function createOutputWindow(displayId?: number | null): BrowserWindow {
   // Output window — borderless (no title bar or traffic lights),
   // manually sized to cover the target display, kept above everything
   // via alwaysOnTop. We deliberately DO NOT use Electron's fullscreen
@@ -217,85 +296,46 @@ function createWindows(): void {
     )
   }
 
-  // Load windows — same bundle, different hash routes
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    operatorWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     outputWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#/output`)
   } else {
-    operatorWindow.loadFile(join(__dirname, '../renderer/index.html'))
     outputWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'output' })
   }
 
-  operatorWindow.on('ready-to-show', () => {
-    operatorWindow.show()
-    if (is.dev) operatorWindow.webContents.openDevTools()
-  })
+  // Target display: the explicit/saved one if it is still attached,
+  // otherwise the first non-primary display (Ate Rose plugs in the
+  // projector and expects slides to land there, not on her laptop),
+  // otherwise primary. Resolved once, applied at ready-to-show — the
+  // old code applied the saved display in a separate settings callback
+  // that could run BEFORE ready-to-show, whose default then won.
+  const savedDisplayId: Promise<number | null> =
+    displayId !== undefined
+      ? Promise.resolve(displayId)
+      : getSettings()
+          .then((s) => s.outputDisplayId)
+          .catch(() => null)
 
   outputWindow.on('ready-to-show', () => {
-    // Pick the best default display for the output window:
-    //   1. If there's a non-primary display attached (i.e. a projector
-    //      or external monitor is plugged in), use that — Ate Rose
-    //      plugs in the projector and expects the slides to land
-    //      there immediately, not on her laptop screen.
-    //   2. Otherwise (laptop only / dev), fall back to primary so
-    //      the window is at least visible and developers can iterate.
-    //
-    // The async settings load below will further override this if
-    // the user has explicitly picked a display in Settings.
-    const displays = screen.getAllDisplays()
-    const primary = screen.getPrimaryDisplay()
-    const defaultTarget =
-      displays.find((d) => d.id !== primary.id) ?? primary
-    outputWindow.setBounds(defaultTarget.workArea)
-    outputWindow.show()
-    // Open devtools on the output window in dev mode too — otherwise
-    // errors in the renderer that runs the projector view (image loads,
-    // font decoding, etc) are invisible because the operator window's
-    // devtools only shows the operator renderer's console.
-    if (is.dev) outputWindow.webContents.openDevTools({ mode: 'detach' })
+    void savedDisplayId.then((id) => {
+      if (outputWindow.isDestroyed()) return
+      // Borderless windowed approach: moving is a straight setBounds
+      // call. No fullscreen API to toggle.
+      outputWindow.setBounds(resolveProjectorDisplay(id).workArea)
+      outputWindow.show()
+      // Open devtools on the output window in dev mode too — otherwise
+      // errors in the renderer that runs the projector view (image loads,
+      // font decoding, etc) are invisible because the operator window's
+      // devtools only shows the operator renderer's console.
+      if (is.dev) outputWindow.webContents.openDevTools({ mode: 'detach' })
+    })
   })
 
-  operatorWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
-
-  // Register the two windows with the global registry so ipc/output.ts
-  // can broadcast slide payloads into the output renderer.
-  setOperatorWindow(operatorWindow)
+  // Register with the global registry so ipc/output.ts can broadcast
+  // slide payloads into the output renderer; replay brings a new (or
+  // recreated) window up on the current slide.
   setOutputWindow(outputWindow)
   attachOutputReplay(outputWindow)
-
-  // Restore saved output display. Fire-and-forget — if settings can't be
-  // read or the saved display no longer exists, the window stays on
-  // primary (which is where it was just created) and the user can pick
-  // a different display from Settings.
-  void getSettings().then((settings) => {
-    const savedId = settings.outputDisplayId
-    if (savedId != null) {
-      const target = screen.getAllDisplays().find((d) => d.id === savedId)
-      if (target) {
-        // Borderless windowed approach: moving is a straight setBounds
-        // call. No fullscreen API to toggle.
-        outputWindow.setBounds(target.workArea)
-      }
-    }
-
-    // Restore stage monitor + lower thirds windows if the user had
-    // them enabled in their last session. Created lazily (i.e. on
-    // demand) so the app doesn't pay the cost of spawning two
-    // additional renderers for users who don't use these features.
-    if (settings.stageMonitorEnabled) {
-      createStageMonitorWindow(settings.stageMonitorDisplayId)
-    }
-    if (settings.lowerThirdsEnabled) {
-      createLowerThirdsWindow(
-        settings.lowerThirdsDisplayId,
-        settings.lowerThirdsChromaKey,
-        settings.lowerThirdsAlignment
-      )
-    }
-  })
+  return outputWindow
 }
 
 app.whenReady().then(async () => {
@@ -325,16 +365,21 @@ app.whenReady().then(async () => {
   // Accept-Ranges headers. This was the root cause of "videos
   // stop instead of looping" — videos played fine until the loop
   // point, where the browser tried to seek and gave up.
-  protocol.handle('present-media', (request) => {
+  protocol.handle('present-media', async (request) => {
     try {
-      const url = new URL(request.url)
-      // url.host is 'local', url.pathname is '/Users/kael/Downloads/logo.jpeg'
-      // decodeURIComponent reverses the encodeURI the renderer applied.
-      const absPath = decodeURIComponent(url.pathname)
+      // Shared decoder (src/shared/mediaUrl.ts) — the exact inverse of
+      // the renderer's toMediaUrl, including `#`/`?` in filenames and
+      // Windows drive paths (`/C:/Users/...` → `C:/Users/...`).
+      const absPath = fromMediaUrl(request.url)
+      if (!absPath) return new Response('Not Found', { status: 404 })
       // Forward request headers so Range requests reach the file
       // layer. pathToFileURL handles platform-specific encoding
       // (Windows drive letters, etc) correctly.
-      return net.fetch(pathToFileURL(absPath).toString(), {
+      //
+      // `await` matters: net.fetch rejects asynchronously for a missing
+      // file (net::ERR_FILE_NOT_FOUND). Returning the bare promise would
+      // let that rejection escape this try/catch instead of becoming a 404.
+      return await net.fetch(pathToFileURL(absPath).toString(), {
         headers: request.headers
       })
     } catch (err) {
@@ -353,7 +398,18 @@ app.whenReady().then(async () => {
   // Fire-and-forget: startup must never block or fail on housekeeping.
   void (async () => {
     try {
-      const setlists = await listSetlists()
+      const { setlists, failed } = await readAllSetlists()
+      // A setlist we couldn't read may still reference PDFs here; with
+      // it missing from `referenced`, its PDFs would look orphaned and
+      // be deleted. Skip the whole sweep — a leftover PDF costs disk
+      // space, a deleted one breaks a service.
+      if (failed.length > 0) {
+        console.warn(
+          `[canva] skipping orphan sweep: ${failed.length} setlist file(s) unreadable`,
+          failed
+        )
+        return
+      }
       // Every deck's pdfPath counts as referenced, not just ones with a
       // `canva` key. A deck can point into media/canva/ without that key
       // (a hand-picked PDF that happens to live there, or one that lost
@@ -377,6 +433,11 @@ app.whenReady().then(async () => {
 
   createWindows()
 
+  // Keep frameless projector windows on a real screen when a display is
+  // unplugged, and move them back when it returns. Registered once
+  // (screen events are app-wide), after windows exist.
+  registerDisplayChangeHandlers()
+
   // Wire auto-updater after windows are created. The updater is a
   // no-op in dev mode (app.isPackaged === false) so this is safe at
   // every startup. See src/main/updater.ts for the full lifecycle.
@@ -397,3 +458,56 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+/**
+ * Hold the quit until in-flight library writes land.
+ *
+ * Why: the operator renderer flushes its autosave on window close, which
+ * reaches main as an IPC → atomicWriteJson. Quitting mid-write leaves
+ * the tmp file un-renamed and the edit lost. So if writes are pending,
+ * cancel this quit, wait (bounded — a wedged disk must not make the app
+ * unquittable), then quit again.
+ *
+ * Both events: `before-quit` covers writes already running when quit
+ * starts; `will-quit` (after all windows have closed) covers the flush
+ * the closing window itself just sent.
+ *
+ * Loop guard: each event holds the quit at most once per process (so
+ * the re-issued app.quit() always goes through), and a quit that
+ * arrives while we're already draining is swallowed — the drain
+ * finishes with its own app.quit().
+ */
+const QUIT_WRITE_DRAIN_TIMEOUT_MS = 3000
+let quitDrainInProgress = false
+const quitHoldsUsed = new Set<'before-quit' | 'will-quit'>()
+
+function holdQuitForPendingWrites(
+  event: Electron.Event,
+  phase: 'before-quit' | 'will-quit'
+): void {
+  if (quitDrainInProgress) {
+    event.preventDefault()
+    return
+  }
+  if (quitHoldsUsed.has(phase) || pendingWriteCount() === 0) return
+  event.preventDefault()
+  quitHoldsUsed.add(phase)
+  quitDrainInProgress = true
+  void waitForPendingWrites(QUIT_WRITE_DRAIN_TIMEOUT_MS).then((drained) => {
+    if (!drained) {
+      console.warn(
+        `[quit] ${pendingWriteCount()} write(s) still pending after ${QUIT_WRITE_DRAIN_TIMEOUT_MS}ms; quitting anyway`
+      )
+    }
+    quitDrainInProgress = false
+    app.quit()
+  })
+}
+
+app.on('before-quit', (event) => {
+  // Windows closing as part of the quit must not trigger output-window
+  // recreation (see ensureOutputWindow in windows.ts).
+  markAppQuitting()
+  holdQuitForPendingWrites(event, 'before-quit')
+})
+app.on('will-quit', (event) => holdQuitForPendingWrites(event, 'will-quit'))

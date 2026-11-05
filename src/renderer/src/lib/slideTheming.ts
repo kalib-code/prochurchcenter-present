@@ -33,6 +33,7 @@
 
 import type { CSSProperties } from 'react'
 import type { Theme } from '@shared/types'
+import { toMediaUrl } from '@shared/mediaUrl'
 
 /**
  * Build a `present-media://` URL for a local file path that lives
@@ -43,7 +44,8 @@ import type { Theme } from '@shared/types'
  * `main/index.ts`, resolved to a real file read on the main process side.
  */
 export function fileUrl(path: string): string {
-  return `present-media://local${encodeURI(path)}`
+  // Shared encoder: encodeURI left `#`/`?` raw, breaking "Song #2.jpg".
+  return toMediaUrl(path)
 }
 
 /**

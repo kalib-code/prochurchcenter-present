@@ -13,10 +13,13 @@ import type { Song } from '@shared/types'
 import type { CreateSongInput, UpdateSongPatch } from '@shared/ipc-contract'
 import { parseSongText } from '@shared/parser'
 import { getSongsDir } from './paths'
-import { atomicWriteJson } from './atomic'
+import { atomicWriteJson, withFileLock } from './atomic'
+import { assertSafeId } from './safePath'
 
 function songPath(id: string): string {
-  return join(getSongsDir(), `${id}.json`)
+  // Ids come from the renderer over IPC — reject anything that could
+  // traverse out of the songs dir (e.g. `../../settings`).
+  return join(getSongsDir(), `${assertSafeId(id)}.json`)
 }
 
 function nowIso(): string {
@@ -102,6 +105,13 @@ export async function createSong(input: CreateSongInput): Promise<Song> {
 }
 
 export async function updateSong(id: string, patch: UpdateSongPatch): Promise<Song> {
+  // Hold the per-file lock across read AND write: two overlapping
+  // patches (e.g. autosave + a metadata edit) would otherwise both read
+  // the same old song and the later write would drop the earlier patch.
+  return withFileLock(songPath(id), () => updateSongLocked(id, patch))
+}
+
+async function updateSongLocked(id: string, patch: UpdateSongPatch): Promise<Song> {
   const existing = await getSong(id)
   if (!existing) throw new Error(`Song not found: ${id}`)
 
@@ -125,7 +135,11 @@ export async function updateSong(id: string, patch: UpdateSongPatch): Promise<So
 }
 
 export async function deleteSong(id: string): Promise<void> {
-  await unlink(songPath(id)).catch(() => {
-    /* ignore missing */
-  })
+  const path = songPath(id)
+  // Locked so an in-flight update can't re-create the file just deleted.
+  await withFileLock(path, () =>
+    unlink(path).catch(() => {
+      /* ignore missing */
+    })
+  )
 }

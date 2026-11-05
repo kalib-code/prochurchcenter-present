@@ -29,6 +29,7 @@ import {
 import type { ThemeOverride } from '@shared/types'
 import {
   getOutputWindow,
+  ensureOutputWindow,
   getOperatorWindow,
   getAllProjectorWindows,
   getLowerThirdsWindow
@@ -84,6 +85,10 @@ let lastStageContext: StageContext = {
  * requiring any per-handler awareness of its existence.
  */
 function sendToProjectors(channel: string, payload: unknown): void {
+  // Recreate the output window if it was closed — otherwise every
+  // broadcast for the rest of the service silently went nowhere. The
+  // new window catches up via attachProjectorReplay on load.
+  ensureOutputWindow()
   for (const win of getAllProjectorWindows()) {
     win.webContents.send(channel, payload)
   }
@@ -209,8 +214,14 @@ export function registerOutputHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.output.setDisplay, async (_, displayId: number | null) => {
-    const win = getOutputWindow()
-    if (!win || win.isDestroyed()) return
+    // Explicit operator action: bring a closed output window back on the
+    // display they just picked (the new window places itself there).
+    const existing = getOutputWindow()
+    if (!existing || existing.isDestroyed()) {
+      ensureOutputWindow(displayId)
+      return
+    }
+    const win = existing
 
     // Resolve the target display. null means "primary". A saved id that no
     // longer exists (monitor unplugged since last run) also falls back to

@@ -172,3 +172,49 @@ describe('formatReference', () => {
     }
   })
 })
+
+describe('parseReference — single-chapter books', () => {
+  it('reads a lone number after Jude as a verse in chapter 1', () => {
+    expect(parseReference('Jude 5')).toMatchObject({ bookId: 'JUD', chapter: 1, verseStart: 5 })
+  })
+
+  it('reads "3 John 4-6" as a verse range in chapter 1', () => {
+    expect(parseReference('3 John 4-6')).toMatchObject({
+      bookId: '3JN',
+      chapter: 1,
+      verseStart: 4,
+      verseEnd: 6
+    })
+  })
+
+  it('keeps "Philemon 1" as the whole (only) chapter', () => {
+    expect(parseReference('Philemon 1')).toMatchObject({
+      bookId: 'PHM',
+      chapter: 1,
+      verseStart: undefined
+    })
+  })
+
+  it('still accepts explicit chapter:verse for single-chapter books', () => {
+    expect(parseReference('Obadiah 1:15')).toMatchObject({ chapter: 1, verseStart: 15 })
+  })
+
+  it('does not change multi-chapter books', () => {
+    expect(parseReference('John 5')).toMatchObject({ chapter: 5, verseStart: undefined })
+  })
+})
+
+describe('parseReference — typing variants', () => {
+  it('accepts an en-dash or em-dash verse range (phone/Word autocorrect)', () => {
+    expect(parseReference('John 3:16–18')).toMatchObject({ verseStart: 16, verseEnd: 18 })
+    expect(parseReference('John 3:16—18')).toMatchObject({ verseStart: 16, verseEnd: 18 })
+  })
+
+  it('accepts common plural/singular misspellings of book names', () => {
+    expect(parseReference('Revelations 21:4')?.bookId).toBe('REV')
+    expect(parseReference('Proverb 3:5')?.bookId).toBe('PRO')
+    expect(parseReference('Songs 2:1')?.bookId).toBe('SNG')
+    expect(parseReference('Hebrew 11:1')?.bookId).toBe('HEB')
+    expect(parseReference('Lamentation 3:22')?.bookId).toBe('LAM')
+  })
+})

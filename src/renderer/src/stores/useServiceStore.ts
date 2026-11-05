@@ -49,6 +49,11 @@ interface ServiceActions {
   exit: () => void
 
   nextSlide: () => void
+  /**
+   * nextSlide for the video-ended auto-advance: identical, except it
+   * never ends the service — see the implementation for why.
+   */
+  autoAdvance: () => void
   prevSlide: () => void
   nextItem: () => void
   prevItem: () => void
@@ -77,6 +82,22 @@ function currentPayload(
 }
 
 /**
+ * How long the final slide must have been on screen before nextSlide()
+ * is allowed to end the service. Ending blacks the projector and has no
+ * undo, so a fast double-tap from the second-to-last slide must stop ON
+ * the final slide rather than blow straight through it. Well above a
+ * double-tap (~100–300ms), well below a deliberate "we're done" press.
+ */
+export const END_GUARD_MS = 1000
+
+/**
+ * When the slide currently on screen was put there. Updated by
+ * broadcastSlide — the one choke point every position change goes
+ * through — and read by nextSlide's END_GUARD_MS check.
+ */
+let lastSlideChangeAt = 0
+
+/**
  * Push the current slide to the output window. Called from every action
  * that changes what's being shown.
  */
@@ -85,6 +106,7 @@ function broadcastSlide(
   itemIndex: number,
   slideIndex: number
 ): void {
+  lastSlideChangeAt = Date.now()
   const payload = currentPayload(items, itemIndex, slideIndex)
   if (payload) {
     // Fire and forget. If IPC fails (main crashed?) we still update
@@ -118,6 +140,20 @@ function broadcastItemOverride(
   // no override) — both collapse to null on the wire.
   const override = item?.themeOverride ?? null
   void window.api.output.setItemThemeOverride(override)
+}
+
+/**
+ * Hide the OBS lower-thirds overlay. Main caches the last payload and
+ * replays it to any (re)opened lower-thirds window, and RunningView's
+ * auto-follow only ever pushes while a service is running — so without
+ * an explicit hide on end/exit the last lyric stays on the stream.
+ */
+function hideLowerThirds(): void {
+  void window.api.output.setLowerThirdsContent({
+    visible: false,
+    title: '',
+    subtitle: ''
+  })
 }
 
 export const useServiceStore = create<Store>((set, get) => ({
@@ -164,12 +200,14 @@ export const useServiceStore = create<Store>((set, get) => ({
     // Clear any lingering per-song override so the next service starts
     // from a clean slate (plus whatever global theme is active).
     void window.api.output.setItemThemeOverride(null)
+    hideLowerThirds()
   },
 
   exit: () => {
     set({ state: { mode: 'idle' } })
     broadcastMode('black')
     void window.api.output.setItemThemeOverride(null)
+    hideLowerThirds()
   },
 
   nextSlide: () => {
@@ -195,8 +233,28 @@ export const useServiceStore = create<Store>((set, get) => ({
       return
     }
 
-    // Past the last slide of the last item
+    // Past the last slide of the last item. Ignore the press if the
+    // final slide only just arrived (see END_GUARD_MS) — a double-tap
+    // should never black out the room and end the service.
+    if (Date.now() - lastSlideChangeAt < END_GUARD_MS) return
     get().end()
+  },
+
+  autoAdvance: () => {
+    const s = get().state
+    if (s.mode !== 'running') return
+    const item = s.items[s.itemIndex]
+    if (!item) return
+    // A closing video finishing on its own must not end the service:
+    // ending blacks the projector and flips the operator to SERVICE
+    // ENDED with no way back, which nobody asked for. Stay put (the
+    // video holds its last frame) and let the operator end it
+    // deliberately with SPACE or EXIT.
+    const isVeryLast =
+      s.slideIndex + 1 >= item.slides.length &&
+      s.itemIndex + 1 >= s.items.length
+    if (isVeryLast) return
+    get().nextSlide()
   },
 
   prevSlide: () => {

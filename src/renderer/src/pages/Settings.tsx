@@ -32,6 +32,7 @@ import { useServiceStore } from '../stores/useServiceStore'
 import { SlideRenderer } from '../components/SlideRenderer'
 import { ThemeFields } from '../components/ThemeFields'
 import { CanvaConnectionCard } from '../components/CanvaConnectionCard'
+import { FEATURES } from '@shared/features'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
@@ -40,10 +41,11 @@ import { MonoLabel } from '../components/ui/MonoLabel'
 import { TitleDot } from '../components/ui/TitleDot'
 import { EmptyState } from '../components/ui/EmptyState'
 import { cn } from '../lib/utils'
+import { MAX_LINES_MAX, MAX_LINES_MIN, parseMaxLinesInput } from '../lib/maxLinesInput'
 
 type Section = 'display' | 'theme' | 'output' | 'data' | 'connections' | 'about'
 
-const SECTIONS: { id: Section; label: string; description: string }[] = [
+const ALL_SECTIONS: { id: Section; label: string; description: string }[] = [
   {
     id: 'display',
     label: 'Display',
@@ -76,6 +78,10 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
     description: 'Language, version, and project info.'
   }
 ]
+
+// Connections only holds the Canva account card, so the whole tab hides
+// while Canva is feature-flagged off (see shared/features.ts).
+const SECTIONS = ALL_SECTIONS.filter((s) => s.id !== 'connections' || FEATURES.canva)
 
 const FALLBACK_LINES = [
   'For God so loved the world',
@@ -114,8 +120,8 @@ function slideCaption(payload: SlidePayload): string {
 }
 
 export function Settings(): JSX.Element {
-  const { settings, loading, load: loadSettings } = useSettingsStore()
-  const { theme, load: loadTheme, update: updateTheme } = useThemeStore()
+  const { settings, loading, load: loadSettings, error: settingsError } = useSettingsStore()
+  const { theme, load: loadTheme, update: updateTheme, error: themeError } = useThemeStore()
   const serviceState = useServiceStore((s) => s.state)
 
   const [section, setSection] = useState<Section>('display')
@@ -183,6 +189,14 @@ export function Settings(): JSX.Element {
             {activeSection.description}
           </p>
 
+          {/* A failed save is rolled back by the store; say so instead of
+              letting the control silently jump back. */}
+          {(settingsError || themeError) && (
+            <div className="mb-4 border border-signal-deep/40 bg-signal-deep/10 px-3.5 py-2.5 text-[12px] text-signal-deep">
+              Couldn't save that change: {settingsError ?? themeError}
+            </div>
+          )}
+
           {section === 'display' && <DisplaySection />}
 
           {section === 'theme' && (
@@ -193,7 +207,7 @@ export function Settings(): JSX.Element {
 
           {section === 'data' && <DataSection />}
 
-          {section === 'connections' && <CanvaConnectionCard />}
+          {section === 'connections' && FEATURES.canva && <CanvaConnectionCard />}
 
           {section === 'about' && <AboutSection />}
         </section>
@@ -240,19 +254,9 @@ function DisplaySection(): JSX.Element | null {
         label="Max lines per slide"
         hint="Lines beyond this split into a new slide automatically."
       >
-        <input
-          type="number"
-          min={2}
-          max={20}
-          step={1}
+        <MaxLinesInput
           value={settings.maxLinesPerSlide}
-          onChange={(e) => {
-            const v = Math.max(2, Math.min(20, Math.floor(Number(e.target.value))))
-            if (v !== settings.maxLinesPerSlide) {
-              void update({ maxLinesPerSlide: v })
-            }
-          }}
-          className="h-9 w-20 border border-border bg-background px-2 text-center text-[13px] text-foreground outline-none focus:border-signal/50"
+          onCommit={(v) => void update({ maxLinesPerSlide: v })}
         />
       </Row>
 
@@ -271,6 +275,62 @@ function DisplaySection(): JSX.Element | null {
         </label>
       </Row>
     </Panel>
+  )
+}
+
+/**
+ * Max-lines field. Holds the typed text locally and commits (clamp + save)
+ * only on blur or Enter: clamping every keystroke turned the "1" of "12"
+ * into 2 and saved it, so two-digit values were nearly impossible to type.
+ */
+function MaxLinesInput({
+  value,
+  onCommit
+}: {
+  value: number
+  onCommit: (v: number) => void
+}): JSX.Element {
+  const [text, setText] = useState(String(value))
+  const [editing, setEditing] = useState(false)
+
+  // Follow the saved value (e.g. a rollback) whenever not mid-edit.
+  useEffect(() => {
+    if (!editing) setText(String(value))
+  }, [value, editing])
+
+  const commit = (): void => {
+    setEditing(false)
+    const v = parseMaxLinesInput(text)
+    if (v === null) {
+      setText(String(value))
+      return
+    }
+    setText(String(v))
+    if (v !== value) onCommit(v)
+  }
+
+  return (
+    <input
+      type="number"
+      min={MAX_LINES_MIN}
+      max={MAX_LINES_MAX}
+      step={1}
+      value={text}
+      onFocus={() => setEditing(true)}
+      onChange={(e) => {
+        setEditing(true)
+        setText(e.target.value)
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === 'Escape') {
+          setText(String(value))
+          setEditing(false)
+        }
+      }}
+      className="h-9 w-20 border border-border bg-background px-2 text-center text-[13px] text-foreground outline-none focus:border-signal/50"
+    />
   )
 }
 
@@ -312,7 +372,7 @@ function OutputDisplaySection(): JSX.Element | null {
             onChange={async (e) => {
               const raw = e.target.value
               const id = raw === '' ? null : Number(raw)
-              await update({ outputDisplayId: id })
+              if (!(await update({ outputDisplayId: id }))) return
               await window.api.output.setDisplay(id)
             }}
             className={selectClass}
@@ -339,7 +399,7 @@ function OutputDisplaySection(): JSX.Element | null {
               checked={settings.stageMonitorEnabled}
               onChange={async (e) => {
                 const enabled = e.target.checked
-                await update({ stageMonitorEnabled: enabled })
+                if (!(await update({ stageMonitorEnabled: enabled }))) return
                 await window.api.output.setStageMonitorEnabled(enabled)
               }}
               className="h-4 w-4 border-border bg-background accent-signal"
@@ -354,7 +414,7 @@ function OutputDisplaySection(): JSX.Element | null {
               onChange={async (e) => {
                 const raw = e.target.value
                 const id = raw === '' ? null : Number(raw)
-                await update({ stageMonitorDisplayId: id })
+                if (!(await update({ stageMonitorDisplayId: id }))) return
                 await window.api.output.setStageMonitorDisplay(id)
               }}
               className={selectClass}
@@ -382,7 +442,7 @@ function OutputDisplaySection(): JSX.Element | null {
               checked={settings.lowerThirdsEnabled}
               onChange={async (e) => {
                 const enabled = e.target.checked
-                await update({ lowerThirdsEnabled: enabled })
+                if (!(await update({ lowerThirdsEnabled: enabled }))) return
                 await window.api.output.setLowerThirdsEnabled(enabled)
               }}
               className="h-4 w-4 border-border bg-background accent-signal"
@@ -398,7 +458,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 onChange={async (e) => {
                   const raw = e.target.value
                   const id = raw === '' ? null : Number(raw)
-                  await update({ lowerThirdsDisplayId: id })
+                  if (!(await update({ lowerThirdsDisplayId: id }))) return
                   await window.api.output.setLowerThirdsDisplay(id)
                 }}
                 className={selectClass}
@@ -419,7 +479,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 type="color"
                 value={settings.lowerThirdsChromaKey}
                 onChange={async (e) => {
-                  await update({ lowerThirdsChromaKey: e.target.value })
+                  if (!(await update({ lowerThirdsChromaKey: e.target.value }))) return
                   // Note: changing the key requires re-creating the
                   // window because the BrowserWindow backgroundColor
                   // is set at construction. Toggle off + on:
@@ -439,7 +499,7 @@ function OutputDisplaySection(): JSX.Element | null {
                 value={settings.lowerThirdsAlignment}
                 onChange={async (e) => {
                   const align = e.target.value as 'left' | 'center' | 'right'
-                  await update({ lowerThirdsAlignment: align })
+                  if (!(await update({ lowerThirdsAlignment: align }))) return
                   // Same as chroma — the URL param is set at
                   // window construction so we re-create the window.
                   if (settings.lowerThirdsEnabled) {

@@ -22,8 +22,11 @@ import {
   setStageMonitorWindow,
   setLowerThirdsWindow,
   getStageMonitorWindow,
-  getLowerThirdsWindow
+  getLowerThirdsWindow,
+  getOutputWindow
 } from './windows'
+import { getSettings } from './storage/settings'
+import { isFullyOnSomeDisplay } from './displayFit'
 import {
   attachProjectorReplay,
   attachLowerThirdsReplay,
@@ -58,6 +61,9 @@ function resolveDisplay(displayId: number | null): Display {
     pickDefaultProjectorDisplay()
   )
 }
+
+/** Exported for the main output window, which uses the same rule. */
+export const resolveProjectorDisplay = resolveDisplay
 
 /**
  * Create the stage monitor window. Idempotent — if the window
@@ -168,13 +174,7 @@ export function createLowerThirdsWindow(
 ): void {
   if (getLowerThirdsWindow()) return
 
-  const target = resolveDisplay(displayId)
-  const stripBounds = {
-    x: target.workArea.x,
-    y: target.workArea.y + target.workArea.height - LOWER_THIRDS_HEIGHT,
-    width: target.workArea.width,
-    height: LOWER_THIRDS_HEIGHT
-  }
+  const stripBounds = lowerThirdsStrip(resolveDisplay(displayId))
   const win = new BrowserWindow({
     width: stripBounds.width,
     height: stripBounds.height,
@@ -244,14 +244,70 @@ export function destroyLowerThirdsWindow(): void {
   setLowerThirdsWindow(null)
 }
 
-export function moveLowerThirdsWindow(displayId: number | null): void {
-  const win = getLowerThirdsWindow()
-  if (!win || win.isDestroyed()) return
-  const target = resolveDisplay(displayId)
-  win.setBounds({
+function lowerThirdsStrip(target: Display): Electron.Rectangle {
+  return {
     x: target.workArea.x,
     y: target.workArea.y + target.workArea.height - LOWER_THIRDS_HEIGHT,
     width: target.workArea.width,
     height: LOWER_THIRDS_HEIGHT
+  }
+}
+
+export function moveLowerThirdsWindow(displayId: number | null): void {
+  const win = getLowerThirdsWindow()
+  if (!win || win.isDestroyed()) return
+  win.setBounds(lowerThirdsStrip(resolveDisplay(displayId)))
+}
+
+/**
+ * Close every frameless projector-class window (output, stage monitor,
+ * lower thirds). Called when the operator window closes: these windows
+ * have no close button of their own, and leaving them up kept the app
+ * alive on Windows/Linux with no way to quit it. Does NOT touch the
+ * stage/lower-thirds "enabled" settings, so they come back next launch.
+ */
+export function closeAllProjectorWindows(): void {
+  for (const win of [getOutputWindow(), getStageMonitorWindow(), getLowerThirdsWindow()]) {
+    if (win && !win.isDestroyed()) win.close()
+  }
+}
+
+/**
+ * Re-fit projector windows after the display layout changes.
+ *
+ * - display-removed: a frameless window that was covering the unplugged
+ *   display is left off-screen (or shoved half onto another screen at
+ *   the wrong size) with no title bar to drag it back. Any window no
+ *   longer fully on a display is moved to its saved display if still
+ *   attached, else the default (first non-primary, else primary).
+ * - display-added: if the returning display is the one a window is
+ *   configured for (projector cable bumped mid-service), move it back.
+ */
+export function registerDisplayChangeHandlers(): void {
+  const refit = async (onlyDisplayId: number | null): Promise<void> => {
+    const settings = await getSettings().catch(() => null)
+    const displays = screen.getAllDisplays().map((d) => d.bounds)
+    const entries: Array<[BrowserWindow | null, number | null, boolean]> = [
+      [getOutputWindow(), settings?.outputDisplayId ?? null, false],
+      [getStageMonitorWindow(), settings?.stageMonitorDisplayId ?? null, false],
+      [getLowerThirdsWindow(), settings?.lowerThirdsDisplayId ?? null, true]
+    ]
+    for (const [win, savedId, isStrip] of entries) {
+      if (!win || win.isDestroyed()) continue
+      if (onlyDisplayId !== null) {
+        // display-added: only windows configured for that display move.
+        if (savedId !== onlyDisplayId) continue
+      } else if (isFullyOnSomeDisplay(win.getBounds(), displays)) {
+        continue
+      }
+      const target = resolveDisplay(savedId)
+      win.setBounds(isStrip ? lowerThirdsStrip(target) : target.workArea)
+    }
+  }
+  screen.on('display-removed', () => {
+    void refit(null).catch((err) => console.error('[displays] refit after removal failed', err))
+  })
+  screen.on('display-added', (_event, display) => {
+    void refit(display.id).catch((err) => console.error('[displays] refit after add failed', err))
   })
 }
