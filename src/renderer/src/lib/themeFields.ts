@@ -35,7 +35,12 @@ export interface FieldOption {
 }
 
 export type ThemeFieldDef =
-  | (FieldBase & { kind: 'select'; options: FieldOption[] })
+  | (FieldBase & {
+      kind: 'select'
+      options: FieldOption[]
+      /** Store the chosen value as a number (option values are strings). */
+      numeric?: boolean
+    })
   | (FieldBase & { kind: 'seg'; options: FieldOption[] })
   | (FieldBase & { kind: 'swatch'; options: FieldOption[] })
   | (FieldBase & { kind: 'step'; step: number; min: number; max: number; unit: string })
@@ -57,6 +62,19 @@ export type ThemeFieldDef =
       companionKey?: keyof ThemeOverride
     })
 
+/** Shared by Settings → Theme and the per-song override editor. */
+export const FONT_WEIGHT_OPTIONS: FieldOption[] = [
+  { value: '100', label: 'Thin' },
+  { value: '200', label: 'Extra light' },
+  { value: '300', label: 'Light' },
+  { value: '400', label: 'Regular' },
+  { value: '500', label: 'Medium' },
+  { value: '600', label: 'Semibold' },
+  { value: '700', label: 'Bold' },
+  { value: '800', label: 'Extra bold' },
+  { value: '900', label: 'Black' }
+]
+
 export const THEME_FIELDS: ThemeFieldDef[] = [
   {
     key: 'fontFamily',
@@ -75,6 +93,26 @@ export const THEME_FIELDS: ThemeFieldDef[] = [
       { value: 'Georgia, serif', label: 'Georgia (serif)' },
       { value: 'Times New Roman, Times, serif', label: 'Times' },
       { value: 'Menlo, Courier New, monospace', label: 'Courier (mono)' }
+    ]
+  },
+  {
+    key: 'fontWeight',
+    group: 'Type',
+    label: 'Weight',
+    hint: 'fonts without that weight get a synthesised one',
+    kind: 'select',
+    numeric: true,
+    options: FONT_WEIGHT_OPTIONS
+  },
+  {
+    key: 'fontStyle',
+    group: 'Type',
+    label: 'Style',
+    hint: '',
+    kind: 'seg',
+    options: [
+      { value: 'normal', label: 'Normal' },
+      { value: 'italic', label: 'Italic' }
     ]
   },
   {
@@ -225,7 +263,7 @@ export function formatFieldValue(def: ThemeFieldDef, value: unknown): string {
     return parts[parts.length - 1] || '—'
   }
 
-  const match = def.options.find((o) => o.value === value)
+  const match = def.options.find((o) => o.value === String(value))
   if (match) return match.label
 
   const raw = String(value ?? '—')

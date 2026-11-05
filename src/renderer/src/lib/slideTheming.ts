@@ -75,9 +75,9 @@ export function themedBodyStyle(
 }
 
 /**
- * Text style for a themed slide card: the theme's text color and font
- * family, plus a small fixed text-shadow when a background image is
- * actually showing (matches `showImage` above), so lyric text stays
+ * Text style for a themed slide card: the theme's text color, font
+ * family, weight and style, plus a small fixed text-shadow when a
+ * background image is actually showing (matches `showImage` above), so lyric text stays
  * legible over a photo without needing the theme's own `textEffect` to
  * be configured. Returns `{}` when there's no theme yet, so text falls
  * through to whatever color it inherits from its container.
@@ -90,6 +90,8 @@ export function themedTextStyle(
   return {
     color: theme.textColor,
     fontFamily: theme.fontFamily,
+    fontWeight: theme.fontWeight ?? 600,
+    fontStyle: theme.fontStyle ?? 'normal',
     textShadow: showImage && theme.backgroundImagePath ? '0 1px 2px rgba(0,0,0,0.85)' : undefined
   }
 }

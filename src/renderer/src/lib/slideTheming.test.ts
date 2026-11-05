@@ -21,6 +21,8 @@ const BASE_THEME: Theme = {
   backgroundVideoPath: null,
   textColor: '#ECE9E4',
   fontFamily: 'Inter, system-ui, sans-serif',
+  fontWeight: 600,
+  fontStyle: 'normal',
   fontSizePercent: 100,
   textAlign: 'center',
   textPosition: 'center',
@@ -84,6 +86,12 @@ describe('themedTextStyle', () => {
     const style = themedTextStyle(BASE_THEME)
     expect(style.color).toBe('#ECE9E4')
     expect(style.fontFamily).toBe('Inter, system-ui, sans-serif')
+  })
+
+  it('uses the theme weight and style so previews match the projector', () => {
+    const style = themedTextStyle({ ...BASE_THEME, fontWeight: 300, fontStyle: 'italic' })
+    expect(style.fontWeight).toBe(300)
+    expect(style.fontStyle).toBe('italic')
   })
 
   it('adds a legibility shadow when a background image is showing', () => {

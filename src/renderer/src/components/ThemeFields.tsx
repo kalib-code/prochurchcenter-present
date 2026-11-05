@@ -22,7 +22,8 @@
  */
 
 import { useEffect, useState } from 'react'
-import type { Theme, TextAlign, TextPosition, TextEffect, Transition } from '@shared/types'
+import type { FontStyle, FontWeight, Theme, TextAlign, TextPosition, TextEffect, Transition } from '@shared/types'
+import { FONT_WEIGHT_OPTIONS } from '../lib/themeFields'
 import type { PickFileKind } from '@shared/ipc-contract'
 import { useFontsStore } from '../stores/useFontsStore'
 import { Badge } from './ui/Badge'
@@ -110,6 +111,37 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
               ...systemFonts.map((f) => `"${f}"`)
             ].includes(theme.fontFamily) && <option value={theme.fontFamily}>Custom value</option>}
           </Select>
+        </Row>
+
+        <Row
+          label="Weight"
+          htmlFor="theme-font-weight"
+          description="Missing weights are synthesised."
+        >
+          <Select
+            id="theme-font-weight"
+            value={String(theme.fontWeight ?? 600)}
+            onChange={(e) => onChange({ fontWeight: Number(e.target.value) as FontWeight })}
+            className="w-56"
+          >
+            {FONT_WEIGHT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Row>
+
+        <Row label="Style">
+          <Segmented<FontStyle>
+            options={[
+              { value: 'normal', label: 'Normal' },
+              { value: 'italic', label: 'Italic' }
+            ]}
+            value={theme.fontStyle ?? 'normal'}
+            onChange={(v) => onChange({ fontStyle: v })}
+            size="sm"
+          />
         </Row>
 
         <Row

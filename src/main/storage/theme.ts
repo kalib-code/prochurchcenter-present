@@ -23,6 +23,8 @@ export const DEFAULT_THEME: Theme = {
   backgroundVideoPath: null,
   textColor: '#ffffff',
   fontFamily: 'system-ui',
+  fontWeight: 600,
+  fontStyle: 'normal',
   fontSizePercent: 100,
   textAlign: 'center',
   textPosition: 'center',

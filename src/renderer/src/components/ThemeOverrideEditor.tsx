@@ -400,7 +400,11 @@ function FieldControl({
     return (
       <Select
         value={current}
-        onChange={(e) => onApplyPatch(fieldPatch(def.key, e.target.value))}
+        onChange={(e) =>
+          onApplyPatch(
+            fieldPatch(def.key, def.numeric ? Number(e.target.value) : e.target.value)
+          )
+        }
         aria-label={def.label}
         className="h-8 w-[200px] text-[13px]"
       >

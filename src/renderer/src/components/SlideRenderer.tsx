@@ -82,6 +82,8 @@ const FALLBACK_THEME: Theme = {
   backgroundVideoPath: null,
   textColor: '#ffffff',
   fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
+  fontWeight: 600,
+  fontStyle: 'normal',
   fontSizePercent: 100,
   textAlign: 'center',
   textPosition: 'center',
@@ -431,7 +433,8 @@ function AutoFitSlide({
   // Build a stable key so React remounts the inner div on slide change OR
   // theme change (to re-run the auto-fit measurement). Theme changes can
   // shift font-family which directly affects content size.
-  const key = `${payloadKey(payload)}::${theme.fontFamily}::${theme.fontSizePercent}`
+  // Weight and style change glyph widths too, so they re-run the fit.
+  const key = `${payloadKey(payload)}::${theme.fontFamily}::${theme.fontWeight}::${theme.fontStyle}::${theme.fontSizePercent}`
 
   // Transitions: respect theme.transition. 'instant' skips the fade entirely;
   // 'fade' uses the tailwindcss-animate fade-in with a custom duration.
@@ -644,8 +647,12 @@ function SlideContent({
     // width. This matches how karaoke-style stages typically render it.
     return (
       <div
-        className="flex flex-col gap-[0.25em] font-semibold leading-[1.25]"
-        style={textEffectStyle(theme)}
+        className="flex flex-col gap-[0.25em] leading-[1.25]"
+        style={{
+          ...textEffectStyle(theme),
+          fontWeight: theme.fontWeight ?? 600,
+          fontStyle: theme.fontStyle ?? 'normal'
+        }}
       >
         {payload.lines.map((line, i) => {
           if (theme.textEffect === 'highlight') {
