@@ -1,15 +1,15 @@
 /**
  * ItemKindIcon — canonical text vocabulary for every kind of setlist
- * item: `itemKindLabel` (human-readable) and `itemKindCode` (3-letter
- * mono Badge code). Centralizing these here means the setlist editor,
+ * item: `itemKindLabel` (human-readable, sentence case) and `itemKindCode`
+ * (short 3-letter code). Centralizing these here means the setlist editor,
  * the home page preview, and the add-item picker all agree on the same
  * label and code for "song" / "scripture" / "image" / etc — a countdown
  * reads CDN everywhere, never CDN in one place and CNT in another.
  *
- * Also exports the `ItemKindIcon` SVG glyph component. Most KLB surfaces
- * render a mono Badge of `itemKindCode` instead, but the glyphs are still
- * used where a compact pictogram reads better than a code — the add-item
- * picker's kind cards and Home's item strips.
+ * Also exports the `ItemKindIcon` SVG glyph component. The setlist editor
+ * shows `itemKindLabel` in neutral Badges and uses the glyphs for the
+ * add-item picker's kind cards and as the thumbnail of items that have no
+ * media preview (songs, scripture, countdowns).
  */
 
 import type { SetlistItem } from '@shared/types'
@@ -36,7 +36,7 @@ export function ItemKindIcon({ kind, size = 20, className }: Props): JSX.Element
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 1.5,
+    strokeWidth: 1.75,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     className
@@ -103,14 +103,14 @@ export function ItemKindIcon({ kind, size = 20, className }: Props): JSX.Element
         </svg>
       )
     case 'pptx':
-      // Reuses the PDF deck glyph for now — a dedicated PowerPoint icon
-      // (distinct from the PDF deck icon above) is still wanted, but
-      // hasn't been designed yet.
+      // Presentation screen on a stand — distinct from the PDF deck's
+      // document glyph, since a live PowerPoint and an imported PDF are
+      // different items with different failure modes.
       return (
         <svg {...common}>
-          <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-          <path d="M9 13h6M9 17h4" />
+          <rect x="3" y="4" width="18" height="12" rx="1.5" />
+          <path d="M12 16v4M8 20h8" />
+          <path d="M8 12.5V10M12 12.5V8M16 12.5v-1.5" />
         </svg>
       )
     case 'canva':
@@ -158,9 +158,8 @@ export function itemKindLabel(kind: Kind): string {
 }
 
 /**
- * Three-letter mono code shown on kind Badges in the setlist editor —
- * the add-item grid and every item row's own kind chip. Matches the
- * KLB design file exactly (SNG / SCR / IMG / VID / PDF / CDN / SEC).
+ * Three-letter code for compact kind chips (e.g. Home's item strips):
+ * SNG / SCR / IMG / VID / PDF / PPT / CDN / SEC.
  */
 export function itemKindCode(kind: Kind): string {
   switch (kind) {

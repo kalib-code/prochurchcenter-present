@@ -1,10 +1,11 @@
 /**
  * SetlistEditor — plan a service.
  *
- * Layout: top bar, a meta strip (name/date/service-start + the running
- * total), then a scrolling run-of-show list. Each item is a draggable
- * card; items reorder via @dnd-kit/sortable for mouse OR via ↑/↓ keys
- * when the list container is focused.
+ * Layout (2026-11 redesign): a page header (inline-editable name, compact
+ * date + start-time inputs, the running total, a missing-media badge,
+ * Start service / Delete), then a scrolling run-of-show list of rounded
+ * rows. Items reorder via @dnd-kit/sortable for mouse OR via the
+ * keyboard sensor when a row's drag handle is focused.
  *
  * Autosave: whenever the draft changes, debounced 500ms, patch goes
  * to main. Same pattern as SongEditor.
@@ -17,25 +18,25 @@
  *
  * Media-missing: `useMediaCheck` flags items whose backing file no
  * longer exists on disk (moved/renamed since it was added). The count
- * surfaces in the meta strip; the per-item banner + RELINK live in
- * SetlistItemCard.
+ * surfaces as a warn badge in the header; the per-item banner + Relink
+ * live in SetlistItemCard.
  *
  * Item creation — the gap-insert model:
- *   A `GapInsert` ("+ INSERT HERE") renders above every item and once
- *   more after the last, so there is always an explicit slot for every
- *   possible insertion point (including the very top and the very
- *   bottom). Clicking one opens an inline kind-picker panel AT that
+ *   A `GapInsert` (hover-only "+ Insert here") renders above every item
+ *   and once more after the last, so there is always an explicit slot
+ *   for every possible insertion point (including the very top and the
+ *   very bottom). Clicking one opens an inline kind-picker panel AT that
  *   position; picking a kind inserts there and closes the panel. This
  *   replaces the old "top Add button + hover inserters" pair with a
  *   single, uniform mechanism that covers exactly the same positions.
  *
  * The AddItemPicker component owns the grid + song-sublist body; this
  * file wires it into the different insertion points and supplies the
- * position-specific header ("INSERT AT POSITION N" / "ADD TO THE END").
+ * position-specific header ("Insert at position N" / "Add to the end").
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   DndContext,
   type DragEndEvent,
@@ -66,7 +67,9 @@ import { AddItemPicker } from '../components/AddItemPicker'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
-import { MonoLabel } from '../components/ui/MonoLabel'
+import { Input } from '../components/ui/Input'
+import { IconButton } from '../components/setlist/parts'
+import { AlertIcon, CloseIcon, PlayIcon, PlusIcon, TrashIcon } from '../components/icons'
 import { SaveStatePill } from '../components/ui/SaveStatePill'
 import { Segmented } from '../components/ui/Segmented'
 import { GapInsert } from '../components/ui/GapInsert'
@@ -107,7 +110,19 @@ function genItemId(): string {
  */
 type InsertAt = number | null
 
+/**
+ * Keyed by the route id so moving straight from one setlist to another
+ * (the sidebar's Upcoming list makes that one click) mounts a fresh
+ * editor. Without the key the previous setlist's draft survived the
+ * route change and autosave wrote it under the NEW id; with it, the old
+ * instance unmounts and flushes any pending edit to its own id.
+ */
 export function SetlistEditor(): JSX.Element {
+  const { id } = useParams<{ id: string }>()
+  return <SetlistEditorForId key={id ?? ''} />
+}
+
+function SetlistEditorForId(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { setlists, load: loadSetlists, update, remove, getById } = useSetlistStore()
@@ -444,24 +459,19 @@ export function SetlistEditor(): JSX.Element {
     onImportCanva: (result: CanvaImportResult, designId: string) => void addCanvaDeck(result, designId)
   }
 
-  /** The signal-bordered "INSERT AT POSITION n" / "ADD TO THE END" panel. */
+  /** The "Insert at position n" / "Add to the end" panel. */
   const renderInsertPanel = (position: number): ReactNode => {
     const label =
-      position >= draft.items.length ? 'ADD TO THE END' : `INSERT AT POSITION ${position + 1}`
+      position >= draft.items.length ? 'Add to the end' : `Insert at position ${position + 1}`
     return (
       <Panel
         emphasis
-        className="mb-2"
-        title={<MonoLabel tone="signal">{label}</MonoLabel>}
+        className="my-1"
+        title={label}
         action={
-          <button
-            type="button"
-            onClick={closePicker}
-            aria-label="Close"
-            className="font-mono text-[13px] text-muted-foreground hover:text-white"
-          >
-            ✕
-          </button>
+          <IconButton label="Close" onClick={closePicker} className="-my-1 -mr-1.5 h-7 w-7">
+            <CloseIcon size={16} />
+          </IconButton>
         }
       >
         <AddItemPicker
@@ -475,107 +485,93 @@ export function SetlistEditor(): JSX.Element {
     )
   }
 
-  const itemsLabel = `${draft.items.length} ITEMS`
+  const itemCount = draft.items.length
+  const itemsLabel = `${itemCount} item${itemCount === 1 ? '' : 's'}`
+  const totalsLabel = `${itemsLabel} · ~${schedule.totalMinutes} min · ends ${schedule.endsAt}`
   const endOpen = insertAt === draft.items.length
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col text-foreground">
-      {/* ── Top bar ──────────────────────────────────────────────── */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-6">
-        <div className="flex items-center gap-4">
-          <Link
-            to="/"
-            className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-signal"
-          >
-            ← HOME
-          </Link>
-          <SaveStatePill status={status} error={error} />
+      {/* ── Header ───────────────────────────────────────────────── */}
+      <header className="shrink-0 px-8 pb-5 pt-7">
+        <div className="flex items-center justify-between gap-6">
+          <h1 className="min-w-0 flex-1">
+            <input
+              type="text"
+              value={draft.name}
+              onChange={(e) => patch({ name: e.target.value })}
+              placeholder="Untitled setlist"
+              aria-label="Setlist name"
+              className="-ml-2 w-full truncate rounded-md bg-transparent px-2 py-0.5 text-[26px] font-semibold leading-tight tracking-[-0.02em] text-foreground transition-colors placeholder:text-dim hover:bg-raised/70 focus:bg-raised focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
+          </h1>
+          <div className="flex shrink-0 items-center gap-2">
+            <SaveStatePill status={status} error={error} />
+            <Button variant="danger" size="md" onClick={() => void handleDelete()}>
+              <TrashIcon size={15} />
+              Delete
+            </Button>
+            {/* Await the pending autosave before entering service mode, so an
+                edit made in the last 500ms is on disk before the service loads
+                the setlist — otherwise it would run the stale version. */}
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => void flush().then(() => navigate(`/service/${id}`))}
+            >
+              <PlayIcon size={14} />
+              Start service
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Await the pending autosave before entering service mode, so an
-              edit made in the last 500ms is on disk before the service loads
-              the setlist — otherwise it would run the stale version. */}
-          <Button
-            variant="signal"
-            size="md"
-            onClick={() => void flush().then(() => navigate(`/service/${id}`))}
-          >
-            START SERVICE →
-          </Button>
-          <Button variant="danger" size="md" onClick={() => void handleDelete()}>
-            DELETE
-          </Button>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px] text-soft">
+          <Input
+            type="date"
+            value={draft.date}
+            aria-label="Service date"
+            title={formatServiceDate(draft.date)}
+            // Clearing the native date field yields '' — ignore it and keep
+            // the last valid date, or autosave writes '' and the header
+            // renders "Invalid Date".
+            onChange={(e) => {
+              if (e.target.value) patch({ date: e.target.value })
+            }}
+            className="h-8 w-auto px-2.5 text-[13px] tabular-nums"
+          />
+          <span className="text-muted-foreground">starts</span>
+          <Input
+            type="time"
+            value={draft.startTime ?? '10:00'}
+            aria-label="Service start time"
+            onChange={(e) => patch({ startTime: e.target.value })}
+            className="h-8 w-auto px-2.5 text-[13px] tabular-nums"
+          />
+          <span className="ml-2 tabular-nums">{totalsLabel}</span>
+          {missing.size > 0 && (
+            <Badge tone="warn" className="ml-2 py-1">
+              <AlertIcon size={12} />
+              {missing.size} missing media
+            </Badge>
+          )}
         </div>
       </header>
 
-      {/* ── Meta strip ───────────────────────────────────────────── */}
-      <section className="grid shrink-0 grid-cols-[1fr_240px] border-b border-border bg-card">
-        <div className="border-r border-border px-6 py-5">
-          <MonoLabel size="xs" className="mb-2 block">
-            NAME
-          </MonoLabel>
-          <input
-            type="text"
-            value={draft.name}
-            onChange={(e) => patch({ name: e.target.value })}
-            className="w-full border border-border bg-background px-[13px] py-[11px] text-[15px] font-semibold tracking-[-0.01em] text-foreground outline-none focus:border-signal/50"
-          />
-          <div className="mt-2.5 flex flex-wrap items-center gap-3.5">
-            <span className="font-mono text-[10px] font-medium tracking-[0.08em] text-muted-foreground">
-              {formatServiceDate(draft.date).toUpperCase()} · {itemsLabel}
-            </span>
-            <span className="font-mono text-[10px] font-semibold tracking-[0.08em] text-signal">
-              ≈ {schedule.totalMinutes} MIN · ENDS {schedule.endsAt}
-            </span>
-            {missing.size > 0 && (
-              <Badge tone="signal">{missing.size} MEDIA MISSING</Badge>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-col gap-3.5 px-6 py-5">
-          <label>
-            <MonoLabel size="xs" className="mb-2 block">
-              DATE
-            </MonoLabel>
-            <input
-              type="date"
-              value={draft.date}
-              // Clearing the native date field yields '' — ignore it and keep
-              // the last valid date, or autosave writes '' and the header
-              // renders "Invalid Date".
-              onChange={(e) => {
-                if (e.target.value) patch({ date: e.target.value })
-              }}
-              className="w-full border border-border bg-background px-[13px] py-[11px] font-mono text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
-            />
-          </label>
-          <label>
-            <MonoLabel size="xs" className="mb-2 block">
-              SERVICE STARTS
-            </MonoLabel>
-            <input
-              type="time"
-              value={draft.startTime ?? '10:00'}
-              onChange={(e) => patch({ startTime: e.target.value })}
-              className="w-full border border-border bg-background px-[13px] py-[11px] font-mono text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
-            />
-          </label>
-        </div>
-      </section>
-
       {/* ── Run of show ──────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto px-6 pb-10">
+      <section
+        aria-label="Run of show"
+        className="scroll-hairline min-h-0 flex-1 overflow-y-auto px-8 pb-10"
+      >
         {draft.items.length === 0 ? (
-          <div className="py-6">
+          <div className="mx-auto max-w-4xl py-8">
             <div className="mb-5 text-center">
-              <h2 className="text-[22px] font-extrabold tracking-[-0.02em] text-foreground">
+              <h2 className="text-[18px] font-semibold tracking-[-0.01em] text-foreground">
                 Start your setlist
               </h2>
-              <p className="mt-1 text-[13px] text-muted-foreground">
+              <p className="mt-1 text-[14px] text-soft">
                 Pick a kind of item to add. You can reorder later.
               </p>
             </div>
-            <Panel emphasis title={<MonoLabel tone="signal">ADD YOUR FIRST ITEM</MonoLabel>}>
+            <Panel title="Add your first item">
               <AddItemPicker
                 {...pickerHandlers}
                 songs={songs}
@@ -587,29 +583,30 @@ export function SetlistEditor(): JSX.Element {
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between py-4">
-              <div className="flex items-baseline gap-3.5">
-                <MonoLabel tone="dim">RUN OF SHOW · {itemsLabel}</MonoLabel>
-                <span className="text-[11.5px] text-dim">
-                  Drag to reorder · click any gap to insert
+            <div className="flex items-center justify-between gap-4 border-t border-rule pb-2 pt-5">
+              <div className="flex min-w-0 items-baseline gap-3">
+                <h2 className="text-[15px] font-semibold text-foreground">Run of show</h2>
+                <span className="truncate text-[13px] text-muted-foreground">
+                  Drag to reorder · hover between items to insert
                 </span>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-none items-center gap-2">
                 <Segmented
                   size="sm"
                   value={density}
                   onChange={setDensity}
                   options={[
-                    { value: 'detail', label: 'DETAIL' },
-                    { value: 'compact', label: 'COMPACT' }
+                    { value: 'detail', label: 'Detail' },
+                    { value: 'compact', label: 'Compact' }
                   ]}
                 />
                 <Button
-                  variant="outline"
-                  size="md"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => (endOpen ? closePicker() : openPickerAt(draft.items.length))}
                 >
-                  + ADD ITEM
+                  <PlusIcon size={15} />
+                  Add item
                 </Button>
               </div>
             </div>
@@ -648,17 +645,13 @@ export function SetlistEditor(): JSX.Element {
             <GapInsert active={endOpen} onClick={() => openPickerAt(draft.items.length)} />
             {endOpen && renderInsertPanel(draft.items.length)}
 
-            <div className="mt-3.5 flex items-center justify-between border-t border-border pt-3">
-              <MonoLabel tone="dim">
-                {itemsLabel} · {schedule.totalMinutes} MIN · ENDS {schedule.endsAt}
-              </MonoLabel>
-              <span className="text-[11.5px] text-muted-foreground">
-                Section dividers are grouping only — they never reach the projector.
-              </span>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-rule pt-3 text-[13px] text-muted-foreground">
+              <span className="tabular-nums">{totalsLabel}</span>
+              <span>Section dividers group items. They never reach the projector.</span>
             </div>
           </>
         )}
-      </main>
+      </section>
     </div>
   )
 }
