@@ -66,12 +66,12 @@ const BOOKS: BookEntry[] = [
   { id: 'EST', name: 'Esther', aliases: ['esther', 'esth', 'est'] },
   { id: 'JOB', name: 'Job', aliases: ['job', 'jb'] },
   { id: 'PSA', name: 'Psalms', aliases: ['psalms', 'psalm', 'psa', 'ps', 'pss'] },
-  { id: 'PRO', name: 'Proverbs', aliases: ['proverbs', 'prov', 'pro', 'pr', 'prv'] },
+  { id: 'PRO', name: 'Proverbs', aliases: ['proverbs', 'proverb', 'prov', 'pro', 'pr', 'prv'] },
   { id: 'ECC', name: 'Ecclesiastes', aliases: ['ecclesiastes', 'eccles', 'eccl', 'ecc', 'ec'] },
-  { id: 'SNG', name: 'Song of Solomon', aliases: ['song of solomon', 'song of songs', 'song', 'sng', 'sos', 'so'] },
+  { id: 'SNG', name: 'Song of Solomon', aliases: ['song of solomon', 'song of songs', 'songs', 'song', 'sng', 'sos', 'so'] },
   { id: 'ISA', name: 'Isaiah', aliases: ['isaiah', 'isa', 'is'] },
   { id: 'JER', name: 'Jeremiah', aliases: ['jeremiah', 'jer', 'jr'] },
-  { id: 'LAM', name: 'Lamentations', aliases: ['lamentations', 'lam', 'la'] },
+  { id: 'LAM', name: 'Lamentations', aliases: ['lamentations', 'lamentation', 'lam', 'la'] },
   { id: 'EZK', name: 'Ezekiel', aliases: ['ezekiel', 'ezek', 'ezk', 'eze', 'ez'] },
   { id: 'DAN', name: 'Daniel', aliases: ['daniel', 'dan', 'dn'] },
   { id: 'HOS', name: 'Hosea', aliases: ['hosea', 'hos', 'ho'] },
@@ -105,7 +105,7 @@ const BOOKS: BookEntry[] = [
   { id: '2TI', name: '2 Timothy', aliases: ['2 timothy', '2timothy', '2 tim', '2tim', '2 ti', '2ti'] },
   { id: 'TIT', name: 'Titus', aliases: ['titus', 'tit', 'ti'] },
   { id: 'PHM', name: 'Philemon', aliases: ['philemon', 'philem', 'phlm', 'phm'] },
-  { id: 'HEB', name: 'Hebrews', aliases: ['hebrews', 'heb'] },
+  { id: 'HEB', name: 'Hebrews', aliases: ['hebrews', 'hebrew', 'heb'] },
   { id: 'JAS', name: 'James', aliases: ['james', 'jas', 'jm'] },
   { id: '1PE', name: '1 Peter', aliases: ['1 peter', '1peter', '1 pet', '1pet', '1 pe', '1pe'] },
   { id: '2PE', name: '2 Peter', aliases: ['2 peter', '2peter', '2 pet', '2pet', '2 pe', '2pe'] },
@@ -113,7 +113,7 @@ const BOOKS: BookEntry[] = [
   { id: '2JN', name: '2 John', aliases: ['2 john', '2john', '2 jhn', '2jhn', '2 jn', '2jn'] },
   { id: '3JN', name: '3 John', aliases: ['3 john', '3john', '3 jhn', '3jhn', '3 jn', '3jn'] },
   { id: 'JUD', name: 'Jude', aliases: ['jude', 'jud', 'jd'] },
-  { id: 'REV', name: 'Revelation', aliases: ['revelation', 'rev', 'rv', 'apoc'] }
+  { id: 'REV', name: 'Revelation', aliases: ['revelations', 'revelation', 'rev', 'rv', 'apoc'] }
 ]
 
 /**
@@ -144,8 +144,22 @@ const ALIAS_INDEX: AliasEntry[] = (() => {
  * trailing chapter:verse split below stays unambiguous.
  */
 function normalize(input: string): string {
-  return input.trim().toLowerCase().replace(/\s+/g, ' ')
+  return (
+    input
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      // En/em dashes and the minus sign arrive via phone keyboards and
+      // Word/Notes autocorrect ("John 3:16–18"); treat them as hyphens.
+      .replace(/[‐-―−]/g, '-')
+  )
 }
+
+/**
+ * Books with exactly one chapter. People cite these by verse alone
+ * ("Jude 5", "3 John 4-6"), so a bare number after them means a verse.
+ */
+const SINGLE_CHAPTER_BOOKS = new Set(['OBA', 'PHM', '2JN', '3JN', 'JUD'])
 
 /**
  * Parse a free-form scripture reference. Returns null if the input
@@ -187,6 +201,21 @@ export function parseReference(input: string): BibleReference | null {
   //   "3:16"
   const remainder = norm.slice(matchEnd).trim()
   if (!remainder) return null
+
+  // Single-chapter books: "Jude 5" → 1:5 and "3 John 4-6" → 1:4-6.
+  // "Philemon 1" stays the whole (only) chapter, matching how Bible
+  // sites read it. Explicit "Jude 1:5" falls through to the general path.
+  if (SINGLE_CHAPTER_BOOKS.has(matched.id)) {
+    const v = remainder.match(/^(\d+)\s*(?:-\s*(\d+))?$/)
+    if (v) {
+      const start = parseInt(v[1], 10)
+      const end = v[2] ? parseInt(v[2], 10) : undefined
+      if (start >= 1 && (end !== undefined || start > 1)) {
+        if (end !== undefined && end < start) return null
+        return { bookId: matched.id, bookName: matched.name, chapter: 1, verseStart: start, verseEnd: end }
+      }
+    }
+  }
 
   const m = remainder.match(/^(\d+)\s*(?::\s*(\d+)\s*(?:-\s*(\d+))?)?$/)
   if (!m) return null

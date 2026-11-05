@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PickFileKind } from './ipc-contract'
 import type { SetlistItem } from './types'
-import { mediaPathOf, relinkKindOf } from './setlist-media'
+import { mediaPathOf, relinkKindOf, themeMediaPaths } from './setlist-media'
 
 type Kind = SetlistItem['kind']
 
@@ -137,5 +137,31 @@ describe('relinkKindOf', () => {
   it.each(ALL_KINDS)('%s: returns the expected PickFileKind (or null)', (kind) => {
     const { item, expectedRelinkKind } = CASES[kind]
     expect(relinkKindOf(item)).toBe(expectedRelinkKind)
+  })
+})
+
+describe('themeMediaPaths', () => {
+  it('returns every background/logo path a theme depends on', () => {
+    expect(
+      themeMediaPaths({
+        backgroundImagePath: '/a/bg.jpg',
+        backgroundVideoPath: '/a/loop.mp4',
+        logoPath: '/a/logo.png'
+      })
+    ).toEqual(['/a/bg.jpg', '/a/loop.mp4', '/a/logo.png'])
+  })
+
+  it('skips null, undefined and empty-string paths', () => {
+    expect(
+      themeMediaPaths({ backgroundImagePath: null, backgroundVideoPath: '', logoPath: undefined })
+    ).toEqual([])
+  })
+
+  it('handles a null override (song with no theme override)', () => {
+    expect(themeMediaPaths(null)).toEqual([])
+  })
+
+  it('accepts a partial ThemeOverride carrying only a video', () => {
+    expect(themeMediaPaths({ backgroundVideoPath: '/v.mp4' })).toEqual(['/v.mp4'])
   })
 })

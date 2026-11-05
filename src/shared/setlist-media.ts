@@ -14,7 +14,7 @@
  * caught `pptx` when live PowerPoint projection merged in.
  */
 
-import type { SetlistItem } from './types'
+import type { SetlistItem, Theme } from './types'
 import type { PickFileKind } from './ipc-contract'
 
 export function mediaPathOf(item: SetlistItem): string | null {
@@ -34,4 +34,23 @@ export function relinkKindOf(item: SetlistItem): PickFileKind | null {
   // must not offer legacy binary .ppt any more than the add flow does.
   if (item.kind === 'pptx') return 'pptx'
   return null
+}
+
+type ThemeMediaFields = Pick<
+  Partial<Theme>,
+  'backgroundImagePath' | 'backgroundVideoPath' | 'logoPath'
+>
+
+/**
+ * Every filesystem path a theme (or per-song ThemeOverride) depends on.
+ *
+ * Pre-flight used to check only setlist items via `mediaPathOf`, so a
+ * theme whose background video had been moved or deleted reported
+ * "All found" while the projector silently rendered no background.
+ */
+export function themeMediaPaths(theme: ThemeMediaFields | null | undefined): string[] {
+  if (!theme) return []
+  return [theme.backgroundImagePath, theme.backgroundVideoPath, theme.logoPath].filter(
+    (p): p is string => typeof p === 'string' && p.length > 0
+  )
 }
