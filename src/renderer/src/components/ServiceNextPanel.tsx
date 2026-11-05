@@ -33,22 +33,43 @@ interface ServiceNextPanelProps {
   slideIndex: number
 }
 
+/**
+ * Presentation of describeNext()'s copy. That module's strings are
+ * pinned by serviceNextText.test.ts (and shared with other surfaces) and
+ * still carry the old all-caps tags, so the sentence-case wording and
+ * the tone live here, keyed on the resolution kind rather than on the
+ * text: a "new item" is the operator's cursor moving (accent); the end
+ * of the service needs attention (amber); same item is neutral. Red is
+ * reserved for on-air, so it is never used here.
+ */
+const TAG_BY_KIND = {
+  'same-item': { tag: 'Same item', tone: 'neutral' },
+  'new-item': { tag: 'New item', tone: 'accent' },
+  end: { tag: 'End of service', tone: 'warn' }
+} as const
+
 export function ServiceNextPanel({
   items,
   itemIndex,
   slideIndex
 }: ServiceNextPanelProps): JSX.Element {
   const resolution = resolveNext(items, itemIndex, slideIndex)
-  const { tag, tagTone, label, previewText, hint } = describeNext(resolution)
+  const { label, previewText, hint } = describeNext(resolution)
+  const { tag, tone } = TAG_BY_KIND[resolution.kind]
+  const isEnd = resolution.kind === 'end'
 
   return (
-    <Panel title="NEXT" action={<Badge tone={tagTone}>{tag}</Badge>}>
-      <div className="space-y-2 px-4 py-3.5">
-        <div className="text-[12.5px] font-semibold text-bone">{label}</div>
-        <div className="whitespace-pre-line text-[12px] leading-[1.5] text-soft">
-          {previewText}
+    <Panel title="Next" action={<Badge tone={tone}>{tag}</Badge>}>
+      <div className="space-y-1.5 px-4 py-3">
+        <div className="truncate text-[14px] font-semibold text-foreground">
+          {isEnd ? 'Service ends' : label}
         </div>
-        <div className="text-[11px] text-dim">{hint}</div>
+        {!isEnd && (
+          <div className="whitespace-pre-line text-[13px] leading-[1.5] text-soft">
+            {previewText}
+          </div>
+        )}
+        <div className="text-[12px] text-muted-foreground">{hint}</div>
       </div>
     </Panel>
   )

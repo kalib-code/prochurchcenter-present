@@ -30,9 +30,9 @@
  * captured pixels by the output renderer. Adding props would
  * suggest the mirror cares about content, which it doesn't.
  *
- * The border color (border-border normally, border-signal when the
- * output is cut to black/logo) and the BLACKOUT/LOGO overlay caption
- * are Service Mode's concern, not this component's — they're drawn by
+ * The frame (red ring when on air, neutral when the output is cut to
+ * black/logo) and the Blackout/Logo overlay caption are Service Mode's
+ * concern, not this component's — they're drawn by
  * the wrapping container in ServiceMode.tsx so this file stays a
  * content-blind mirror.
  */
@@ -116,8 +116,9 @@ export function OutputMirror(): JSX.Element {
 
   if (error) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-black p-4 text-center text-[11px] text-soft">
-        {error}
+      <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-black p-5 text-center text-[13px] leading-relaxed text-soft">
+        <span className="font-medium text-warn">Preview unavailable</span>
+        <span className="max-w-[340px]">{error}</span>
       </div>
     )
   }

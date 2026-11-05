@@ -1,16 +1,26 @@
 /**
- * ServiceMode — the operator view during a live service. KLB layout:
+ * ServiceMode — the operator view during a live service (full screen,
+ * no app sidebar). Layout (2026-11 redesign):
  *
  *   ┌─────────────────────────────────────────────────────────────────┐
- *   │ [name/counter] [timer]      [LIVE/BLACK/LOGO] [B][L][?] [EXIT]  │
+ *   │ name · Item 2 of 6 · Slide 3 of 5  0:42  [Live|Black|Logo] B L ? Exit │
  *   ├──────────┬──────────────────────────────────┬───────────────────┤
- *   │  ITEMS   │  ALL SLIDES toolbar (sticky)      │  ON SCREEN mirror │
- *   │  rail +  │  GROUPED: sticky per-item header  │  video runway     │
- *   │  filter  │  + that item's slide cards        │  NEXT panel       │
- *   │ (resize) │  FLAT: one grid of every slide     │  notes (resize)  │
+ *   │  Items   │  All slides toolbar (sticky)      │  Program preview  │
+ *   │  list +  │  Grouped: sticky per-item header  │  video runway     │
+ *   │  filter  │  + that item's slide cards        │  Next panel       │
+ *   │ (resize) │  Flat: one grid of every slide     │  stage notes     │
  *   ├──────────┴──────────────────────────────────┴───────────────────┤
  *   │  Lower thirds strip (title/subtitle/hide) — only when enabled    │
  *   └───────────────────────────────────────────────────────────────────┘
+ *
+ * The three columns are rounded inset panels on the app background; the
+ * resize handles are the gaps between them.
+ *
+ * Colour: red (`live`) marks ONLY what is on the projector right now —
+ * the active Live segment, the on-air slide's ring + chip, the program
+ * preview's chip and the on-air item's dot. Black/Logo are neutral.
+ * Accent marks the operator's cursor (current item, next slide);
+ * amber marks problems (deck warnings, a stalled video).
  *
  * Flow:
  *   - Mounts with :setlistId from URL
@@ -38,11 +48,18 @@ import { KeyCheatSheet } from '../components/KeyCheatSheet'
 import { ServiceNextPanel } from '../components/ServiceNextPanel'
 import { VideoRunway } from '../components/VideoRunway'
 import { Button } from '../components/ui/Button'
+import { Input, Textarea } from '../components/ui/Input'
 import { MonoLabel } from '../components/ui/MonoLabel'
 import { Segmented, type SegmentedOption } from '../components/ui/Segmented'
 import { StatusDot } from '../components/ui/StatusDot'
-import { TitleDot } from '../components/ui/TitleDot'
 import { WarningBanner, type WarningItem } from '../components/ui/WarningBanner'
+import { DisplayModeSwitch } from '../components/service/DisplayModeSwitch'
+import { Kbd } from '../components/service/Kbd'
+import { OnAirBadge, QuietBadge } from '../components/service/StatusBadges'
+import { AlertIcon, SearchIcon } from '../components/icons'
+import { itemKindLabel } from '../components/ItemKindIcon'
+import { resolveNext } from '../lib/serviceNext'
+import { cn } from '../lib/utils'
 import type { PptxThumbError } from '../components/MediaPreview'
 import type { PptxSlideErrorKind } from '../components/PptxSlideView'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -61,7 +78,7 @@ import type {
  * headers pin under. One constant so the two sticky layers can never
  * drift apart — see the module doc's ASCII layout above.
  */
-export const GRID_TOOLBAR_H = 37
+export const GRID_TOOLBAR_H = 48
 
 /**
  * Height of each GROUPED-mode sticky item header (the row showing the
@@ -79,20 +96,19 @@ export const GRID_TOOLBAR_H = 37
  * mode's toolbar + item header both painted over it — with no way to
  * tell where you are short of scrolling by hand.
  */
-export const GRID_GROUP_HEADER_H = 35
+export const GRID_GROUP_HEADER_H = 44
 
 type GridMode = 'grouped' | 'flat'
 
-const DISPLAY_MODE_OPTIONS: SegmentedOption<OutputMode>[] = [
-  { value: 'live', label: 'LIVE' },
-  { value: 'black', label: 'BLACK' },
-  { value: 'logo', label: 'LOGO' }
+const GRID_MODE_OPTIONS: SegmentedOption<GridMode>[] = [
+  { value: 'grouped', label: 'Grouped' },
+  { value: 'flat', label: 'Flat' }
 ]
 
-const GRID_MODE_OPTIONS: SegmentedOption<GridMode>[] = [
-  { value: 'grouped', label: 'GROUPED' },
-  { value: 'flat', label: 'FLAT' }
-]
+/** "1 slide" / "5 slides" — sans tabular counts, never mono caps. */
+function slideCount(n: number): string {
+  return `${n} slide${n === 1 ? '' : 's'}`
+}
 
 export function ServiceMode(): JSX.Element {
   const { setlistId } = useParams<{ setlistId: string }>()
@@ -196,14 +212,16 @@ export function ServiceMode(): JSX.Element {
   // ── LOADING ────────────────────────────────────────────────────────────
   if (state.mode === 'idle') {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
-        <StatusDot tone="signal" pulse />
-        <MonoLabel tone="signal">PREPARING SERVICE</MonoLabel>
-        <p className="max-w-sm text-center text-[12.5px] text-soft">
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-app text-foreground">
+        <div className="flex items-center gap-2.5">
+          <StatusDot tone="accent" pulse />
+          <span className="text-[16px] font-semibold text-foreground">Preparing service…</span>
+        </div>
+        <p className="max-w-sm text-center text-[13px] text-soft">
           If this sticks, the setlist might be empty or missing songs.
         </p>
-        <Button type="button" variant="outline" size="sm" onClick={() => navigate('/')}>
-          CANCEL → HOME
+        <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={() => navigate('/')}>
+          Cancel and go home
         </Button>
       </div>
     )
@@ -211,31 +229,30 @@ export function ServiceMode(): JSX.Element {
 
   // ── ENDED ──────────────────────────────────────────────────────────────
   // The last thing an operator sees every Sunday — worth landing on the
-  // same KLB language as the rest of the app rather than a bare white
-  // button on black.
+  // same design language as the rest of the app rather than a bare
+  // white button on black.
   if (state.mode === 'ended') {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center gap-6 bg-background text-foreground">
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-7 bg-app text-foreground">
         <div className="text-center">
-          <MonoLabel tone="signal">SERVICE ENDED</MonoLabel>
-          <h1 className="mt-2 text-[36px] font-extrabold leading-none tracking-[-0.03em] text-foreground">
+          <MonoLabel className="text-[13px]">Service ended</MonoLabel>
+          <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
             {state.setlistName}
-            <TitleDot />
           </h1>
-          <p className="mt-2 text-[13px] text-soft">
+          <p className="mt-1.5 text-[14px] text-soft">
             Started {new Date(state.startedAt).toLocaleTimeString()}
           </p>
         </div>
         <Button
           type="button"
-          variant="signal"
-          size="md"
+          variant="primary"
+          size="lg"
           onClick={() => {
             exit()
             navigate('/')
           }}
         >
-          BACK TO HOME
+          Back to home
         </Button>
       </div>
     )
@@ -281,10 +298,10 @@ interface GridEntry {
     | { kind: 'pptx'; pptxPath: string; slideOrdinal: number }
 }
 
-/** "≈ N MIN" for a known duration, or an em dash when the operator never set one. */
+/** "≈ N min" for a known duration, or an em dash when the operator never set one. */
 function formatEstimatedRuntime(minutes: number | undefined): string {
   if (typeof minutes !== 'number') return '—'
-  return `≈ ${minutes} MIN`
+  return `≈ ${minutes} min`
 }
 
 function RunningView({
@@ -316,11 +333,11 @@ function RunningView({
   // are operator-adjustable. Widths persist in localStorage so the
   // operator's preference survives across services. usePanelWidth
   // encapsulates the load/clamp/persist dance so each panel only
-  // needs one line. 190 / 400 are the KLB design's INITIAL widths only
+  // needs one line. 224 / 400 are the INITIAL widths only
   // — an operator who has already resized keeps their saved value.
   const itemsPanel = usePanelWidth({
     storageKey: 'present:itemsPanelWidth',
-    defaultPx: 190,
+    defaultPx: 224,
     min: 140,
     max: 360
   })
@@ -556,10 +573,10 @@ function RunningView({
   // old two-state LIVE/HIDDEN that couldn't tell the operator WHY it was
   // showing or hiding.
   const lowerThirdsStatusLabel = ltEdited
-    ? 'EDITED · RESETS ON ADVANCE'
+    ? 'Edited · resets on advance'
     : autoFollowLyrics
-      ? 'AUTO-FOLLOWING SONG'
-      : 'AUTO-HIDDEN · NOT A SONG'
+      ? 'Auto-following song'
+      : 'Auto-hidden · not a song'
 
   // ── Live notes (operator-editable, broadcast to stage monitor) ────
   // The notes shown on the stage monitor and in the operator's own
@@ -873,8 +890,21 @@ function RunningView({
   // the top of the scroll container. Composing both constants here
   // (rather than a second hardcoded number) is what keeps this in sync
   // if either sticky layer's height ever changes.
+  // + CARD_RING_GAP so the on-air ring and its chip clear the sticky
+  // layers instead of sitting flush against them.
+  const CARD_RING_GAP = 12
   const activeCardScrollMargin =
-    gridMode === 'grouped' ? GRID_TOOLBAR_H + GRID_GROUP_HEADER_H : GRID_TOOLBAR_H
+    (gridMode === 'grouped' ? GRID_TOOLBAR_H + GRID_GROUP_HEADER_H : GRID_TOOLBAR_H) +
+    CARD_RING_GAP
+
+  // What Space will put on screen — the same resolveNext the Next panel
+  // and the store's traversal use, so the grid's "Next" chip can never
+  // disagree with them. Presentation only.
+  const nextTarget = useMemo(() => {
+    const r = resolveNext(state.items, state.itemIndex, state.slideIndex)
+    return r.kind === 'end' ? null : r
+  }, [state.items, state.itemIndex, state.slideIndex])
+  const onAir = state.displayMode === 'live'
 
   const renderCard = (entry: GridEntry): JSX.Element => {
     const active =
@@ -898,6 +928,12 @@ function RunningView({
         onPreviewError={reportPptxError}
         theme={cardTheme}
         active={active}
+        onAir={onAir}
+        next={
+          nextTarget !== null &&
+          entry.itemIndex === nextTarget.itemIndex &&
+          entry.slideIndex === nextTarget.slideIndex
+        }
         style={active ? { scrollMarginTop: activeCardScrollMargin } : undefined}
         onClick={() => jumpTo(entry.itemIndex, entry.slideIndex)}
       />
@@ -935,46 +971,43 @@ function RunningView({
   const mirrorCut = state.displayMode !== 'live'
 
   return (
-    <div className="relative flex h-screen w-screen flex-col bg-background text-foreground">
+    <div className="relative flex h-screen w-screen flex-col bg-app text-foreground">
       {/* ── Top bar ──────────────────────────────────────────────────── */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-5 border-b border-border bg-card px-[18px]">
-        <div className="flex min-w-0 items-center gap-5">
+      <header className="flex h-[60px] shrink-0 items-center justify-between gap-5 px-4">
+        <div className="flex min-w-0 items-center gap-6">
           <div className="min-w-0">
-            <div className="truncate text-[14px] font-bold tracking-[-0.01em] text-foreground">
+            <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-foreground">
               {state.setlistName}
             </div>
-            <div className="mt-0.5 font-mono text-[9.5px] font-medium tracking-[0.08em] text-muted-foreground">
-              ITEM {state.itemIndex + 1} OF {state.items.length} · SLIDE{' '}
-              {state.slideIndex + 1} OF {currentItem?.slides.length ?? 0}
+            <div className="mt-0.5 text-[13px] tabular-nums text-soft">
+              Item {state.itemIndex + 1} of {state.items.length} · Slide{' '}
+              {state.slideIndex + 1} of {currentItem?.slides.length ?? 0}
             </div>
           </div>
           <ElapsedTimer startedAt={state.startedAt} />
         </div>
 
-        <div className="flex shrink-0 items-center gap-3.5">
-          <Segmented
-            options={DISPLAY_MODE_OPTIONS}
-            value={state.displayMode}
-            onChange={handleDisplayModeChange}
-          />
-          <div className="flex gap-1.5">
-            <SquareIconButton label="B" title="Blackout (B)" onClick={toggleBlack} />
-            <SquareIconButton label="L" title="Logo / standby (L)" onClick={toggleLogo} />
-            <SquareIconButton
-              label="?"
+        <div className="flex shrink-0 items-center gap-2">
+          <DisplayModeSwitch value={state.displayMode} onChange={handleDisplayModeChange} />
+          <div className="ml-2 flex items-center gap-0.5">
+            <ShortcutButton keyLabel="B" title="Toggle blackout (B)" onClick={toggleBlack} />
+            <ShortcutButton keyLabel="L" title="Toggle logo / standby (L)" onClick={toggleLogo} />
+            <ShortcutButton
+              keyLabel="?"
               title="Keyboard shortcuts (?)"
               onClick={toggleCheatSheet}
             />
           </div>
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={onExit}
-            title="Exit (Esc)"
-            className="border-signal-deep text-signal hover:border-signal-deep hover:bg-signal-deep hover:text-white"
+            title="Exit service mode (Esc)"
+            className="ml-1"
           >
-            EXIT
+            Exit
+            <Kbd>Esc</Kbd>
           </Button>
         </div>
       </header>
@@ -983,15 +1016,19 @@ function RunningView({
           failures during the service, both routed through
           reportPptxError/deckWarnings above. Operator-only: see
           WarningBanner.tsx for why this can never reach the projector. */}
-      <WarningBanner items={deckWarningItems} onDismiss={dismissDeckWarning} />
+      <WarningBanner
+        items={deckWarningItems}
+        onDismiss={dismissDeckWarning}
+        className="mx-2 mb-2 rounded-lg border border-warn/25"
+      />
 
-      {/* Main: three-panel layout
-          ┌─ items list ─┬──── slide grid ────┬─ confidence ─┐
+      {/* Main: three inset panels; the resize handles are the gaps.
+          ┌─ items list ─┬──── slide grid ────┬─ program ────┐
           │   (narrow)   │      (flex)         │   (fixed)    │
           └──────────────┴─────────────────────┴──────────────┘
       */}
-      <section className="flex min-h-0 flex-1">
-        {/* ── Items sidebar ────────────────────────────────────────────
+      <section className="flex min-h-0 flex-1 px-2 pb-2">
+        {/* ── Items list ───────────────────────────────────────────────
             Coarse navigator: click any row to jump to that item's first
             slide. Width is operator-adjustable via the resize handle to
             its right. The "Jump to…" filter narrows the list by label
@@ -999,88 +1036,120 @@ function RunningView({
             jumpTo always lands correctly. */}
         <aside
           style={{ width: `${itemsPanel.width}px` }}
-          className="flex shrink-0 flex-col border-r border-border bg-card"
+          className="flex shrink-0 flex-col overflow-hidden rounded-xl bg-panel"
         >
-          <div className="shrink-0 border-b border-border px-3.5 py-[11px]">
-            <MonoLabel>ITEMS · {state.items.length}</MonoLabel>
+          <div className="flex shrink-0 items-baseline justify-between px-4 pb-2 pt-3.5">
+            <span className="text-[13px] font-semibold text-foreground">Items</span>
+            <span className="text-[12px] tabular-nums text-muted-foreground">
+              {state.items.length}
+            </span>
           </div>
-          <div className="shrink-0 border-b border-border p-2.5">
-            <input
+          <div className="relative shrink-0 px-2.5 pb-2">
+            <SearchIcon
+              size={15}
+              className="pointer-events-none absolute left-[22px] top-1/2 -translate-y-[calc(50%+4px)] text-muted-foreground"
+            />
+            <Input
               type="text"
               value={itemFilter}
               onChange={(e) => setItemFilter(e.target.value)}
               placeholder="Jump to…"
               aria-label="Filter items by label"
-              className="w-full border border-border bg-background px-2.5 py-2 font-mono text-[11px] font-medium tracking-[0.06em] text-foreground outline-none placeholder:text-muted-foreground focus:border-signal"
+              className="h-8 pl-8 text-[13px]"
             />
           </div>
-          <ol className="min-h-0 flex-1 overflow-y-auto scroll-hairline">
+          <ol className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 scroll-hairline">
             {filteredItems.map(({ item, index }) => {
               const isActive = index === state.itemIndex
               return (
-                <li key={item.id} className="border-b border-rule">
+                <li key={item.id}>
                   <button
                     type="button"
                     onClick={() => jumpTo(index, 0)}
-                    className={`block w-full border-l-2 px-3.5 py-3 text-left transition-colors ${
-                      isActive
-                        ? 'border-l-signal bg-ember'
-                        : 'border-l-transparent hover:bg-panel-hi'
-                    }`}
+                    aria-current={isActive ? 'true' : undefined}
+                    className={cn(
+                      'relative flex w-full items-start gap-2.5 rounded-lg py-2 pl-3 pr-2.5 text-left transition-colors',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                      isActive ? 'bg-selected' : 'hover:bg-hover'
+                    )}
                   >
-                    <span className="flex items-baseline gap-2">
-                      <span className="w-4 shrink-0 text-right font-mono text-[10px] font-medium text-dim">
-                        {index + 1}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-foreground">
-                        {item.label}
-                      </span>
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-accent"
+                      />
+                    )}
+                    <span
+                      className={cn(
+                        'w-4 shrink-0 pt-px text-right text-[12px] tabular-nums',
+                        isActive ? 'text-quiet' : 'text-muted-foreground'
+                      )}
+                    >
+                      {index + 1}
                     </span>
-                    <span className="mt-1 block pl-[18px] font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
-                      {item.kind} · {item.slides.length}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            'min-w-0 flex-1 truncate text-[13px] font-medium',
+                            isActive ? 'text-foreground' : 'text-bone'
+                          )}
+                        >
+                          {item.label}
+                        </span>
+                        {isActive && onAir && (
+                          <StatusDot tone="live" pulse="fast" className="shrink-0" />
+                        )}
+                      </span>
+                      <span
+                        className="mt-0.5 block truncate text-[12px] tabular-nums text-muted-foreground"
+                        title={`${itemKindLabel(item.kind)} · ${slideCount(item.slides.length)}`}
+                      >
+                        {itemKindLabel(item.kind)} · {item.slides.length}
+                      </span>
                     </span>
                   </button>
                 </li>
               )
             })}
             {filteredItems.length === 0 && (
-              <li className="px-3.5 py-6 text-center text-[11px] text-muted-foreground">
+              <li className="px-3 py-6 text-center text-[13px] text-muted-foreground">
                 No items match “{itemFilter}”.
               </li>
             )}
           </ol>
         </aside>
 
-        {/* ── Resize handle (items sidebar | grid) ────────────────────── */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize items sidebar"
+        {/* ── Resize handle (items list | grid) ──────────────────────── */}
+        <ResizeGap
+          label="Resize items list"
           onMouseDown={itemsPanel.startResize('right')}
-          className="group relative flex w-1 shrink-0 cursor-col-resize select-none items-center justify-center bg-border transition-colors hover:bg-signal/40 active:bg-signal/60"
-        >
-          <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
-        </div>
+        />
 
         {/* ── Slide grid (center) ──────────────────────────────────────
             Fine navigator: every slide in the whole service as its own
-            clickable card. GROUPED (default) shows one block per item
-            with a sticky header; FLAT shows one continuous grid. Both
+            clickable card. Grouped (default) shows one block per item
+            with a sticky header; Flat shows one continuous grid. Both
             sticky layers (toolbar + group headers) share GRID_TOOLBAR_H
             so they can't drift apart while scrolling. */}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-panel">
           <div
             ref={gridContainerRef}
             className="min-h-0 flex-1 overflow-y-auto scroll-hairline"
           >
             <div
-              className="sticky top-0 z-[2] flex items-center justify-between border-b border-border bg-card px-4"
+              className="sticky top-0 z-[2] flex items-center justify-between gap-3 border-b border-rule bg-panel px-4"
               style={{ height: GRID_TOOLBAR_H }}
             >
-              <MonoLabel>ALL SLIDES · {grid.length}</MonoLabel>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[13px] font-semibold text-foreground">All slides</span>
+                <span className="text-[12px] tabular-nums text-muted-foreground">
+                  {grid.length}
+                </span>
+              </div>
               <div className="flex items-center gap-3">
-                <span className="font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
-                  CLICK TO JUMP · SPACE TO ADVANCE
+                <span className="hidden text-[12px] text-muted-foreground xl:inline">
+                  Click to jump · Space to advance
                 </span>
                 <Segmented size="sm" options={GRID_MODE_OPTIONS} value={gridMode} onChange={setGridMode} />
               </div>
@@ -1092,72 +1161,78 @@ function RunningView({
                   return (
                     <div key={item.id}>
                       <div
-                        // border-b-border (not the general border-border) is
-                        // deliberate: mixing an all-sides border-color utility
-                        // with a side-specific border-l-* color on the same
-                        // element is a genuine Tailwind cascade hazard — both
-                        // compile to same-specificity rules, so whichever one
-                        // Tailwind happens to emit LATER in the stylesheet
-                        // wins, regardless of class order in this string.
-                        // Keeping both colors side-specific (border-b-* vs
-                        // border-l-*) sidesteps that entirely.
-                        className={`sticky z-[1] flex items-center gap-3 border-b border-b-border border-l-2 bg-card px-4 ${
-                          isActiveGroup ? 'border-l-signal' : 'border-l-transparent'
-                        }`}
+                        // Opaque (bg-panel) because it is sticky: slide
+                        // cards scroll underneath it. The current-item
+                        // marker is an absolutely positioned bar rather
+                        // than a border colour, so there is no all-sides vs
+                        // side-specific border-colour cascade to manage.
+                        className="sticky z-[1] flex items-center gap-2.5 bg-panel px-4"
                         style={{ top: GRID_TOOLBAR_H, height: GRID_GROUP_HEADER_H }}
                       >
-                        <span className="font-mono text-[9.5px] font-medium text-dim">
+                        {isActiveGroup && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-accent"
+                          />
+                        )}
+                        <span className="w-4 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">
                           {itemIndex + 1}
                         </span>
-                        <span className="truncate text-[12px] font-bold tracking-[-0.01em] text-foreground">
+                        <span
+                          className={cn(
+                            'truncate text-[14px] font-semibold tracking-[-0.01em]',
+                            isActiveGroup ? 'text-foreground' : 'text-bone'
+                          )}
+                        >
                           {item.label}
                         </span>
-                        <span className="shrink-0 font-mono text-[8.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                          {item.kind} · {item.slides.length}
+                        <span className="shrink-0 text-[12px] text-muted-foreground">
+                          {itemKindLabel(item.kind)} · {slideCount(item.slides.length)}
                         </span>
-                        <span className="ml-auto shrink-0 font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
+                        <span className="ml-auto shrink-0 text-[12px] tabular-nums text-muted-foreground">
                           {formatEstimatedRuntime(durationById.get(item.id))}
                         </span>
                       </div>
-                      <div className="grid grid-cols-3 gap-3 p-4">
+                      <div className="grid grid-cols-3 gap-x-3 gap-y-4 px-4 pb-6 pt-2">
                         {entries.map((entry) => renderCard(entry))}
                       </div>
                     </div>
                   )
                 })
               : (
-                <div className="grid grid-cols-3 gap-3 p-4">
+                <div className="grid grid-cols-3 gap-x-3 gap-y-4 p-4">
                   {grid.map((entry) => renderCard(entry))}
                 </div>
               )}
           </div>
         </div>
 
-        {/* ── Resize handle (grid | confidence monitor) ───────────────── */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize confidence monitor"
+        {/* ── Resize handle (grid | program preview) ─────────────────── */}
+        <ResizeGap
+          label="Resize confidence monitor"
           onMouseDown={sidePanel.startResize('left')}
-          className="group relative flex w-1 shrink-0 cursor-col-resize select-none items-center justify-center bg-border transition-colors hover:bg-signal/40 active:bg-signal/60"
-        >
-          <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
-        </div>
+        />
 
-        {/* ── Confidence monitor (right) ───────────────────────────────
+        {/* ── Program preview / confidence monitor (right) ─────────────
             Width is operator-adjustable via the resize handle to the
             left; clamped between 280 and 720 px in usePanelWidth. */}
         <aside
           style={{ width: `${sidePanel.width}px` }}
-          className="flex shrink-0 flex-col border-l border-border bg-card"
+          className="flex shrink-0 flex-col overflow-hidden rounded-xl bg-panel"
         >
-          <div className="flex shrink-0 items-center gap-[9px] border-b border-border px-4 py-[11px]">
-            <StatusDot tone="signal" pulse="fast" />
-            <MonoLabel tone="signal">ON SCREEN</MonoLabel>
-            {currentItem && <MonoLabel tone="muted">· {currentItem.label}</MonoLabel>}
+          <div className="flex shrink-0 items-center gap-2.5 px-4 pb-2.5 pt-3.5">
+            <span className="text-[13px] font-semibold text-foreground">Program</span>
+            {state.displayMode === 'live' ? (
+              <OnAirBadge />
+            ) : (
+              <QuietBadge>{state.displayMode === 'black' ? 'Black' : 'Logo'}</QuietBadge>
+            )}
+            {currentItem && (
+              <span className="min-w-0 truncate text-[13px] text-soft">{currentItem.label}</span>
+            )}
           </div>
 
-          <div className="flex-none p-4">
+          <div className="flex-none px-4">
             {/* The confidence monitor is a literal pixel mirror of the
                 projector via desktopCapturer (Option C). This eliminates
                 rendering drift between operator and output for ALL
@@ -1165,24 +1240,26 @@ function RunningView({
                 capturing the actual output pixels rather than rendering
                 an independent copy. */}
             <div
-              className={`relative aspect-video overflow-hidden border bg-black ${
-                mirrorCut ? 'border-signal' : 'border-border'
-              }`}
+              className={cn(
+                'relative aspect-video overflow-hidden rounded-lg bg-black',
+                mirrorCut ? 'ring-1 ring-border' : 'ring-2 ring-live/80'
+              )}
             >
               <OutputMirror />
               {mirrorCut && (
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-signal/[0.06]">
-                  <span className="font-mono text-[15px] tracking-[0.2em] text-signal">
-                    {state.displayMode === 'black' ? 'BLACKOUT' : 'LOGO · STANDBY'}
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/70 px-6 text-center">
+                  <span className="text-[16px] font-semibold text-foreground">
+                    {state.displayMode === 'black' ? 'Blackout' : 'Logo · standby'}
                   </span>
-                  <span className="text-[11px] text-soft">
-                    The congregation sees nothing. Press again to resume.
+                  <span className="text-[13px] text-soft">
+                    The congregation can’t see the slide. Press{' '}
+                    {state.displayMode === 'black' ? 'B' : 'L'} again to resume.
                   </span>
                 </div>
               )}
             </div>
             {currentSlide?.kind === 'text' && currentSlide.sectionLabel && (
-              <div className="mt-1.5 text-[11px] text-soft">{currentSlide.sectionLabel}</div>
+              <div className="mt-2 text-[12px] text-soft">{currentSlide.sectionLabel}</div>
             )}
 
             {/* Video playback runway — only visible while a video slide
@@ -1204,7 +1281,7 @@ function RunningView({
             )}
           </div>
 
-          <div className="px-4">
+          <div className="mt-4 px-4">
             <ServiceNextPanel
               items={state.items}
               itemIndex={state.itemIndex}
@@ -1218,28 +1295,30 @@ function RunningView({
               (announcements, sermon timing, prayer cues). Edits are
               ephemeral: switching items resets to the song's saved
               notes. The stage monitor mirrors this in real time. */}
-          <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border">
-            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-[11px]">
-              <MonoLabel>NOTES · LIVE TO STAGE</MonoLabel>
-              <MonoLabel tone="dim">EPHEMERAL</MonoLabel>
-            </div>
-            {liveNotes !== (currentItem?.notes ?? '') && (
-              <div className="flex shrink-0 justify-end border-b border-rule px-4 py-1">
+          <div className="mt-4 flex min-h-0 flex-1 flex-col px-4 pb-4">
+            <div className="flex shrink-0 items-baseline justify-between gap-3 pb-2">
+              <span className="text-[13px] font-semibold text-foreground">Stage notes</span>
+              {liveNotes !== (currentItem?.notes ?? '') ? (
                 <button
                   type="button"
                   onClick={() => setLiveNotes(currentItem?.notes ?? '')}
-                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                  className="rounded text-[12px] text-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                   title="Reset to the saved notes for this item"
                 >
                   Reset to saved notes
                 </button>
-              </div>
-            )}
-            <textarea
+              ) : (
+                <span className="text-[12px] text-muted-foreground">
+                  Shown on stage · not saved
+                </span>
+              )}
+            </div>
+            <Textarea
               value={liveNotes}
               onChange={(e) => setLiveNotes(e.target.value)}
               placeholder="Type announcements, prayer cues, sermon notes…"
-              className="min-h-0 flex-1 resize-none bg-background px-4 py-3.5 text-[12.5px] leading-[1.7] text-bone outline-none placeholder:text-muted-foreground"
+              aria-label="Stage notes"
+              className="min-h-[72px] flex-1 resize-none text-[13px] leading-[1.6] text-bone"
             />
           </div>
         </aside>
@@ -1254,31 +1333,32 @@ function RunningView({
           edits are intentionally ephemeral — advancing to a new
           item re-runs the auto-follow effect. */}
       {lowerThirdsEnabled && (
-        <div className="flex shrink-0 items-center gap-3 border-t border-border bg-card px-[18px] py-[11px]">
-          <MonoLabel tone="signal" className="shrink-0">
-            LOWER THIRDS
-          </MonoLabel>
-          <input
+        <div className="mx-2 mb-2 flex shrink-0 items-center gap-3 rounded-xl bg-panel px-4 py-2.5">
+          <span className="shrink-0 text-[13px] font-semibold text-foreground">Lower thirds</span>
+          {lowerThirdsContent.visible && <OnAirBadge className="shrink-0">On feed</OnAirBadge>}
+          <Input
             type="text"
             value={lowerThirdsContent.title}
             onChange={(e) =>
               pushLowerThirdsManual({ ...lowerThirdsContent, title: e.target.value })
             }
             placeholder="Title (auto-fills from songs)"
-            className="min-w-0 flex-1 border border-border bg-background px-3 py-[9px] text-[12.5px] font-medium text-foreground outline-none placeholder:text-muted-foreground focus:border-signal"
+            aria-label="Lower thirds title"
+            className="min-w-0 flex-1 text-[13px]"
           />
-          <input
+          <Input
             type="text"
             value={lowerThirdsContent.subtitle}
             onChange={(e) =>
               pushLowerThirdsManual({ ...lowerThirdsContent, subtitle: e.target.value })
             }
             placeholder="Subtitle (author, role, reference)"
-            className="w-[260px] shrink-0 border border-border bg-background px-3 py-[9px] text-[12.5px] text-bone outline-none placeholder:text-muted-foreground focus:border-signal"
+            aria-label="Lower thirds subtitle"
+            className="w-[260px] shrink-0 text-[13px]"
           />
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() =>
               pushLowerThirdsManual({ ...lowerThirdsContent, visible: !lowerThirdsContent.visible })
@@ -1286,11 +1366,7 @@ function RunningView({
             disabled={
               !lowerThirdsContent.visible && lowerThirdsContent.title.trim().length === 0
             }
-            className={
-              lowerThirdsContent.visible
-                ? 'shrink-0 border-signal-deep text-signal hover:border-signal-deep hover:bg-signal-deep hover:text-white'
-                : 'shrink-0'
-            }
+            className="shrink-0"
             title={
               !lowerThirdsContent.visible && lowerThirdsContent.title.trim().length === 0
                 ? 'Type a title first or navigate to a song'
@@ -1299,9 +1375,9 @@ function RunningView({
                   : 'Show lower thirds on the OBS feed'
             }
           >
-            {lowerThirdsContent.visible ? 'HIDE' : 'SHOW'}
+            {lowerThirdsContent.visible ? 'Hide' : 'Show'}
           </Button>
-          <span className="shrink-0 font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
+          <span className="shrink-0 text-[12px] text-muted-foreground">
             {lowerThirdsStatusLabel}
           </span>
         </div>
@@ -1395,9 +1471,16 @@ function LiveVideoRunway({
         onToggleMute={onToggleMute}
       />
       {stalled && (
-        <div role="alert" className="mt-2 border border-signal px-[13px] py-[9px] text-[11px] text-signal">
-          Not playing on the projector. The file may be missing or in a format the player
-          can&apos;t decode — re-export it as H.264 (8-bit). The congregation sees black.
+        <div
+          role="alert"
+          className="mt-2 flex gap-2.5 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2.5 text-[13px] leading-relaxed text-bone"
+        >
+          <AlertIcon size={16} className="mt-0.5 shrink-0 text-warn" />
+          <span>
+            <span className="font-medium text-warn">Not playing on the projector.</span> The file
+            may be missing or in a format the player can&apos;t decode — re-export it as H.264
+            (8-bit). The congregation sees black.
+          </span>
         </div>
       )}
     </>
@@ -1463,13 +1546,17 @@ function usePanelWidth({
 // Little pieces
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 32px square toolbar button — B / L / ? in the top bar. */
-function SquareIconButton({
-  label,
+/**
+ * Ghost toolbar button showing a shortcut key — B / L / ? in the top
+ * bar. Same actions as the keys themselves (toggleBlack / toggleLogo /
+ * toggleCheatSheet).
+ */
+function ShortcutButton({
+  keyLabel,
   title,
   onClick
 }: {
-  label: string
+  keyLabel: string
   title: string
   onClick: () => void
 }): JSX.Element {
@@ -1478,10 +1565,35 @@ function SquareIconButton({
       type="button"
       onClick={onClick}
       title={title}
-      className="flex h-8 w-8 items-center justify-center border border-border bg-transparent font-mono text-[10px] font-semibold text-soft transition-colors hover:border-white hover:text-white"
+      aria-label={title}
+      className="group flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
     >
-      {label}
+      <Kbd className="group-hover:border-dim group-hover:text-foreground">{keyLabel}</Kbd>
     </button>
+  )
+}
+
+/**
+ * The gap between two Service Mode panels, doubling as its resize
+ * handle: invisible at rest, a thin accent line on hover/drag.
+ */
+function ResizeGap({
+  label,
+  onMouseDown
+}: {
+  label: string
+  onMouseDown: (e: React.MouseEvent) => void
+}): JSX.Element {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      onMouseDown={onMouseDown}
+      className="group relative flex w-2 shrink-0 cursor-col-resize select-none items-center justify-center"
+    >
+      <div className="h-full w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-accent/40 group-active:bg-accent/70" />
+    </div>
   )
 }
 
@@ -1499,7 +1611,11 @@ function ElapsedTimer({ startedAt }: { startedAt: string }): JSX.Element {
   const ss = totalSec % 60
 
   return (
-    <div className="font-mono text-[20px] font-semibold tabular-nums text-bone">
+    <div
+      className="font-mono text-[22px] font-medium tabular-nums tracking-tight text-foreground"
+      title="Time since the service started"
+      aria-label="Elapsed time"
+    >
       {mm}:{String(ss).padStart(2, '0')}
     </div>
   )
