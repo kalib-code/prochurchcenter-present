@@ -203,6 +203,9 @@ export interface Setlist {
 export type TextAlign = 'left' | 'center' | 'right'
 export type TextPosition = 'top' | 'center' | 'bottom'
 export type TextEffect = 'none' | 'shadow' | 'outline' | 'highlight'
+/** CSS font-weight. Fonts without a face at the chosen weight get the browser's synthesised bold. */
+export type FontWeight = 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+export type FontStyle = 'normal' | 'italic'
 export type Transition = 'fade' | 'instant'
 
 export interface Theme {
@@ -224,6 +227,13 @@ export interface Theme {
   textColor: string
   /** System font family name; v1.0 only supports pre-installed fonts */
   fontFamily: string
+  /**
+   * Weight of lyric and scripture text. Default 600 (semibold) — what
+   * the projector rendered before this was configurable, so older
+   * themes look the same.
+   */
+  fontWeight: FontWeight
+  fontStyle: FontStyle
   /** 50–150, default 100 */
   fontSizePercent: number
   textAlign: TextAlign

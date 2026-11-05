@@ -1,16 +1,3 @@
-/**
- * HairlineGrid — the design's border-seam grid.
- *
- * The design builds every card grid and table as `border-left` on the
- * container plus `border-right`/`border-bottom` on each cell (see design
- * L103, L121, L431). That produces exact 1px seams; a naive
- * `border` on every cell would double them to 2px at every interior
- * edge, and `gap` would separate the cards entirely — neither matches.
- *
- * Cells are the direct children. This component owns the seams, so
- * children must NOT set their own borders on the seam edges.
- */
-
 import type { ReactNode } from 'react'
 import { Children } from 'react'
 import { cn } from '../../lib/utils'
@@ -21,14 +8,19 @@ interface HairlineGridProps {
   className?: string
 }
 
+/**
+ * Grid of cells separated by 1px hairlines, inside one rounded frame.
+ * The hairlines are the frame's background showing through a 1px gap,
+ * so cells never double up borders.
+ */
 export function HairlineGrid({ cols, children, className }: HairlineGridProps): JSX.Element {
   return (
     <div
-      className={cn('grid border-l border-t border-border', className)}
+      className={cn('grid gap-px overflow-hidden rounded-xl border border-border/70 bg-rule', className)}
       style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
     >
       {Children.map(children, (child) => (
-        <div className="min-w-0 border-b border-r border-border">{child}</div>
+        <div className="min-w-0 bg-panel">{child}</div>
       ))}
     </div>
   )

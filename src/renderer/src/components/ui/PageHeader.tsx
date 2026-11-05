@@ -1,21 +1,12 @@
-/**
- * PageHeader — the KLB screen header.
- *
- * Optional back link, mono eyebrow, Inter-800 title terminated by a
- * signal period, optional description, optional right-aligned action
- * cluster. Used by Library, Song Editor, and Settings.
- */
-
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { MonoLabel } from './MonoLabel'
-import { TitleDot } from './TitleDot'
 
 interface PageHeaderProps {
-  eyebrow: string
+  /** Optional small context line above the title (sentence case). */
+  eyebrow?: string
   title: string
   description?: string
-  /** Renders a "← LABEL" link above the eyebrow. */
+  /** Breadcrumb-style link above the title, e.g. back to Songs. */
   back?: { to: string; label: string }
   action?: ReactNode
   /** Extra content below the description, e.g. a tab row. */
@@ -31,29 +22,26 @@ export function PageHeader({
   children
 }: PageHeaderProps): JSX.Element {
   return (
-    <header className="shrink-0 border-b border-border bg-card px-6 pt-6">
+    <header className="shrink-0 px-8 pt-7">
       <div className="flex items-end justify-between gap-6 pb-5">
         <div className="min-w-0">
           {back && (
             <Link
               to={back.to}
-              className="mb-3 block font-mono text-[9.5px] font-semibold uppercase leading-none tracking-[0.12em] text-muted-foreground transition-colors hover:text-signal"
+              className="mb-2 inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
             >
-              ← {back.label}
+              <span aria-hidden="true">←</span> {back.label}
             </Link>
           )}
-          <MonoLabel tone="signal" className="mb-2 block">
-            {eyebrow}
-          </MonoLabel>
-          <h1 className="text-[36px] font-extrabold leading-none tracking-[-0.03em] text-foreground">
-            {title}
-            <TitleDot />
-          </h1>
-          {description && (
-            <p className="mt-2 text-[13px] text-soft">{description}</p>
+          {eyebrow && !back && (
+            <div className="mb-1 text-[13px] text-muted-foreground">{eyebrow}</div>
           )}
+          <h1 className="truncate text-[26px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
+            {title}
+          </h1>
+          {description && <p className="mt-1.5 text-[14px] text-soft">{description}</p>}
         </div>
-        {action && <div className="flex shrink-0 items-center gap-2.5">{action}</div>}
+        {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
       </div>
       {children}
     </header>

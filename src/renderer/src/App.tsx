@@ -10,6 +10,7 @@ import { OutputView } from './output/OutputView'
 import { StageView } from './output/StageView'
 import { LowerThirdsView } from './output/LowerThirdsView'
 import { useFontsStore } from './stores/useFontsStore'
+import { AppShell } from './components/AppShell'
 
 /**
  * Determine which renderer "kind" this window is by inspecting the
@@ -51,12 +52,15 @@ function App(): JSX.Element {
         )}
         {kind === 'operator' && (
           <>
-            <Route path="/" element={<Home />} />
-            <Route path="/library" element={<SongLibrary />} />
-            <Route path="/library/:id" element={<SongEditor />} />
-            <Route path="/setlists/:id" element={<SetlistEditor />} />
+            {/* Service Mode is full-screen: no sidebar while presenting. */}
             <Route path="/service/:setlistId" element={<ServiceMode />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route element={<AppShell />}>
+              <Route path="/" element={<Home />} />
+              <Route path="/library" element={<SongLibrary />} />
+              <Route path="/library/:id" element={<SongEditor />} />
+              <Route path="/setlists/:id" element={<SetlistEditor />} />
+              <Route path="/settings" element={<Settings />} />
+            </Route>
           </>
         )}
       </Routes>

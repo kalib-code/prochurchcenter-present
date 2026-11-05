@@ -39,8 +39,12 @@
  *   - display     := whichever of the two effective values is actually set
  *
  * This mirrors ThemeFields.tsx's MediaPickerRow behaviour exactly (L192-210)
- * without touching that file — it is restyled separately in Task 21 and
- * still drives the global Settings editor.
+ * without touching that file — it still drives the global Settings editor.
+ *
+ * Presentation (2026-11 redesign): sentence case throughout (the field
+ * table in lib/themeFields is sentence case at the source). Accent marks
+ * only the current selection
+ * (the chosen swatch); there is no decorative orange.
  *
  * All of the actual override-manipulation logic (isFieldOverridden,
  * effectiveDisplayValue, promoteField, revertField, pickField, etc.) is
@@ -65,9 +69,11 @@ import {
 } from '../lib/themeOverrideFields'
 import { SlideRenderer } from './SlideRenderer'
 import { Button } from './ui/Button'
+import { Badge } from './ui/Badge'
 import { Panel } from './ui/Card'
-import { MonoLabel } from './ui/MonoLabel'
+import { Select } from './ui/Input'
 import { Segmented } from './ui/Segmented'
+import { PaletteIcon, PlusIcon } from './icons'
 import { cn } from '../lib/utils'
 
 interface ThemeOverrideEditorProps {
@@ -88,21 +94,24 @@ export function ThemeOverrideEditor({
 }: ThemeOverrideEditorProps): JSX.Element {
   if (override === null) {
     return (
-      <div className="flex items-center justify-between gap-4 border border-dashed border-dim p-[18px]">
-        <div>
-          <div className="mb-1 text-[14px] font-bold text-foreground">Theme override</div>
-          <div className="text-[12px] text-dim">
+      <div className="flex items-center gap-4 rounded-xl border border-dashed border-border px-4 py-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-raised text-soft">
+          <PaletteIcon size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14px] font-semibold text-foreground">Theme override</div>
+          <div className="text-[13px] text-soft">
             This song uses the global theme. Override it to give this one song its own look.
           </div>
         </div>
         <Button
           type="button"
-          variant="outline"
-          size="md"
+          variant="secondary"
+          size="sm"
           className="shrink-0"
           onClick={() => onChange({})}
         >
-          OVERRIDE THEME
+          Override theme
         </Button>
       </div>
     )
@@ -158,53 +167,51 @@ function ActiveOverrideEditor({
 
   return (
     <Panel
-      emphasis
-      title={<MonoLabel tone="signal">THEME OVERRIDE · THIS SONG ONLY</MonoLabel>}
+      title={
+        <span className="flex items-center gap-2.5">
+          <span className="text-[14px] font-semibold text-foreground">Theme override</span>
+          <Badge tone="neutral">This song only</Badge>
+        </span>
+      }
       action={
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="text-signal-deep hover:text-signal"
-          onClick={() => onChange(null)}
-        >
-          REMOVE OVERRIDE
+        <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>
+          Remove override
         </Button>
       }
     >
       {/* Live preview — the song's first real slide, styled with the
           effective (global + override) theme. */}
-      <div className="border-b border-border p-4">
-        <div className="aspect-video overflow-hidden border border-border">
+      <div className="p-4 pb-3">
+        <div className="aspect-video overflow-hidden rounded-lg ring-1 ring-inset ring-white/5">
           <SlideRenderer payload={previewSlide} mode="live" theme={effective} animate={false} />
         </div>
-        <div className="mt-2 font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
-          LIVE — THIS SONG&apos;S FIRST SLIDE WITH THE OVERRIDE APPLIED
+        <div className="mt-2 text-[12.5px] text-muted-foreground">
+          This song&apos;s first slide with the override applied
         </div>
       </div>
 
       {/* Count row */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-[14px]">
-        <MonoLabel size="xs" tone="soft">
-          {overriddenCount} OF {THEME_FIELDS.length} FIELDS OVERRIDDEN · REST INHERITED
-        </MonoLabel>
+      <div className="flex min-h-[44px] items-center justify-between gap-3 border-t border-rule px-4 py-1.5">
+        <span className="text-[13px] tabular-nums text-soft">
+          {overriddenCount} of {THEME_FIELDS.length} fields overridden
+        </span>
         {overriddenCount > 0 && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="text-soft hover:text-signal"
+            className="-mr-2 shrink-0"
             onClick={() => onChange({})}
           >
-            REVERT ALL
+            Revert all
           </Button>
         )}
       </div>
 
       {overriddenCount === 0 && (
-        <div className="border-b border-border px-4 py-[22px] text-center">
-          <div className="mb-1.5 text-[14px] font-bold text-foreground">Nothing overridden yet</div>
-          <p className="mx-auto max-w-[46ch] text-[12px] leading-[1.6] text-dim">
+        <div className="border-t border-rule px-4 py-6 text-center">
+          <div className="mb-1 text-[14px] font-semibold text-foreground">Nothing overridden yet</div>
+          <p className="mx-auto max-w-[46ch] text-[13px] leading-[1.55] text-soft">
             This song looks exactly like the global theme. Add only the fields you want
             different — everything else keeps following the global theme, even when you
             change it later.
@@ -224,34 +231,34 @@ function ActiveOverrideEditor({
       ))}
 
       {/* Override-another-field tray */}
-      <div className="px-4 py-[14px]">
-        <MonoLabel size="xs" className="mb-1 block">
-          OVERRIDE ANOTHER FIELD
-        </MonoLabel>
-        <p className="mb-2.5 text-[11px] text-dim">Everything below follows the global theme.</p>
-        <div className="flex flex-wrap gap-[6px]">
-          {inheritedDefs.map((def) => (
-            <button
-              key={def.key}
-              type="button"
-              onClick={() => handlePromote(def)}
-              className="flex items-baseline gap-[7px] border border-dashed border-dim bg-transparent px-[10px] py-[7px] hover:border-signal hover:border-solid"
-            >
-              <MonoLabel size="xs" tone="dim">
-                {def.group}
-              </MonoLabel>
-              <span className="text-[11.5px] font-medium text-bone">{def.label}</span>
-              <span className="font-mono text-[10px] text-dim">
-                {formatFieldValue(def, effectiveDisplayValue(def, effective))}
-              </span>
-            </button>
-          ))}
+      {inheritedDefs.length > 0 && (
+        <div className="border-t border-rule px-4 py-4">
+          <div className="text-[13px] font-medium text-quiet">Override another field</div>
+          <p className="mb-3 text-[12.5px] text-muted-foreground">
+            Everything below follows the global theme.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {inheritedDefs.map((def) => (
+              <button
+                key={def.key}
+                type="button"
+                onClick={() => handlePromote(def)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-left transition-colors hover:border-solid hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+              >
+                <PlusIcon size={13} className="shrink-0 text-muted-foreground" />
+                <span className="text-[13px] font-medium text-bone">{def.label}</span>
+                <span className="max-w-[16ch] truncate text-[12px] text-muted-foreground">
+                  {formatFieldValue(def, effectiveDisplayValue(def, effective))}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="border-t border-border px-4 py-[11px] text-[11px] leading-[1.5] text-soft">
-        Anything you don&apos;t set here is inherited from the global theme — clearing a
-        field never wipes the global one.
+      <div className="border-t border-rule px-4 py-3 text-[12.5px] leading-[1.5] text-muted-foreground">
+        Anything you don&apos;t set here is inherited from the global theme — clearing a field
+        never wipes the global one.
       </div>
     </Panel>
   )
@@ -273,32 +280,31 @@ function ActiveFieldRow({
   onPickFile: () => void
 }): JSX.Element {
   return (
-    <div className="border-b border-rule">
-      <div className="flex items-center justify-between gap-3 px-4 py-[11px]">
-        <div className="flex min-w-0 items-baseline gap-[9px]">
-          <MonoLabel tone="signal" size="xs" className="shrink-0">
-            {def.group}
-          </MonoLabel>
-          <span className="shrink-0 text-[12.5px] font-semibold text-foreground">{def.label}</span>
-          {def.hint && (
-            <span className="truncate text-[11px] text-soft">{def.hint}</span>
-          )}
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-rule px-4 py-3">
+      <div className="min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[13.5px] font-medium text-foreground">{def.label}</span>
+          <span className="text-[12px] text-muted-foreground">{def.group}</span>
         </div>
-        <button
-          type="button"
-          onClick={onRevert}
-          className="shrink-0 font-mono text-[8.5px] font-semibold uppercase tracking-[0.08em] text-dim hover:text-signal"
-        >
-          REVERT
-        </button>
+        {def.hint && <div className="truncate text-[12.5px] text-soft">{def.hint}</div>}
       </div>
-      <div className="flex items-center justify-end gap-[10px] px-4 pb-3">
+      <div className="ml-auto flex min-w-0 items-center gap-2">
         <FieldControl
           def={def}
           effective={effective}
           onApplyPatch={onApplyPatch}
           onPickFile={onPickFile}
         />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-mr-2 shrink-0 px-2"
+          onClick={onRevert}
+          aria-label={`Revert ${def.label} to the global theme`}
+        >
+          Revert
+        </Button>
       </div>
     </div>
   )
@@ -318,7 +324,7 @@ function FieldControl({
   if (def.kind === 'seg') {
     return (
       <Segmented
-        options={def.options}
+        options={def.options.map((o) => ({ value: o.value, label: o.label }))}
         value={String(effective[def.key])}
         onChange={(v) => onApplyPatch(fieldPatch(def.key, v))}
         size="sm"
@@ -330,21 +336,26 @@ function FieldControl({
     const current = String(effective[def.key] ?? '')
     return (
       <div className="flex items-center gap-2">
-        {def.options.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            title={opt.label}
-            aria-label={opt.label}
-            onClick={() => onApplyPatch(fieldPatch(def.key, opt.value))}
-            className={cn(
-              'h-[26px] w-[26px] border',
-              opt.value === current ? 'border-signal' : 'border-border'
-            )}
-            style={{ backgroundColor: opt.value }}
-          />
-        ))}
-        <span className="min-w-[80px] border border-border px-[9px] py-[6px] text-center font-mono text-[11px] text-soft">
+        {def.options.map((opt) => {
+          const selected = opt.value === current
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              title={opt.label}
+              aria-label={opt.label}
+              aria-pressed={selected}
+              onClick={() => onApplyPatch(fieldPatch(def.key, opt.value))}
+              className={cn(
+                'h-7 w-7 rounded-md border border-white/10 transition-shadow',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                selected && 'ring-2 ring-accent ring-offset-2 ring-offset-raised'
+              )}
+              style={{ backgroundColor: opt.value }}
+            />
+          )
+        })}
+        <span className="min-w-[72px] rounded-md bg-panel px-2 py-1.5 text-center text-[12px] text-soft">
           {formatFieldValue(def, current)}
         </span>
       </div>
@@ -355,24 +366,30 @@ function FieldControl({
     const current = Number(effective[def.key] ?? def.min)
     const clamp = (v: number): number => Math.min(def.max, Math.max(def.min, v))
     return (
-      <div className="flex items-center gap-2">
-        <button
+      <div className="flex items-center gap-1.5">
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
+          className="w-8 px-0 text-[15px]"
+          aria-label={`Decrease ${def.label}`}
           onClick={() => onApplyPatch(fieldPatch(def.key, clamp(current - def.step)))}
-          className="h-7 w-7 border border-border font-mono text-[12px] font-semibold text-bone hover:border-signal hover:text-signal"
         >
           −
-        </button>
-        <span className="min-w-[66px] text-center font-mono text-[12px] text-foreground">
+        </Button>
+        <span className="min-w-[64px] text-center text-[13px] tabular-nums text-foreground">
           {formatFieldValue(def, current)}
         </span>
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
+          className="w-8 px-0 text-[15px]"
+          aria-label={`Increase ${def.label}`}
           onClick={() => onApplyPatch(fieldPatch(def.key, clamp(current + def.step)))}
-          className="h-7 w-7 border border-border font-mono text-[12px] font-semibold text-bone hover:border-signal hover:text-signal"
         >
           +
-        </button>
+        </Button>
       </div>
     )
   }
@@ -381,10 +398,15 @@ function FieldControl({
     const current = String(effective[def.key] ?? '')
     const known = def.options.some((o) => o.value === current)
     return (
-      <select
+      <Select
         value={current}
-        onChange={(e) => onApplyPatch(fieldPatch(def.key, e.target.value))}
-        className="w-[210px] border border-border bg-background px-[10px] py-2 text-[12px] text-foreground outline-none focus:border-signal/50"
+        onChange={(e) =>
+          onApplyPatch(
+            fieldPatch(def.key, def.numeric ? Number(e.target.value) : e.target.value)
+          )
+        }
+        aria-label={def.label}
+        className="h-8 w-[200px] text-[13px]"
       >
         {def.options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -396,7 +418,7 @@ function FieldControl({
             show as itself rather than silently snapping to the first
             option. Mirrors ThemeFields.tsx's own "Custom value" guard. */}
         {!known && current && <option value={current}>Custom value</option>}
-      </select>
+      </Select>
     )
   }
 
@@ -405,18 +427,18 @@ function FieldControl({
   // pickField, up in ActiveOverrideEditor.
   const value = effectiveDisplayValue(def, effective)
   return (
-    <div className="flex min-w-0 items-center gap-[10px]">
-      <span className="truncate font-mono text-[11px] text-dim">
+    <div className="flex min-w-0 items-center gap-2.5">
+      <span className="min-w-0 max-w-[180px] truncate text-[13px] text-soft">
         {formatFieldValue(def, value)}
       </span>
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         className="shrink-0"
         onClick={onPickFile}
       >
-        CHOOSE…
+        Choose…
       </Button>
     </div>
   )

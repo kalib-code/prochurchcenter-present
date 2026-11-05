@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { THEME_FIELDS, formatFieldValue } from './themeFields'
 
 describe('THEME_FIELDS', () => {
-  it('covers the twelve overridable fields', () => {
-    expect(THEME_FIELDS).toHaveLength(12)
+  it('covers the fourteen overridable fields', () => {
+    expect(THEME_FIELDS).toHaveLength(14)
+  })
+
+  it('stores weight as a number and labels it by name', () => {
+    const weight = THEME_FIELDS.find((f) => f.key === 'fontWeight')!
+    expect(weight.kind === 'select' && weight.numeric).toBe(true)
+    expect(formatFieldValue(weight, 700)).toBe('Bold')
+    expect(formatFieldValue(weight, 600)).toBe('Semibold')
   })
 
   it('has a unique key per field', () => {
@@ -14,7 +21,7 @@ describe('THEME_FIELDS', () => {
   it('groups fields into the design’s six sections', () => {
     const groups = new Set(THEME_FIELDS.map((f) => f.group))
     expect(groups).toEqual(
-      new Set(['TYPE', 'BACKDROP', 'PLACEMENT', 'LEGIBILITY', 'MOTION', 'STANDBY'])
+      new Set(['Type', 'Backdrop', 'Placement', 'Legibility', 'Motion', 'Standby'])
     )
   })
 
@@ -49,7 +56,7 @@ describe('formatFieldValue', () => {
 
   it('shows the option label rather than the raw value for seg fields', () => {
     const align = THEME_FIELDS.find((f) => f.key === 'textAlign')!
-    expect(formatFieldValue(align, 'center')).toBe('CENTER')
+    expect(formatFieldValue(align, 'center')).toBe('Center')
   })
 
   it('renders a null file path as an em dash', () => {
@@ -71,7 +78,7 @@ describe('formatFieldValue', () => {
 
   it('shows the option label for a swatch field that matches a preset', () => {
     const textColor = THEME_FIELDS.find((f) => f.key === 'textColor')!
-    expect(formatFieldValue(textColor, '#FFFFFF')).toBe('WHITE')
+    expect(formatFieldValue(textColor, '#FFFFFF')).toBe('White')
   })
 
   it('falls back to the raw hex for a swatch field outside its presets', () => {

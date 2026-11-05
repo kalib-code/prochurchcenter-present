@@ -3,10 +3,8 @@
  * detects but can't (and shouldn't) fix silently: a PowerPoint deck that
  * failed to parse at entry, or a slide that failed to render mid-service.
  *
- * Rose/red, deliberately NOT amber: ServiceMode's items sidebar already uses
- * `bg-amber-400/10 text-amber-200` to mean "this is the active upcoming
- * item" (see ServiceMode.tsx). Reusing amber here would make a warning read
- * as "currently playing" instead of "something is wrong."
+ * Amber (`warn`): in the redesign amber means "needs attention" and red is
+ * reserved for ON AIR, so a warning can never be mistaken for live state.
  *
  * Operator-only by construction: this component only exists in the
  * ServiceMode module tree, which renders inside the operator's own
@@ -47,13 +45,13 @@ export function WarningBanner({
     <div
       role="alert"
       className={cn(
-        'flex flex-col gap-1 border-b border-rose-500/30 bg-rose-950/40 px-4 py-2',
+        'flex flex-col gap-1 border-b border-warn/25 bg-warn/10 px-4 py-2',
         className
       )}
     >
       {items.map((item) => (
-        <div key={item.id} className="flex items-start gap-2 text-xs text-rose-200">
-          <span aria-hidden="true" className="mt-0.5 shrink-0">
+        <div key={item.id} className="flex items-start gap-2 text-[13px] text-bone">
+          <span aria-hidden="true" className="mt-0.5 shrink-0 text-warn">
             ⚠
           </span>
           <span className="min-w-0 flex-1 leading-relaxed">{item.message}</span>
@@ -61,7 +59,7 @@ export function WarningBanner({
             <button
               type="button"
               onClick={() => onDismiss(item.id)}
-              className="shrink-0 text-rose-300/70 hover:text-rose-100"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
               aria-label="Dismiss warning"
             >
               ✕
