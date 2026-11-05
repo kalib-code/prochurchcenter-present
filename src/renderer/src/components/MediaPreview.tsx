@@ -25,10 +25,14 @@
  *     cache as the projector (pptxLoader.ts), so many pptx thumbnails
  *     pointing at the same file only parse it once.
  *
- * A 120 × 72 px box (classic 16:9 thumbnail aspect) is the default.
- * Override via the `className` prop if a caller wants bigger.
+ * A 120 × 72 px box (classic 16:9 thumbnail aspect) with `rounded-md`
+ * corners is the default. Override via the `className` prop if a caller
+ * wants a different size or radius (classes merge via `cn`, so e.g.
+ * `rounded-none` wins when a parent already clips the corners).
  *
  * Loading + error states are inline placeholders — no skeleton library.
+ * A thumbnail that can't be drawn shows an amber alert glyph: in the
+ * redesign amber means "needs attention" (usually missing media).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -36,6 +40,7 @@ import { cn } from '../lib/utils'
 import { loadPdfDocument } from '../lib/pdfLoader'
 import PptxSlideView, { type PptxSlideErrorKind } from './PptxSlideView'
 import { toMediaUrl } from '@shared/mediaUrl'
+import { AlertIcon, PlayIcon } from './icons'
 
 function fileUrl(path: string): string {
   // Shared encoder: encodeURI left `#`/`?` raw, breaking "Song #2.mp4".
@@ -103,13 +108,10 @@ export function MediaPreview({
   return (
     <div
       className={cn(
-        // Deliberately square: the project's binding constraint is zero
-        // border radius everywhere outside SlideRenderer.tsx and the
-        // output views. Every consumer (SetlistEditor's list thumbnails,
-        // Service Mode's SlideCard grid) relies on this default — do NOT
-        // reintroduce any Tailwind border-radius utility here, and
-        // consumers should not need a cancelling override to undo one.
-        'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden border border-border/50 bg-black',
+        // Soft 16:9 thumbnail (redesign: rounded-md for thumbnails). No
+        // outline — the black body already separates it from the
+        // charcoal surfaces around it.
+        'relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-black',
         className
       )}
     >
@@ -133,7 +135,7 @@ export function MediaPreview({
 
 function ImageThumb({ path }: { path: string }): JSX.Element {
   const [errored, setErrored] = useState(false)
-  if (errored) return <Placeholder label="image" />
+  if (errored) return <Placeholder label="Image" />
   return (
     <img
       src={fileUrl(path)}
@@ -152,7 +154,7 @@ function VideoThumb({ path }: { path: string }): JSX.Element {
   // the first frame without autoplay on most codecs.
   const src = `${fileUrl(path)}#t=0.1`
   const [errored, setErrored] = useState(false)
-  if (errored) return <Placeholder label="video" />
+  if (errored) return <Placeholder label="Video" />
   return (
     <div className="relative h-full w-full">
       <video
@@ -165,9 +167,10 @@ function VideoThumb({ path }: { path: string }): JSX.Element {
       />
       {/* Play-glyph badge so the operator immediately reads this as
           "video" rather than "weird static image" */}
-      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
-        ▶ video
-      </div>
+      <KindChip>
+        <PlayIcon size={9} />
+        Video
+      </KindChip>
     </div>
   )
 }
@@ -254,19 +257,17 @@ function PdfThumb({
     }
   }, [pdfPath, pageIndex])
 
-  if (error) return <Placeholder label="pdf" />
+  if (error) return <Placeholder label="PDF" />
 
   return (
     <div className="relative h-full w-full">
       <div ref={wrapperRef} className="flex h-full w-full items-center justify-center" />
       {!rendered && (
-        <div className="absolute inset-0 flex items-center justify-center text-[9px] uppercase tracking-wider text-muted-foreground/80">
-          loading…
+        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-muted-foreground">
+          Loading…
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
-        pdf
-      </div>
+      <KindChip>PDF</KindChip>
     </div>
   )
 }
@@ -402,7 +403,7 @@ function PptxThumb({
   return (
     <div ref={containerRef} className="relative h-full w-full">
       {errored ? (
-        <Placeholder label="pptx" />
+        <Placeholder label="PPTX" />
       ) : inView ? (
         <PptxSlideView
           pptxPath={pptxPath}
@@ -413,20 +414,32 @@ function PptxThumb({
           onError={handleError}
         />
       ) : null}
-      {/* Bottom-right badge is the only "pptx" label while off-screen —
+      {/* Bottom-right chip is the only "PPTX" label while off-screen —
           avoids showing the word twice in one small thumbnail. */}
-      <div className="pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-white/90">
-        pptx
-      </div>
+      <KindChip>PPTX</KindChip>
     </div>
   )
 }
 
-// ─── Placeholder ──────────────────────────────────────────────────────
+// ─── Kind chip + placeholder ──────────────────────────────────────────
 
+/** Bottom-right media-kind chip, legible over any thumbnail. */
+function KindChip({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <div className="pointer-events-none absolute bottom-1 right-1 inline-flex items-center gap-1 rounded bg-black/70 px-1 py-0.5 text-[11px] font-semibold leading-none text-white/90">
+      {children}
+    </div>
+  )
+}
+
+/** A thumbnail that couldn't be drawn: amber glyph = needs attention. */
 function Placeholder({ label }: { label: string }): JSX.Element {
   return (
-    <div className="flex h-full w-full items-center justify-center text-[9px] uppercase tracking-wider text-muted-foreground/60">
+    <div
+      className="flex h-full w-full flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"
+      title={`${label} preview unavailable — the file may be missing`}
+    >
+      <AlertIcon size={14} className="text-warn" />
       {label}
     </div>
   )

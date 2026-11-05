@@ -1,12 +1,3 @@
-/**
- * Segmented — joined button group for mode switches.
- *
- * LIVE/BLACK/LOGO, GROUPED/FLAT, DETAIL/COMPACT all use this shape: a
- * shared 1px container border with hairline dividers between children,
- * the active child filled signal. Generic over the value type so
- * callers keep their union types instead of stringly-typed modes.
- */
-
 import { cn } from '../../lib/utils'
 
 export interface SegmentedOption<T extends string> {
@@ -22,6 +13,7 @@ interface SegmentedProps<T extends string> {
   className?: string
 }
 
+/** Segmented control: a recessed track with a raised "thumb" on the active option. */
 export function Segmented<T extends string>({
   options,
   value,
@@ -29,11 +21,11 @@ export function Segmented<T extends string>({
   size = 'md',
   className
 }: SegmentedProps<T>): JSX.Element {
-  const pad = size === 'sm' ? 'px-[11px] py-1.5 text-[8.5px]' : 'px-[13px] py-2 text-[9px]'
+  const pad = size === 'sm' ? 'h-7 px-2.5 text-[12px]' : 'h-8 px-3 text-[13px]'
 
   return (
-    <span className={cn('inline-flex border border-border', className)}>
-      {options.map((opt, i) => {
+    <span className={cn('inline-flex rounded-lg bg-app p-0.5 ring-1 ring-border/70', className)}>
+      {options.map((opt) => {
         const active = opt.value === value
         return (
           <button
@@ -42,10 +34,12 @@ export function Segmented<T extends string>({
             onClick={() => onChange(opt.value)}
             aria-pressed={active}
             className={cn(
-              'font-mono font-semibold uppercase leading-none tracking-[0.1em] transition-colors',
+              'rounded-md font-medium leading-none transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
               pad,
-              i < options.length - 1 && 'border-r border-border',
-              active ? 'bg-signal text-white' : 'bg-transparent text-muted-foreground hover:text-white'
+              active
+                ? 'bg-hover text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
             )}
           >
             {opt.label}

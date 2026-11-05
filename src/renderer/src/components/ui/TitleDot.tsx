@@ -1,9 +1,8 @@
 /**
- * TitleDot — the signal-orange period that terminates every page title
- * in the design ("Songs.", "Settings.", "New Service."). A component
- * rather than a hand-typed span so the colour can never drift.
+ * TitleDot — retired. The old design ended every title with an orange
+ * period ("Songs."). The redesign drops it; this renders nothing so any
+ * remaining call site is harmless. Remove usages when touching a page.
  */
-
-export function TitleDot(): JSX.Element {
-  return <span className="text-signal">.</span>
+export function TitleDot(): null {
+  return null
 }

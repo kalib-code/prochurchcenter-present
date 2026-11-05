@@ -1,103 +1,108 @@
 /**
- * PreflightPanel — Home's readiness grid.
+ * PreflightPanel — Home's readiness checklist.
  *
- * Header: "PRE-FLIGHT" eyebrow, the rationale line, an "N OK · M WARNING"
- * chip, and RE-CHECK. Body: one cell per check in a HairlineGrid, each
- * with a status dot, status word, name, and detail.
+ * Header: "Pre-flight", a sentence-case summary ("2 ready · 2 need
+ * attention"), and Re-check. Body: one row per check — a status icon
+ * (green check / amber triangle), the check name and detail, and on
+ * warning rows the remedy as a secondary button.
  *
- * PreflightBanner is the hero's inline warning strip — it shows only the
- * FIRST warning, with its remedy button, because the hero has room for
- * one line and the panel below carries the rest.
+ * Warnings are amber (`warn`), never orange or red: red is reserved for
+ * ON AIR, orange for selection/brand.
  */
 
 import type { PreflightCheck, PreflightReport } from '@shared/ipc-contract'
 import { summarize } from '../lib/preflight'
-import { Badge } from './ui/Badge'
+import { cn } from '../lib/utils'
 import { Button } from './ui/Button'
-import { Panel } from './ui/Card'
-import { HairlineGrid } from './ui/HairlineGrid'
-import { MonoLabel } from './ui/MonoLabel'
-import { StatusDot } from './ui/StatusDot'
+import { AlertIcon, CheckIcon } from './icons'
 
-export function PreflightBanner({
-  check,
-  count,
-  onAct
-}: {
-  check: PreflightCheck
-  count: number
-  onAct: (check: PreflightCheck) => void
-}): JSX.Element {
-  return (
-    <div className="mb-[18px] flex items-center gap-3 border border-signal/50 bg-signal/[0.08] px-3.5 py-[11px]">
-      <MonoLabel tone="signal" size="xs" className="shrink-0">
-        {count} WARNING{count === 1 ? '' : 'S'}
-      </MonoLabel>
-      <span className="flex-1 text-[12px] text-bone">{check.detail}</span>
-      {check.remedy && (
-        <Button
-          size="sm"
-          onClick={() => onAct(check)}
-          className="shrink-0 border-signal text-signal hover:bg-signal hover:text-white"
-        >
-          {check.remedy.label}
-        </Button>
-      )}
-    </div>
-  )
+/** "3 ready" / "2 ready · 2 need attention" — sentence-case summary. */
+export function preflightSummaryText(checks: PreflightCheck[]): string {
+  const { okCount, warningCount } = summarize(checks)
+  if (warningCount === 0) return `${okCount} ready`
+  return `${okCount} ready · ${warningCount} need${warningCount === 1 ? 's' : ''} attention`
 }
 
 export function PreflightPanel({
   report,
   onRecheck,
+  onAct,
   busy = false
 }: {
   report: PreflightReport | null
   onRecheck: () => void
+  /** Runs a warning row's remedy. Rows show no remedy button without it. */
+  onAct?: (check: PreflightCheck) => void
   busy?: boolean
 }): JSX.Element | null {
   if (!report) return null
-  const { headline, warningCount } = summarize(report.checks)
+  const { warningCount } = summarize(report.checks)
 
   return (
-    <Panel
-      className="mb-[34px]"
-      title={
-        <span className="flex items-baseline gap-3.5">
-          <MonoLabel>PRE-FLIGHT</MonoLabel>
-          <span className="text-[12px] text-muted-foreground">
-            Checked on launch — Saturday night, not Sunday morning.
-          </span>
-        </span>
-      }
-      action={
-        <span className="flex items-center gap-2.5">
-          <Badge tone={warningCount > 0 ? 'signal' : 'ok'}>{headline}</Badge>
-          <Button size="sm" onClick={onRecheck} disabled={busy}>
-            {busy ? 'CHECKING…' : 'RE-CHECK'}
-          </Button>
-        </span>
-      }
-    >
-      {/* cols is the check COUNT, not a hardcoded 4 — the macOS-only
-          screenRecording check is absent on Windows and Linux, and the
-          grid has to stay even when it is. */}
-      <HairlineGrid cols={report.checks.length} className="border-l-0 border-t-0">
-        {report.checks.map((c) => (
-          <div key={c.id} className="px-[18px] py-4">
-            <span className="mb-2 flex items-center gap-2">
-              <StatusDot tone={c.status === 'ready' ? 'ok' : 'signal'} />
-              <MonoLabel tone={c.status === 'ready' ? 'muted' : 'signal'} size="xs">
-                {c.status === 'ready' ? 'READY' : 'ACTION NEEDED'}
-              </MonoLabel>
-            </span>
-            <span className="mb-1 block text-[13.5px] font-bold text-foreground">{c.name}</span>
-            <span className="block text-[11.5px] leading-[1.55] text-muted-foreground">
-              {c.detail}
+    <section aria-labelledby="preflight-heading">
+      <div className="mb-3 flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-3">
+            <h2 id="preflight-heading" className="text-[16px] font-semibold text-foreground">
+              Pre-flight
+            </h2>
+            <span
+              className={cn(
+                'text-[13px] tabular-nums',
+                warningCount > 0 ? 'text-warn' : 'text-ok'
+              )}
+            >
+              {preflightSummaryText(report.checks)}
             </span>
           </div>
-        ))}
-      </HairlineGrid>
-    </Panel>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Checked on launch — Saturday night, not Sunday morning.
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onRecheck} disabled={busy} className="shrink-0">
+          {busy ? 'Checking…' : 'Re-check'}
+        </Button>
+      </div>
+
+      {/* One row per check. The macOS-only screenRecording check is
+          absent on Windows and Linux; a list (unlike the old fixed-column
+          grid) needs no special handling for that. */}
+      <ul className="overflow-hidden rounded-xl bg-raised">
+        {report.checks.map((c) => {
+          const ready = c.status === 'ready'
+          return (
+            <li
+              key={c.id}
+              className="flex items-center gap-3.5 border-b border-rule px-4 py-3 last:border-b-0"
+            >
+              <span
+                className={cn(
+                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
+                  ready ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'
+                )}
+                aria-label={ready ? 'Ready' : 'Needs attention'}
+                role="img"
+              >
+                {ready ? <CheckIcon size={15} /> : <AlertIcon size={14} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-medium text-foreground">{c.name}</div>
+                <div className="text-[13px] leading-snug text-soft">{c.detail}</div>
+              </div>
+              {!ready && c.remedy && onAct && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onAct(c)}
+                  className="shrink-0"
+                >
+                  {c.remedy.label}
+                </Button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }

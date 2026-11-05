@@ -1,33 +1,39 @@
 /**
- * SetlistItemCard — renders one item in the setlist, per-kind.
+ * SetlistItemCard — renders one row of the run of show, per-kind.
+ *
+ * Layout (2026-11 redesign): a rounded row on the panel —
+ *   time · drag handle (hover) · 16:9 thumbnail · title + kind badge +
+ *   meta · hover-revealed duplicate/delete · minutes field.
+ * In Detail density the per-kind editing fields sit under the title line;
+ * Compact density shows the title line only.
  *
  * dnd-kit integration: this component is a sortable node. The drag
- * handle is the leading ⠿ glyph so clicking the delete button or typing
- * inside inline fields doesn't trigger a drag.
+ * handle is the grip next to the time, so clicking the delete button or
+ * typing inside inline fields doesn't trigger a drag. The handle is
+ * hidden until the row is hovered but stays keyboard-focusable.
  *
- * Section dividers render as a thin group-header bar rather than a full
- * card — they're grouping-only (skipped during playback AND excluded
- * from the running clock), so they shouldn't visually compete with the
- * actual items.
+ * Section dividers render as a labelled divider line rather than a row —
+ * they're grouping-only (skipped during playback AND excluded from the
+ * running clock), so they shouldn't visually compete with the actual
+ * items.
  *
  * Inline editing: scripture fields, countdown target, deck/pptx title — all
  * editable inline. Images, decks, and pptx items use the native file
  * picker. Song items show the resolved song title from the library
  * (read-only; edit the actual song in the library editor).
  *
- * Timing: the leading rail shows this item's computed clock time (from
- * `computeSchedule`, passed down as `at`); the trailing rail holds the
- * per-item duration-in-minutes input that feeds that computation.
+ * Timing: the leading column shows this item's computed clock time (from
+ * `computeSchedule`, passed down as `at`); the trailing minutes field
+ * feeds that computation.
  *
- * Media-missing: when the parent's `useMediaCheck` flags this item, a
- * signal-bordered banner offers RELINK, which reopens the native picker
- * (filtered to the right kind via `relinkKindOf`) and writes the result
- * back onto the item — re-probing the page count for decks, since the
- * replacement PDF may have a different length than the one that was
- * removed.
+ * Media-missing: when the parent's `useMediaCheck` flags this item, an
+ * amber banner offers Relink, which reopens the native picker (filtered
+ * to the right kind via `relinkKindOf`) and writes the result back onto
+ * the item — re-probing the page count for decks, since the replacement
+ * PDF may have a different length than the one that was removed.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { CanvaOrigin, SetlistItem, Song } from '@shared/types'
@@ -38,11 +44,13 @@ import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
 import { MediaPreview } from './MediaPreview'
 import { useBibleStore } from '../stores/useBibleStore'
 import { useCanvaStore } from '../stores/useCanvaStore'
-import { itemKindCode } from './ItemKindIcon'
+import { ItemKindIcon, itemKindLabel } from './ItemKindIcon'
 import { cn } from '../lib/utils'
 import { Badge } from './ui/Badge'
-import { MonoLabel } from './ui/MonoLabel'
 import { Button } from './ui/Button'
+import { Input, Select, Textarea } from './ui/Input'
+import { AlertIcon, CopyIcon, LinkChainIcon, TrashIcon } from './icons'
+import { DragHandle, IconButton, InlineLabel, InlineTextInput, ItemWarning } from './setlist/parts'
 import { isoToLocalInput, localInputToIso } from '../lib/datetimeLocal'
 import { packScripture } from '../lib/scriptureSlides'
 import { useSettingsStore } from '../stores/useSettingsStore'
@@ -61,6 +69,9 @@ function useLatest<T>(value: T): { readonly current: T } {
   ref.current = value
   return ref
 }
+
+/** Renders the row's title line around the given title node. */
+type HeadRenderer = (title: ReactNode) => JSX.Element
 
 interface SetlistItemCardProps {
   item: SetlistItem
@@ -104,52 +115,48 @@ export function SetlistItemCard({
     opacity: isDragging ? 0.5 : 1
   }
 
-  // Section dividers get their own thin-bar treatment so they read as
-  // "group header between real items" rather than "item #3". They never
-  // reach the projector and always contribute 0 to the running clock
-  // (enforced in computeSchedule), so they carry no duration/time UI.
+  // Section dividers get a labelled divider line so they read as "group
+  // header between real items" rather than "item #3". They never reach
+  // the projector and always contribute 0 to the running clock (enforced
+  // in computeSchedule), so they carry no duration/time UI.
   if (item.kind === 'section-divider') {
     return (
       <div
         ref={setNodeRef}
         style={style}
-        className="flex items-center gap-3 border-l-2 border-signal bg-panel-hi px-3.5 py-2.5"
+        className={cn(
+          'group relative flex items-center gap-3 rounded-lg px-3 pb-1 pt-4',
+          isDragging && 'z-10 bg-raised'
+        )}
       >
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-grab select-none font-mono text-[12px] text-dim active:cursor-grabbing"
-          aria-label="Drag to reorder"
-        >
-          ⠿
-        </div>
-        <MonoLabel tone="signal">SECTION</MonoLabel>
-        <input
-          type="text"
+        {/* Empty time column keeps the label aligned with row thumbnails. */}
+        <span className="w-11 flex-none" aria-hidden="true" />
+        <DragHandle {...attributes} {...listeners} />
+        <InlineTextInput
           value={item.label}
           onChange={(e) => onChange({ ...item, label: e.target.value })}
-          placeholder="Welcome / Worship / Sermon / Offering"
-          className="flex-1 bg-transparent font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-bone outline-none placeholder:normal-case placeholder:font-normal placeholder:tracking-normal placeholder:text-muted-foreground/60"
+          placeholder="Section name, e.g. Worship"
+          aria-label="Section name"
+          className="h-7 text-[13px] font-semibold text-quiet"
         />
-        <span className="whitespace-nowrap font-mono text-[10px] tracking-[0.06em] text-dim">
-          GROUPING ONLY · NOT PROJECTED
-        </span>
-        <button
-          type="button"
+        <span aria-hidden="true" className="h-px min-w-8 flex-1 bg-border" />
+        <span className="flex-none text-[12px] text-muted-foreground">Not projected</span>
+        <IconButton
+          label="Delete section"
+          tone="danger"
           onClick={onDelete}
-          className="font-mono text-[12px] text-dim hover:text-signal-deep"
-          aria-label="Delete section"
+          className="h-7 w-7 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
         >
-          ✕
-        </button>
+          <TrashIcon size={15} />
+        </IconButton>
       </div>
     )
   }
 
-  // Which kinds get a visual thumbnail instead of a flat kind-code box?
+  // Which kinds get a visual thumbnail instead of a kind glyph?
   // Media items (image, video, PDF deck, PowerPoint) show their real
   // preview once a file is chosen; everything else — and media items
-  // before a file has been picked — falls back to the flat code box.
+  // before a file has been picked — falls back to the kind glyph.
   const previewSource = getPreviewSource(item)
   const relinkKind = relinkKindOf(item)
 
@@ -184,15 +191,14 @@ export function SetlistItemCard({
   }
 
   const title = rowTitle(item, songsById)
-  const sourceLine = sourceLineFor(item, songsById)
   const slideCount = slideCountLabel(item, songsById, maxLines)
   const detail = density === 'detail'
-  // COMPACT rows have no room for the full MEDIA MISSING banner (that's
-  // the whole point of COMPACT density), but the count in the meta strip
-  // is unactionable on its own — there's no RELINK and no per-row marker
-  // to tell WHICH row it's talking about. A signal left border + a small
-  // Badge keeps the affected row findable without spending the vertical
-  // space a full banner needs.
+  // Compact rows have no room for the full media-missing banner (that's
+  // the whole point of Compact density), but the count in the header is
+  // unactionable on its own — there's no Relink and no per-row marker to
+  // tell WHICH row it's talking about. An amber ring + a small Badge keeps
+  // the affected row findable without spending the vertical space a full
+  // banner needs.
   const compactMissing = !detail && missing && Boolean(relinkKind)
   // A song item whose library entry is gone (deleted song): slideify
   // silently drops it, so flag it loudly here instead. Only once the
@@ -201,124 +207,124 @@ export function SetlistItemCard({
     item.kind === 'song' && libraryLoaded && !songsById.has(item.songId)
   const flagged = compactMissing || songMissing
 
+  const meta = detail ? detailMetaFor(item, songsById, slideCount) : slideCount
+  const metaTitle = mediaPathOf(item)
+
+  const head: HeadRenderer = (titleNode) => (
+    <div className="flex min-h-8 min-w-0 items-center gap-2.5">
+      {titleNode}
+      <Badge className="flex-none">{itemKindLabel(item.kind)}</Badge>
+      {meta && (
+        <span
+          className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground"
+          title={metaTitle ?? undefined}
+        >
+          {meta}
+        </span>
+      )}
+      {!detail && flagged && (
+        <Badge tone="warn" className="ml-auto flex-none">
+          <AlertIcon size={12} />
+          Missing
+        </Badge>
+      )}
+    </div>
+  )
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'flex items-center gap-4 border bg-card transition-colors',
-        detail ? 'p-3.5' : 'py-2.5 px-3.5',
-        flagged
-          ? // Side-specific border colors on every edge (not the general
-            // `border-border` utility) — mixing an all-sides border-color
-            // class with a side-specific `border-l-*` override on the same
-            // element is a genuine Tailwind cascade hazard (see
-            // ServiceMode.tsx's group-header comment for the full
-            // explanation): both compile to same-specificity rules, so
-            // whichever Tailwind emits LATER in the stylesheet wins,
-            // regardless of class order in this string.
-            'border-t-border border-r-border border-b-border border-l-2 border-l-signal hover:border-t-dim hover:border-r-dim hover:border-b-dim'
-          : 'border-border hover:border-dim'
+        'group relative flex gap-3 rounded-lg px-3 transition-colors',
+        detail ? 'items-start py-3' : 'items-center py-1.5',
+        flagged ? 'ring-1 ring-inset ring-warn/30' : '',
+        isDragging
+          ? 'z-10 bg-hover shadow-xl shadow-black/40'
+          : 'bg-raised/50 hover:bg-raised focus-within:bg-raised'
       )}
     >
-      {/* Leading rail: computed clock time above the drag handle. */}
-      <div className="flex w-[52px] flex-none flex-col items-center justify-center gap-[5px]">
-        <span className="font-mono text-[11px] font-semibold text-bone">{at}</span>
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-grab select-none font-mono text-[12px] text-dim transition-colors hover:text-soft active:cursor-grabbing"
-          aria-label="Drag to reorder"
-        >
-          ⠿
-        </div>
-      </div>
+      {/* Leading: computed clock time, then the drag handle. */}
+      <span className="flex h-8 w-11 flex-none items-center justify-end text-[13px] tabular-nums text-muted-foreground">
+        {at}
+      </span>
+      <DragHandle {...attributes} {...listeners} />
 
       {/* Thumbnail — detail mode only. */}
       {detail &&
         (previewSource ? (
-          <MediaPreview source={previewSource} className="h-[60px] w-[104px]" />
+          <MediaPreview
+            source={previewSource}
+            className="h-[63px] w-[112px] rounded-lg border-0 bg-black"
+          />
         ) : (
-          <div className="flex h-[60px] w-[104px] flex-none items-center justify-center border border-border bg-black font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-dim">
-            {itemKindCode(item.kind)}
+          <div className="flex h-[63px] w-[112px] flex-none items-center justify-center rounded-lg bg-app text-muted-foreground">
+            <ItemKindIcon kind={item.kind} size={22} />
           </div>
         ))}
 
       {/* Body */}
       <div className="min-w-0 flex-1">
-        <div className="mb-2 flex items-center gap-2.5">
-          <Badge tone="signal" className="flex-none">
-            {itemKindCode(item.kind)}
-          </Badge>
-          {detail && sourceLine && (
-            <span className="truncate font-mono text-[11.5px] text-muted-foreground">
-              {sourceLine}
-            </span>
-          )}
-          {!detail && (
-            <>
-              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-                {title}
-              </span>
-              {flagged && (
-                <Badge tone="signal" className="flex-none">
-                  MISSING
-                </Badge>
-              )}
-              {slideCount && (
-                <span className="flex-none font-mono text-[9px] font-medium tracking-[0.08em] text-dim">
-                  {slideCount}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-
-        {detail && (
+        {detail ? (
           <ItemBody
             item={item}
             songsById={songsById}
             onChange={onChange}
             staleDesignIds={staleDesignIds}
+            head={head}
           />
+        ) : (
+          head(
+            <span
+              className={cn(
+                'min-w-0 shrink truncate text-[14px] font-medium',
+                songMissing ? 'text-warn' : 'text-foreground'
+              )}
+            >
+              {title}
+            </span>
+          )
         )}
 
         {detail && songMissing && (
-          <div className="mt-2.5 flex items-center gap-2.5 border border-signal/50 bg-signal/[0.08] px-[11px] py-2">
-            <MonoLabel tone="signal" className="flex-none">
-              SONG MISSING
-            </MonoLabel>
-            <span className="flex-1 text-[11.5px] text-bone">
-              This song was deleted from the library. It will be skipped in service — remove it or add the song again.
-            </span>
-          </div>
+          <ItemWarning title="Song missing">
+            This song was deleted from the library and will be skipped in service. Remove it or
+            add the song again.
+          </ItemWarning>
         )}
 
         {detail && missing && relinkKind && (
-          <div className="mt-2.5 flex items-center gap-2.5 border border-signal/50 bg-signal/[0.08] px-[11px] py-2">
-            <MonoLabel tone="signal" className="flex-none">
-              MEDIA MISSING
-            </MonoLabel>
-            <span className="flex-1 text-[11.5px] text-bone">
-              The file moved since you added it. This item will be skipped in service.
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-none border-signal text-signal hover:border-signal hover:bg-signal hover:text-white"
-              onClick={() => void handleRelink()}
-            >
-              RELINK
-            </Button>
-          </div>
+          <ItemWarning
+            title="Media missing"
+            action={
+              <Button
+                variant="secondary"
+                size="sm"
+                className="flex-none"
+                onClick={() => void handleRelink()}
+              >
+                <LinkChainIcon size={14} />
+                Relink
+              </Button>
+            }
+          >
+            The file moved since you added it, so this item will be skipped in service.
+          </ItemWarning>
         )}
-
       </div>
 
-      {/* Trailing rail: duration + duplicate/delete. */}
-      <div className="flex w-[112px] flex-none flex-col items-end gap-2">
-        <div className="flex items-center gap-1.5">
-          <input
+      {/* Trailing: hover-revealed duplicate/delete, then the duration. */}
+      <div className="flex h-8 flex-none items-center gap-0.5">
+        <div className="flex items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <IconButton label="Duplicate item" onClick={onDuplicate}>
+            <CopyIcon size={16} />
+          </IconButton>
+          <IconButton label="Delete item" tone="danger" onClick={onDelete}>
+            <TrashIcon size={16} />
+          </IconButton>
+        </div>
+        <label className="ml-2 flex items-center gap-1.5">
+          <Input
             type="number"
             inputMode="numeric"
             min={0}
@@ -335,28 +341,11 @@ export function SetlistItemCard({
               onChange({ ...item, durationMinutes: Math.max(0, Math.floor(n)) })
             }}
             aria-label="Duration in minutes"
-            className="w-[52px] border border-border bg-background px-[7px] py-1.5 text-center font-mono text-[11px] text-bone outline-none focus:border-signal/60"
+            placeholder="0"
+            className="h-8 w-12 px-1.5 text-center text-[13px] tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
-          <MonoLabel size="xs" tone="dim">
-            MIN
-          </MonoLabel>
-        </div>
-        <div className="flex gap-2.5">
-          <button
-            type="button"
-            onClick={onDuplicate}
-            className="font-mono text-[9px] font-semibold uppercase tracking-[0.1em] text-dim hover:text-white"
-          >
-            DUPLICATE
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="font-mono text-[9px] font-semibold uppercase tracking-[0.1em] text-dim hover:text-signal-deep"
-          >
-            DELETE
-          </button>
-        </div>
+          <span className="text-[13px] text-muted-foreground">min</span>
+        </label>
       </div>
     </div>
   )
@@ -364,7 +353,7 @@ export function SetlistItemCard({
 
 /**
  * Return the MediaPreview source for items that have visual content,
- * or null for items that should keep the flat kind-code box.
+ * or null for items that should keep the kind glyph.
  * Items missing their path (e.g. a brand-new image item before the
  * user has picked a file) don't get a preview either.
  */
@@ -393,12 +382,12 @@ function getPreviewSource(
   return null
 }
 
-/** Compact-mode single-line title, and the detail-mode fallback label. */
+/** Compact-mode single-line title. */
 function rowTitle(item: SetlistItem, songsById: Map<string, Song>): string {
   switch (item.kind) {
     case 'song': {
       const song = songsById.get(item.songId)
-      return song ? song.title : '(missing song)'
+      return song ? song.title : 'Missing song'
     }
     case 'scripture':
       return item.reference.trim() || 'Scripture'
@@ -417,12 +406,32 @@ function rowTitle(item: SetlistItem, songsById: Map<string, Song>): string {
   }
 }
 
+/** Full path of the item's backing file, for the meta line's tooltip. */
+function mediaPathOf(item: SetlistItem): string | null {
+  switch (item.kind) {
+    case 'image':
+      return item.imagePath || null
+    case 'video':
+      return item.videoPath || null
+    case 'deck':
+      return item.pdfPath || null
+    case 'pptx':
+      return item.pptxPath || null
+    default:
+      return null
+  }
+}
+
 /**
- * The small mono "byline" shown next to the kind badge in detail mode —
- * the source filename for media items, or the closest analogous detail
- * for everything else. Null means "nothing to show here".
+ * The muted meta shown after the kind badge in detail mode — the source
+ * filename for media items, or the closest analogous detail for
+ * everything else. Null means "nothing to show here".
  */
-function sourceLineFor(item: SetlistItem, songsById: Map<string, Song>): string | null {
+function detailMetaFor(
+  item: SetlistItem,
+  songsById: Map<string, Song>,
+  slideCount: string | null
+): string | null {
   switch (item.kind) {
     case 'image':
       return item.imagePath ? displayFileName(item.imagePath) : null
@@ -439,89 +448,95 @@ function sourceLineFor(item: SetlistItem, songsById: Map<string, Song>): string 
         ? `${displayFileName(item.pptxPath)} · ${item.slideCount} slide${item.slideCount === 1 ? '' : 's'}`
         : null
     case 'song': {
-      const song = songsById.get(item.songId)
-      return song?.author?.trim() || null
+      const author = songsById.get(item.songId)?.author?.trim()
+      return [author, slideCount].filter(Boolean).join(' · ') || null
     }
     case 'scripture':
-      return item.translation || null
+      return slideCount
     case 'countdown':
     case 'section-divider':
       return null
   }
 }
 
-/** Compact-mode slide-count readout, or null when a kind has none. */
+/** Slide-count readout ("5 slides"), or null when a kind has none. */
 function slideCountLabel(
   item: SetlistItem,
   songsById: Map<string, Song>,
   maxLines: number
 ): string | null {
+  const plural = (n: number): string => `${n} slide${n === 1 ? '' : 's'}`
   switch (item.kind) {
     case 'song': {
       const song = songsById.get(item.songId)
       if (!song) return null
-      const n = song.sections.reduce((sum, s) => sum + s.slides.length, 0)
-      return `${n} SLIDE${n === 1 ? '' : 'S'}`
+      return plural(song.sections.reduce((sum, s) => sum + s.slides.length, 0))
     }
     case 'deck':
-      return `${item.pageCount} SLIDE${item.pageCount === 1 ? '' : 'S'}`
+      return plural(item.pageCount)
     case 'pptx':
-      return `${item.slideCount} SLIDE${item.slideCount === 1 ? '' : 'S'}`
+      return plural(item.slideCount)
     case 'scripture': {
       const text = item.text.trim()
       if (!text) return null
       // Must match slideify's scripture packing, or the badge says
-      // "1 SLIDE" for a chapter the service splits across many.
+      // "1 slide" for a chapter the service splits across many.
       const n = packScripture(text, maxLines).length
-      return n > 0 ? `${n} SLIDE${n === 1 ? '' : 'S'}` : null
+      return n > 0 ? plural(n) : null
     }
     case 'image':
     case 'video':
     case 'countdown':
-      return '1 SLIDE'
+      return '1 slide'
     case 'section-divider':
       return null
   }
+}
+
+/** One row of secondary controls under the title line. */
+function FieldRow({ children }: { children: ReactNode }): JSX.Element {
+  return <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">{children}</div>
+}
+
+function Hint({ children }: { children: ReactNode }): JSX.Element {
+  return <p className="mt-1.5 text-[13px] text-muted-foreground">{children}</p>
 }
 
 function ItemBody({
   item,
   songsById,
   onChange,
-  staleDesignIds
+  staleDesignIds,
+  head
 }: {
   item: SetlistItem
   songsById: Map<string, Song>
   onChange: (patch: SetlistItem) => void
   staleDesignIds?: string[]
+  head: HeadRenderer
 }): JSX.Element {
   const latest = useLatest(item)
 
   if (item.kind === 'song') {
     const song = songsById.get(item.songId)
-    return (
-      <div>
-        <div
-          className={cn(
-            'text-[13.5px] font-medium',
-            song ? 'text-foreground' : 'text-signal'
-          )}
-        >
-          {song ? song.title : '(missing song)'}
-        </div>
-        {song?.author && (
-          <div className="text-[11.5px] text-muted-foreground">{song.author}</div>
+    return head(
+      <span
+        className={cn(
+          'min-w-0 shrink truncate text-[14px] font-medium',
+          song ? 'text-foreground' : 'text-warn'
         )}
-      </div>
+      >
+        {song ? song.title : 'Missing song'}
+      </span>
     )
   }
 
   if (item.kind === 'scripture') {
-    return <ScriptureEditor item={item} onChange={onChange} />
+    return <ScriptureEditor item={item} onChange={onChange} head={head} />
   }
 
   if (item.kind === 'section-divider') {
-    // Handled at the parent level with the thin-bar layout.
+    // Handled at the parent level with the divider-line layout.
     return <></>
   }
 
@@ -533,21 +548,20 @@ function ItemBody({
     }
 
     return (
-      <div className="flex flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={() => void handlePick()}
-          className="w-fit border border-border bg-background px-2.5 py-1 text-[11px] text-soft hover:border-dim"
-        >
-          {item.imagePath ? 'Change image…' : 'Choose image…'}
-        </button>
-        <input
-          type="text"
-          value={item.caption ?? ''}
-          onChange={(e) => onChange({ ...item, caption: e.target.value })}
-          placeholder="Caption (optional)"
-          className="w-full border border-border bg-background px-2 py-1.5 text-[13.5px] text-foreground outline-none focus:border-signal/50"
-        />
+      <div>
+        {head(
+          <InlineTextInput
+            value={item.caption ?? ''}
+            onChange={(e) => onChange({ ...item, caption: e.target.value })}
+            placeholder="Caption (optional)"
+            aria-label="Image caption"
+          />
+        )}
+        <FieldRow>
+          <Button variant="secondary" size="sm" onClick={() => void handlePick()}>
+            {item.imagePath ? 'Change image…' : 'Choose image…'}
+          </Button>
+        </FieldRow>
       </div>
     )
   }
@@ -568,35 +582,32 @@ function ItemBody({
     const loop = item.loop ?? true
 
     return (
-      <div className="flex flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={() => void handlePick()}
-          className="w-fit border border-border bg-background px-2.5 py-1 text-[11px] text-soft hover:border-dim"
-        >
-          {item.videoPath ? 'Change video…' : 'Choose video…'}
-        </button>
-        <input
-          type="text"
-          value={item.title ?? ''}
-          onChange={(e) => onChange({ ...item, title: e.target.value })}
-          placeholder="Video title (e.g. Sermon Intro — Philippians)"
-          className="w-full border border-border bg-background px-2 py-1.5 text-[13.5px] text-foreground outline-none focus:border-signal/50"
-        />
-        <label className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={loop}
-            onChange={(e) => onChange({ ...item, loop: e.target.checked })}
-            className="h-3.5 w-3.5 border-border bg-background accent-signal"
+      <div>
+        {head(
+          <InlineTextInput
+            value={item.title ?? ''}
+            onChange={(e) => onChange({ ...item, title: e.target.value })}
+            placeholder="Video title, e.g. Sermon intro"
+            aria-label="Video title"
           />
-          <span>
-            Loop continuously
-            <span className="ml-1 text-muted-foreground/70">
-              — uncheck to auto-advance when the video finishes
+        )}
+        <FieldRow>
+          <Button variant="secondary" size="sm" onClick={() => void handlePick()}>
+            {item.videoPath ? 'Change video…' : 'Choose video…'}
+          </Button>
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-soft">
+            <input
+              type="checkbox"
+              checked={loop}
+              onChange={(e) => onChange({ ...item, loop: e.target.checked })}
+              className="h-4 w-4 cursor-pointer rounded accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            />
+            <span>
+              Loop continuously
+              <span className="text-muted-foreground"> · off moves on when it ends</span>
             </span>
-          </span>
-        </label>
+          </label>
+        </FieldRow>
       </div>
     )
   }
@@ -606,7 +617,14 @@ function ItemBody({
     // below) — the in-flight `refreshing` guard needs a `useState`, and
     // ItemBody's if/else switch cannot host a hook that only some
     // branches would call.
-    return <DeckEditor item={item} onChange={onChange} staleDesignIds={staleDesignIds} />
+    return (
+      <DeckEditor
+        item={item}
+        onChange={onChange}
+        staleDesignIds={staleDesignIds}
+        head={head}
+      />
+    )
   }
 
   if (item.kind === 'countdown') {
@@ -615,25 +633,31 @@ function ItemBody({
     // so every edit shifted the target by the zone offset — 8h in Manila).
     const localValue = isoToLocalInput(item.targetTime)
     return (
-      <div className="flex flex-col gap-1.5">
-        <input
-          type="text"
-          value={item.label}
-          onChange={(e) => onChange({ ...item, label: e.target.value })}
-          placeholder="Service starts in…"
-          className="w-full border border-border bg-background px-2 py-1.5 text-[13.5px] text-foreground outline-none focus:border-signal/50"
-        />
-        <input
-          type="datetime-local"
-          value={localValue}
-          onChange={(e) => {
-            // Cleared / partial input → null; ignore it rather than throw
-            // (new Date('').toISOString() is a RangeError) or save garbage.
-            const iso = localInputToIso(e.target.value)
-            if (iso) onChange({ ...item, targetTime: iso })
-          }}
-          className="w-full border border-border bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus:border-signal/50 [color-scheme:dark]"
-        />
+      <div>
+        {head(
+          <InlineTextInput
+            value={item.label}
+            onChange={(e) => onChange({ ...item, label: e.target.value })}
+            placeholder="Service starts in…"
+            aria-label="Countdown label"
+          />
+        )}
+        <FieldRow>
+          <label className="flex items-center gap-2">
+            <InlineLabel>Counts down to</InlineLabel>
+            <Input
+              type="datetime-local"
+              value={localValue}
+              onChange={(e) => {
+                // Cleared / partial input → null; ignore it rather than throw
+                // (new Date('').toISOString() is a RangeError) or save garbage.
+                const iso = localInputToIso(e.target.value)
+                if (iso) onChange({ ...item, targetTime: iso })
+              }}
+              className="h-8 w-auto px-2.5 text-[13px] tabular-nums"
+            />
+          </label>
+        </FieldRow>
       </div>
     )
   }
@@ -675,40 +699,25 @@ function ItemBody({
     }
 
     return (
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handlePick}
-            className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
-          >
+      <div>
+        {head(
+          <InlineTextInput
+            value={item.title ?? ''}
+            onChange={(e) => onChange({ ...item, title: e.target.value })}
+            placeholder="PowerPoint title (optional)"
+            aria-label="PowerPoint title"
+          />
+        )}
+        <FieldRow>
+          <Button variant="secondary" size="sm" onClick={() => void handlePick()}>
             {item.pptxPath ? 'Change PowerPoint…' : 'Choose PowerPoint…'}
-          </button>
-          {item.pptxPath && (
-            <>
-              <span
-                className="truncate text-[11px] text-muted-foreground"
-                title={item.pptxPath}
-              >
-                {displayFileName(item.pptxPath)}
-              </span>
-              <span className="text-[11px] text-muted-foreground/70">
-                · {item.slideCount} slide{item.slideCount === 1 ? '' : 's'}
-              </span>
-            </>
-          )}
-        </div>
-        <input
-          type="text"
-          value={item.title ?? ''}
-          onChange={(e) => onChange({ ...item, title: e.target.value })}
-          placeholder="PowerPoint title (optional)"
-          className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
-        />
+          </Button>
+        </FieldRow>
         {!item.pptxPath && (
-          <p className="text-[11px] text-muted-foreground/80">
-            Projects directly — no PDF export needed. Only .pptx files work
-            (not the older .ppt format).
-          </p>
+          <Hint>
+            Projects directly, no PDF export needed. Only .pptx files work (not the older .ppt
+            format).
+          </Hint>
         )}
       </div>
     )
@@ -733,11 +742,13 @@ type DeckItem = Extract<SetlistItem, { kind: 'deck' }>
 function DeckEditor({
   item,
   onChange,
-  staleDesignIds
+  staleDesignIds,
+  head
 }: {
   item: DeckItem
   onChange: (next: DeckItem) => void
   staleDesignIds?: string[]
+  head: HeadRenderer
 }): JSX.Element {
   const latest = useLatest(item)
 
@@ -863,59 +874,40 @@ function DeckEditor({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handlePick}
-          className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border"
-        >
+    <div>
+      {head(
+        <InlineTextInput
+          value={item.title ?? ''}
+          onChange={(e) => onChange({ ...item, title: e.target.value })}
+          placeholder="Deck title, e.g. Sermon — Romans 12"
+          aria-label="Deck title"
+        />
+      )}
+      <FieldRow>
+        <Button variant="secondary" size="sm" onClick={() => void handlePick()}>
           {item.pdfPath ? 'Change PDF…' : 'Choose PDF…'}
-        </button>
-        {item.pdfPath && (
-          <>
-            <span
-              className="truncate text-[11px] text-muted-foreground"
-              title={item.pdfPath}
-            >
-              {displayFileName(item.pdfPath)}
-            </span>
-            <span className="text-[11px] text-muted-foreground/70">
-              · {item.pageCount} page{item.pageCount === 1 ? '' : 's'}
-            </span>
-          </>
-        )}
+        </Button>
+        {/* Canva-only UI (hidden while FEATURES.canva is off). */}
         {origin && (
           <>
-            <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              From Canva
-            </span>
-            {isStale && (
-              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] text-brand">
-                Updated in Canva
-              </span>
-            )}
-            <button
+            <Badge>From Canva</Badge>
+            {isStale && <Badge tone="warn">Updated in Canva</Badge>}
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => void handleRefresh()}
               disabled={refreshing}
-              className="rounded-md border border-border/60 bg-background px-2.5 py-1 text-xs hover:border-border disabled:opacity-60"
             >
               {refreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
+            </Button>
           </>
         )}
-      </div>
-      <input
-        type="text"
-        value={item.title ?? ''}
-        onChange={(e) => onChange({ ...item, title: e.target.value })}
-        placeholder="Deck title (e.g. Sermon — Romans 12)"
-        className="w-full rounded border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-border"
-      />
+      </FieldRow>
       {!item.pdfPath && (
-        <p className="text-[11px] text-muted-foreground/80">
-          Export your PowerPoint, Keynote, or Google Slides to PDF first,
-          then pick it here. Each PDF page becomes one slide.
-        </p>
+        <Hint>
+          Export your PowerPoint, Keynote, or Google Slides to PDF first, then pick it here. Each
+          PDF page becomes one slide.
+        </Hint>
       )}
     </div>
   )
@@ -954,10 +946,12 @@ interface ScriptureItem {
 
 function ScriptureEditor({
   item,
-  onChange
+  onChange,
+  head
 }: {
   item: ScriptureItem
   onChange: (next: ScriptureItem) => void
+  head: HeadRenderer
 }): JSX.Element {
   const { translations, loading: translationsLoading, loadTranslations } =
     useBibleStore()
@@ -1023,26 +1017,28 @@ function ScriptureEditor({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-stretch gap-2">
-        <input
-          type="text"
+    <div>
+      {head(
+        <InlineTextInput
           value={item.reference}
           onChange={(e) => onChange({ ...item, reference: e.target.value })}
           onKeyDown={handleReferenceKeyDown}
-          placeholder="John 3:16  or  Romans 12:1-3"
-          className="flex-1 border border-border bg-background px-2 py-1.5 text-[13.5px] text-foreground outline-none focus:border-signal/50"
+          placeholder="Reference, e.g. John 3:16 or Romans 12:1-3"
+          aria-label="Scripture reference"
         />
-        <select
+      )}
+      <FieldRow>
+        <Select
           value={item.translation}
           onChange={(e) => onChange({ ...item, translation: e.target.value })}
           disabled={translationsLoading || translations.length === 0}
+          aria-label="Bible translation"
           title={
             translationsLoading
               ? 'Loading translations…'
               : 'Pick a Bible translation'
           }
-          className="w-32 border border-border bg-background px-1 text-[11px] text-foreground outline-none focus:border-signal/50 disabled:opacity-50"
+          className="h-8 w-auto max-w-[280px] text-[13px]"
         >
           {translations.length === 0 ? (
             <option value="">
@@ -1055,25 +1051,29 @@ function ScriptureEditor({
               </option>
             ))
           )}
-        </select>
-        <button
-          type="button"
+        </Select>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => void handleLookup()}
           disabled={lookupBusy || !item.reference.trim() || !item.translation}
-          className="border border-signal/40 bg-signal/10 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-signal hover:bg-signal/20 disabled:opacity-40"
           title="Look up this reference (Enter)"
         >
-          {lookupBusy ? '…' : 'Lookup'}
-        </button>
-      </div>
-      {lookupError && (
-        <p className="text-[11px] text-destructive">{lookupError}</p>
-      )}
-      <textarea
+          {lookupBusy ? 'Looking up…' : 'Look up'}
+        </Button>
+        {lookupError && (
+          <p className="flex items-center gap-1.5 text-[13px] text-warn">
+            <AlertIcon size={14} className="flex-none" />
+            {lookupError}
+          </p>
+        )}
+      </FieldRow>
+      <Textarea
         value={item.text}
         onChange={(e) => onChange({ ...item, text: e.target.value })}
-        placeholder="Verse text — fill via Lookup or paste manually"
-        className="min-h-[60px] w-full border border-border bg-background px-2 py-1.5 text-[13.5px] text-foreground outline-none focus:border-signal/50"
+        placeholder="Verse text. Fill it with Look up or paste it in."
+        aria-label="Verse text"
+        className="mt-2 min-h-[72px] text-[13.5px]"
       />
     </div>
   )

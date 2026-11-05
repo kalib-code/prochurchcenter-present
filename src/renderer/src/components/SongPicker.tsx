@@ -17,6 +17,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Song } from '@shared/types'
+import { Input } from './ui/Input'
+import { SearchIcon } from './icons'
 
 interface SongPickerProps {
   songs: Song[]
@@ -43,32 +45,43 @@ export function SongPicker({ songs, onPick }: SongPickerProps): JSX.Element {
 
   return (
     <div className="w-full">
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search songs…"
-        className="w-full border border-border bg-background px-3 py-2 text-[13px] text-foreground outline-none focus:border-signal/50"
-      />
-      <ul className="mt-2 max-h-72 overflow-y-auto border border-border">
+      <div className="relative">
+        <SearchIcon
+          size={16}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search songs…"
+          aria-label="Search songs"
+          className="pl-9"
+        />
+      </div>
+      <ul className="scroll-hairline mt-2 flex max-h-72 flex-col gap-0.5 overflow-y-auto">
         {filtered.length === 0 && (
-          <li className="px-3 py-2 text-[12px] text-muted-foreground">
+          <li className="px-3 py-2 text-[13px] text-muted-foreground">
             {songs.length === 0
               ? 'No songs in library yet.'
               : `No songs match "${query}".`}
           </li>
         )}
         {filtered.map((song) => (
-          <li key={song.id} className="border-b border-rule last:border-b-0">
+          <li key={song.id}>
             <button
               type="button"
               onClick={() => onPick(song.id)}
-              className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-panel-hi"
+              className="flex w-full items-baseline gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
             >
-              <span className="text-[13px] font-medium text-foreground">{song.title}</span>
+              <span className="min-w-0 truncate text-[14px] font-medium text-foreground">
+                {song.title}
+              </span>
               {song.author && (
-                <span className="text-[11px] text-muted-foreground">{song.author}</span>
+                <span className="min-w-0 truncate text-[13px] text-muted-foreground">
+                  {song.author}
+                </span>
               )}
             </button>
           </li>

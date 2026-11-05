@@ -1,15 +1,6 @@
-/**
- * StatusDot — 7px circle used by NEXT UP, ON SCREEN, pre-flight rows,
- * and the saved-state pills.
- *
- * This is the ONLY component in the redesign allowed to use
- * `rounded-full`. Everything else is square by design; the design file
- * uses `border-radius:50%` here specifically.
- */
-
 import { cn } from '../../lib/utils'
 
-type Tone = 'signal' | 'ok' | 'dim'
+type Tone = 'signal' | 'accent' | 'ok' | 'warn' | 'live' | 'dim'
 
 interface StatusDotProps {
   tone?: Tone
@@ -19,21 +10,20 @@ interface StatusDotProps {
 }
 
 const TONES: Record<Tone, string> = {
-  signal: 'bg-signal',
+  signal: 'bg-accent',
+  accent: 'bg-accent',
   ok: 'bg-ok',
+  warn: 'bg-warn',
+  live: 'bg-live',
   dim: 'bg-dim'
 }
 
-export function StatusDot({
-  tone = 'signal',
-  pulse = false,
-  className
-}: StatusDotProps): JSX.Element {
+export function StatusDot({ tone = 'accent', pulse = false, className }: StatusDotProps): JSX.Element {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        'inline-block h-[7px] w-[7px] shrink-0 rounded-full',
+        'inline-block h-2 w-2 shrink-0 rounded-full',
         TONES[tone],
         pulse === 'fast' && 'animate-pulse-signal-fast',
         pulse === true && 'animate-pulse-signal',

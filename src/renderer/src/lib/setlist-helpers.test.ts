@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Setlist, SetlistItem } from '@shared/types'
 import {
+  itemIssue,
   itemsWithoutSong,
   pickCloneSource,
   pickHero,
   setlistsUsingSong,
-  songDeleteConfirmText
+  songDeleteConfirmText,
+  splitByDate
 } from './setlist-helpers'
 
 function setlist(id: string, date: string): Setlist {
@@ -105,5 +107,34 @@ describe('deleting a song used in setlists', () => {
 
   it('keeps the plain confirm text when no setlist uses the song', () => {
     expect(songDeleteConfirmText('Amazing Grace', [])).toBe('Delete "Amazing Grace"?')
+  })
+})
+
+describe('splitByDate', () => {
+  it('splits around today, excluding the hero, sorted toward today', () => {
+    const all = [
+      setlist('past1', '2026-10-25'),
+      setlist('hero', '2026-11-08'),
+      setlist('today', '2026-11-05'),
+      setlist('future', '2026-11-15'),
+      setlist('past2', '2026-11-01')
+    ]
+    const { upcoming, past } = splitByDate(all, 'hero', '2026-11-05')
+    expect(upcoming.map((s) => s.id)).toEqual(['today', 'future'])
+    expect(past.map((s) => s.id)).toEqual(['past2', 'past1'])
+  })
+})
+
+describe('itemIssue', () => {
+  const songs = new Map([['s1', {}]])
+  it('flags songs missing from the library', () => {
+    expect(itemIssue({ kind: 'song', id: 'i', songId: 'gone' }, songs, {}, null)).toBe('missing-song')
+    expect(itemIssue({ kind: 'song', id: 'i', songId: 's1' }, songs, {}, null)).toBeNull()
+  })
+  it('flags media only once the check says it is gone', () => {
+    const item: SetlistItem = { kind: 'image', id: 'i', imagePath: '/a.png' }
+    expect(itemIssue(item, songs, {}, '/a.png')).toBeNull()
+    expect(itemIssue(item, songs, { '/a.png': true }, '/a.png')).toBeNull()
+    expect(itemIssue(item, songs, { '/a.png': false }, '/a.png')).toBe('missing-media')
   })
 })

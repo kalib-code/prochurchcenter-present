@@ -1,7 +1,7 @@
 /**
  * KeyCheatSheet — overlay shown in Service Mode when the user presses `?`.
  * A quick reference so a new volunteer can see what every key does
- * without having to memorize anything. KLB-styled per design L680–695.
+ * without having to memorize anything.
  *
  * Deliberately dead-simple: big type, high contrast, no icons, nothing
  * to learn. Matches the Ate Rose principle ("Kaya ba ni Ate Rose nang
@@ -15,7 +15,7 @@
  */
 
 import { Panel } from './ui/Card'
-import { MonoLabel } from './ui/MonoLabel'
+import { Kbd } from './service/Kbd'
 
 interface KeyCheatSheetProps {
   onClose: () => void
@@ -26,52 +26,71 @@ interface KeyCheatSheetProps {
 // ServiceMode.tsx's RunningView. Keeping this list in sync with both
 // is manual; it is the ONE place a volunteer looks, so an omission
 // here is a real gap even though it doesn't break functionality.
-const SHORTCUTS: Array<[string, string]> = [
-  ['SPACE / →', 'Next slide'],
-  ['SHIFT + SPACE / ←', 'Previous slide'],
-  ['↓', 'Next item (skip forward)'],
-  ['↑', 'Previous item (rewind)'],
-  ['B', 'Blackout on/off'],
-  ['L', 'Logo/standby on/off'],
-  ['P', 'Pause/resume the active video'],
-  ['M', 'Mute/unmute the active video'],
-  ['?', 'Show / hide this cheat sheet'],
-  ['ESC', 'Exit service']
+//
+// Each entry is a list of alternatives; each alternative is a list of
+// keys pressed together (rendered "Shift + Space").
+const SHORTCUTS: Array<[string[][], string]> = [
+  [[['Space'], ['→']], 'Next slide'],
+  [[['Shift', 'Space'], ['←']], 'Previous slide'],
+  [[['↓']], 'Next item (skip forward)'],
+  [[['↑']], 'Previous item (rewind)'],
+  [[['B']], 'Blackout on/off'],
+  [[['L']], 'Logo/standby on/off'],
+  [[['P']], 'Pause/resume the active video'],
+  [[['M']], 'Mute/unmute the active video'],
+  [[['?']], 'Show / hide this cheat sheet'],
+  [[['Esc']], 'Exit service']
 ]
+
+function KeyCombos({ combos }: { combos: string[][] }): JSX.Element {
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {combos.map((combo, i) => (
+        <span key={i} className="flex items-center gap-1.5">
+          {i > 0 && <span className="text-[12px] text-muted-foreground">or</span>}
+          {combo.map((key, j) => (
+            <span key={key} className="flex items-center gap-1">
+              {j > 0 && <span className="text-[12px] text-muted-foreground">+</span>}
+              <Kbd className="h-6 min-w-[24px] text-[12px] text-foreground">{key}</Kbd>
+            </span>
+          ))}
+        </span>
+      ))}
+    </span>
+  )
+}
 
 export function KeyCheatSheet({ onClose }: KeyCheatSheetProps): JSX.Element {
   return (
     <div
-      className="absolute inset-0 z-20 flex items-center justify-center bg-background/[0.88]"
+      className="absolute inset-0 z-20 flex items-center justify-center bg-app/80 backdrop-blur-sm"
       onClick={onClose}
     >
       <Panel
-        emphasis
         onClick={(e) => e.stopPropagation()}
-        className="w-[520px]"
-        title={<MonoLabel tone="signal">KEYBOARD</MonoLabel>}
+        className="w-[540px] bg-raised shadow-2xl"
+        title={<span className="text-[15px] font-semibold text-foreground">Keyboard shortcuts</span>}
         action={
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[12px] text-muted-foreground">
             Kaya ba ni Ate Rose nang walang tatanungin?
           </span>
         }
       >
-        <dl>
-          {SHORTCUTS.map(([key, desc]) => (
+        <dl className="py-1">
+          {SHORTCUTS.map(([combos, desc]) => (
             <div
-              key={key}
-              className="flex items-center gap-4 border-b border-rule px-[18px] py-[11px] last:border-b-0"
+              key={desc}
+              className="flex items-center gap-4 border-b border-rule px-5 py-2.5 last:border-b-0"
             >
-              <dt className="w-[150px] shrink-0 font-mono text-[10px] font-semibold tracking-[0.06em] text-foreground">
-                {key}
+              <dt className="w-[180px] shrink-0">
+                <KeyCombos combos={combos} />
               </dt>
-              <dd className="text-[12.5px] text-soft">{desc}</dd>
+              <dd className="text-[13.5px] text-bone">{desc}</dd>
             </div>
           ))}
         </dl>
-        <div className="border-t border-border px-[18px] py-[11px] text-center text-[11px] text-muted-foreground">
-          Press <span className="font-mono text-foreground">?</span> again,{' '}
-          <span className="font-mono text-foreground">ESC</span>, or click outside to close
+        <div className="border-t border-rule px-5 py-3 text-center text-[12px] text-muted-foreground">
+          Press <Kbd>?</Kbd> again, <Kbd>Esc</Kbd>, or click outside to close
         </div>
       </Panel>
     </div>

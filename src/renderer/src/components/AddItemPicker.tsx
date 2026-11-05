@@ -1,11 +1,11 @@
 /**
  * AddItemPicker — the body of "which kind of item do I want to add to
- * the setlist?". Renders as a 4-column hairline grid of the seven item
- * kinds (design L431-439), or — mid-flow — the song search sublist.
+ * the setlist?". Renders as a 4-column grid of the item kinds (glyph,
+ * label, hint), or — mid-flow — the song search sublist.
  *
  * This component owns ONLY the grid/sublist content. The chrome around
- * it (the signal-bordered Panel with "INSERT AT POSITION N" / "ADD TO
- * THE END" / "ADD YOUR FIRST ITEM" header and the close ✕) is built by
+ * it (the Panel with "Insert at position N" / "Add to the end" / "Add
+ * your first item" header and the close button) is built by
  * the caller (SetlistEditor), because that header's text depends on
  * WHERE the picker was opened — something this component doesn't know.
  *
@@ -20,16 +20,15 @@
  * to point at a real library entry.
  */
 
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import type { Song } from '@shared/types'
 import type { CanvaImportResult } from '@shared/canva'
 import { FEATURES } from '@shared/features'
-import { itemKindCode, itemKindLabel } from './ItemKindIcon'
+import { ItemKindIcon, itemKindLabel } from './ItemKindIcon'
 import { SongPicker } from './SongPicker'
 import { CanvaPicker } from './CanvaPicker'
-import { Badge } from './ui/Badge'
-import { MonoLabel } from './ui/MonoLabel'
-import { HairlineGrid } from './ui/HairlineGrid'
+import { Button } from './ui/Button'
+import { ChevronLeftIcon } from './icons'
 
 interface Handlers {
   onPickSong: (songId: string) => void
@@ -150,16 +149,7 @@ export function AddItemPicker(props: Props): JSX.Element {
   if (view === 'song') {
     return (
       <div>
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <button
-            type="button"
-            onClick={() => setView('grid')}
-            className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-white"
-          >
-            ← BACK
-          </button>
-          <MonoLabel tone="dim">PICK A SONG</MonoLabel>
-        </div>
+        <SubViewHeader title="Pick a song" onBack={() => setView('grid')} />
         <div className="p-3">
           <SongPicker songs={songs} onPick={onPickSong} />
         </div>
@@ -172,16 +162,7 @@ export function AddItemPicker(props: Props): JSX.Element {
   if (view === 'canva' && FEATURES.canva) {
     return (
       <div>
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <button
-            type="button"
-            onClick={() => setView('grid')}
-            className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-white"
-          >
-            ← BACK
-          </button>
-          <MonoLabel tone="dim">IMPORT FROM CANVA</MonoLabel>
-        </div>
+        <SubViewHeader title="Import from Canva" onBack={() => setView('grid')} />
         <div className="p-3">
           <CanvaPicker onImported={onImportCanva} />
         </div>
@@ -190,29 +171,38 @@ export function AddItemPicker(props: Props): JSX.Element {
   }
 
   return (
-    // border-l-0/border-t-0 cancel HairlineGrid's own container seams:
-    // this grid always renders inside SetlistEditor's bordered
-    // `Panel emphasis`, whose header already draws a border-b, so the
-    // grid's left/top hairlines would double up into a 2px rule against
-    // the Panel's 1px border. Same fix as PreflightPanel.tsx's own
-    // HairlineGrid.
-    <HairlineGrid cols={4} className="border-l-0 border-t-0">
+    <div className="grid grid-cols-4 gap-1 p-2">
       {KIND_CARDS.map((c) => (
         <button
           key={c.kind}
           type="button"
           onClick={() => handlePick(c.kind)}
-          className="flex flex-col items-start p-[15px] text-left transition-colors hover:bg-panel-hi focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal"
+          className="group flex items-start gap-3 rounded-lg p-3 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
         >
-          <Badge tone="signal" className="mb-[9px]">
-            {itemKindCode(c.kind)}
-          </Badge>
-          <span className="mb-[3px] text-[13px] font-bold text-foreground">
-            {itemKindLabel(c.kind)}
+          <span className="flex h-9 w-9 flex-none items-center justify-center rounded-md bg-hover text-soft transition-colors group-hover:bg-selected group-hover:text-foreground">
+            <ItemKindIcon kind={c.kind} size={18} />
           </span>
-          <span className="text-[11px] text-muted-foreground">{c.hint}</span>
+          <span className="min-w-0">
+            <span className="block text-[14px] font-medium text-foreground">
+              {itemKindLabel(c.kind)}
+            </span>
+            <span className="block text-[13px] text-muted-foreground">{c.hint}</span>
+          </span>
         </button>
       ))}
-    </HairlineGrid>
+    </div>
+  )
+}
+
+/** "← Back" + title strip for the song and Canva sub-views. */
+function SubViewHeader({ title, onBack }: { title: ReactNode; onBack: () => void }): JSX.Element {
+  return (
+    <div className="flex items-center gap-2 border-b border-rule px-2 py-2">
+      <Button variant="ghost" size="sm" onClick={onBack} className="px-2">
+        <ChevronLeftIcon size={15} />
+        Back
+      </Button>
+      <span className="text-[13px] font-medium text-quiet">{title}</span>
+    </div>
   )
 }

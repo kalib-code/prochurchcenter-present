@@ -1,17 +1,22 @@
 /**
  * SlideCard — visual preview of a single slide in Service Mode's slide
- * grid, KLB-styled per design L583–591.
+ * grid.
  *
- * Structure (all inside one `aspect-[16/9]` root so cards are uniformly
- * shaped regardless of grid column width):
+ * Structure: a rounded 16:9 thumbnail with a caption row underneath
+ * (section label left, shortcut glyph right), Figma-Slides style.
  *
- *   ┌──────────────────────────┐
- *   │ Verse 1               1  │  ← header strip: mono label left,
- *   ├──────────────────────────┤    shortcut glyph right, shrink-0
- *   │  [theme bg image]        │
- *   │    lyric line 1          │  ← body, flex-1, theme bg or media
+ *   ╭──────────────────────────╮
+ *   │    lyric line 1          │
  *   │    lyric line 2          │
- *   └──────────────────────────┘
+ *   ╰──────────────────────────╯
+ *    Verse 1         [Live] V1    ← caption + status chip: Live (red,
+ *                                   on air), Current (neutral, cursor
+ *                                   while the output is cut to
+ *                                   black/logo) or Next
+ *
+ * Ring colour carries the state: red ring = on the projector right now,
+ * accent ring = current slide while the output is cut, subtle accent
+ * ring = next slide. Red is used for nothing else.
  *
  * Body rendering modes (highest priority first):
  *   1. `preview` is set    → MediaPreview thumbnail (image/video/PDF/PowerPoint)
@@ -19,8 +24,7 @@
  *                            backgroundImagePath / backgroundColor
  *   3. neither             → text lines on plain black (fallback) —
  *                            `themedBodyStyle(null)` already resolves
- *                            to `#000000`, matching the design's
- *                            `bg-black` body.
+ *                            to `#000000`.
  *
  * Why no background VIDEO support: a setlist with a video bg would
  * spawn N <video> elements (one per card in the grid) running
@@ -30,17 +34,14 @@
  *
  * A subtle dark scrim lifts text legibility on busy backgrounds — it's
  * 25% opacity black, just enough to read white text without obscuring
- * the image content underneath. (Kept intact per the redesign brief —
- * the Song Editor's own slide grid deliberately omits this scrim; see
- * ../lib/slideTheming.ts's doc comment for why the two must differ.)
+ * the image content underneath. (The Song Editor's own slide grid
+ * deliberately omits this scrim; see ../lib/slideTheming.ts's doc
+ * comment for why the two must differ.)
  *
- * Real `<button>` (not `<div role="button">`): the KLB redesign
- * requires genuine keyboard-operable controls. No ARIA-div workaround is
- * needed, but a button carries TWO UA-stylesheet defaults that have to be
- * overridden, not one: `display: inline-block` AND
- * `align-items: flex-start`. Overriding only the display leaves the header
- * strip and the slide body sizing to their own content instead of
- * spanning the card — see the `items-stretch` note on the element below.
+ * Real `<button>` (not `<div role="button">`) so every card is keyboard
+ * operable. Chromium's UA stylesheet gives a button
+ * `align-items: flex-start`; the root resets it with `items-stretch` so
+ * the thumbnail and caption span the card's full width.
  *
  * Lyric text wraps and auto-shrinks (../hooks/useAutoFitText.ts) rather
  * than being clipped per line. On a card this small a clipped line is
@@ -52,7 +53,9 @@
 import type { Theme } from '@shared/types'
 import { themedBodyStyle, themedTextStyle } from '../lib/slideTheming'
 import { useAutoFitText } from '../hooks/useAutoFitText'
+import { cn } from '../lib/utils'
 import { MediaPreview, type PptxThumbError } from './MediaPreview'
+import { NextBadge, OnAirBadge, QuietBadge } from './service/StatusBadges'
 
 /**
  * Optional visual preview source rendered INSIDE the slide body,
@@ -89,6 +92,15 @@ interface SlideCardProps {
   theme?: Theme | null
   /** Highlight — used when this is the currently-active slide in Service Mode */
   active?: boolean
+  /**
+   * The active slide is actually on the projector (output mode is Live,
+   * not Black/Logo). Only meaningful together with `active`; draws the
+   * red ring + "Live" chip. When `active` is set without it, the card
+   * shows the neutral "Current" state instead.
+   */
+  onAir?: boolean
+  /** The slide Space will advance to — subtle accent ring + "Next" chip. */
+  next?: boolean
   /** Click handler — Service Mode always supplies one (jumpTo). */
   onClick?: () => void
   /**
@@ -108,6 +120,8 @@ export function SlideCard({
   onPreviewError,
   theme,
   active = false,
+  onAir = false,
+  next = false,
   onClick,
   style
 }: SlideCardProps): JSX.Element {
@@ -128,82 +142,101 @@ export function SlideCard({
   // slide. See ../hooks/useAutoFitText.ts.
   const { containerRef, contentRef } = useAutoFitText(lines.join('\n'))
 
+  const live = active && onAir
+  const ring = live
+    ? 'ring-2 ring-live'
+    : active
+      ? 'ring-2 ring-accent'
+      : next
+        ? 'ring-1 ring-accent/60'
+        : 'ring-1 ring-white/[0.07] group-hover:ring-border'
+
   return (
     <button
       type="button"
       onClick={onClick}
       data-active={active ? 'true' : undefined}
       style={style}
-      // `items-stretch` is load-bearing, not decoration: Chromium's UA
-      // stylesheet gives `button` `align-items: flex-start`, which in a
-      // `flex-col` card means the header strip and the slide body size
-      // themselves to their CONTENT instead of spanning the card. The
-      // visible symptom is a header that renders as a short chip in the
-      // top-left and a body that shrink-wraps around the lyrics, so a
-      // media thumbnail has almost no box to render into. Overriding
-      // `display` alone is not enough — `align-items` has to be reset too.
-      className={`relative flex aspect-[16/9] w-full flex-col items-stretch overflow-hidden border text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-signal ${
-        active ? 'border-signal' : 'border-border hover:border-dim'
-      }`}
+      className="group flex w-full flex-col items-stretch gap-1.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-4 focus-visible:ring-offset-panel"
     >
-      {/* Header bar — mono section label left, shortcut glyph right */}
       <div
-        className={`flex shrink-0 items-center justify-between gap-1.5 border-b border-border px-[9px] py-[6px] ${
-          active ? 'bg-signal text-white' : 'bg-panel-hi text-soft'
-        }`}
-      >
-        <span className="truncate font-mono text-[8.5px] font-semibold uppercase tracking-[0.12em]">
-          {sectionLabel || '—'}
-        </span>
-        {shortcut && (
-          <span className="shrink-0 pl-1.5 font-mono text-[9px] font-medium">{shortcut}</span>
+        className={cn(
+          'relative aspect-[16/9] w-full overflow-hidden rounded-lg bg-black transition-shadow',
+          ring
         )}
+      >
+        {/* Slide body — fills the thumbnail. If a media preview is
+            provided, it renders edge-to-edge. Otherwise the body's inline
+            style applies the theme background (image + color) and the
+            text lines render on top with the theme's text color. */}
+        <div
+          ref={containerRef}
+          className="relative flex h-full w-full items-center justify-center overflow-hidden"
+          style={bodyStyle}
+        >
+          {/* Subtle dark scrim — only when a real background image is
+              in play. Keeps text readable on busy photos without
+              destroying the visual reference. */}
+          {usingThemeBg && theme?.backgroundImagePath && (
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-black/25" />
+          )}
+
+          {preview ? (
+            <MediaPreview
+              source={preview}
+              className="h-full w-full rounded-none"
+              onError={onPreviewError}
+            />
+          ) : lines.length === 0 ? (
+            <span className="relative text-[12px] text-muted-foreground">Blank slide</span>
+          ) : (
+            <div
+              ref={contentRef}
+              // `text-[11.5px]` is the DESIGN size and stays here on purpose:
+              // useAutoFitText only ever shrinks below it, and only once it
+              // has really measured the card, so a card that can't be measured
+              // still renders at the intended size instead of the browser's
+              // 16px default. `max-w-full` + `break-words` keep a single long
+              // word (a URL, a run-on lyric) inside the card rather than
+              // forcing the block wider than its container, which would defeat
+              // the width half of the fit measurement.
+              className={`relative max-w-full overflow-hidden break-words p-2 text-center text-[11.5px] font-bold leading-[1.35] ${
+                active ? 'text-white' : 'text-quiet'
+              }`}
+              style={textStyle}
+            >
+              {lines.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
 
-      {/* Slide body — fills remaining space. If a media preview is
-          provided, it renders edge-to-edge. Otherwise the body's inline
-          style applies the theme background (image + color) and the
-          text lines render on top with the theme's text color. */}
-      <div
-        ref={containerRef}
-        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
-        style={bodyStyle}
-      >
-        {/* Subtle dark scrim — only when a real background image is
-            in play. Keeps text readable on busy photos without
-            destroying the visual reference. */}
-        {usingThemeBg && theme?.backgroundImagePath && (
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-black/25" />
-        )}
-
-        {preview ? (
-          <MediaPreview
-            source={preview}
-            className="h-full w-full border-0"
-            onError={onPreviewError}
-          />
-        ) : lines.length === 0 ? (
-          <span className="relative text-[9px] italic text-dim">(empty)</span>
-        ) : (
-          <div
-            ref={contentRef}
-            // `text-[11.5px]` is the DESIGN size and stays here on purpose:
-            // useAutoFitText only ever shrinks below it, and only once it
-            // has really measured the card, so a card that can't be measured
-            // still renders at the intended size instead of the browser's
-            // 16px default. `max-w-full` + `break-words` keep a single long
-            // word (a URL, a run-on lyric) inside the card rather than
-            // forcing the block wider than its container, which would defeat
-            // the width half of the fit measurement.
-            className={`relative max-w-full overflow-hidden break-words p-2 text-center text-[11.5px] font-bold leading-[1.35] ${
-              active ? 'text-white' : 'text-quiet'
-            }`}
-            style={textStyle}
-          >
-            {lines.map((line, i) => (
-              <div key={i}>{line}</div>
-            ))}
-          </div>
+      {/* Caption — section label left; status chip + shortcut glyph
+          right. The chip lives here, not on the thumbnail, so it never
+          covers the lyrics the operator is checking. */}
+      <div className="flex h-5 items-center gap-2 px-0.5">
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-[12px] font-medium',
+            active ? 'text-foreground' : 'text-soft'
+          )}
+        >
+          {sectionLabel || '—'}
+        </span>
+        {live ? (
+          <OnAirBadge className="shrink-0" />
+        ) : active ? (
+          <QuietBadge className="shrink-0">Current</QuietBadge>
+        ) : next ? (
+          <NextBadge className="shrink-0" />
+        ) : null}
+        {shortcut && (
+          <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
+            {shortcut}
+          </span>
         )}
       </div>
     </button>

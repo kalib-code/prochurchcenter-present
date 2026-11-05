@@ -35,6 +35,8 @@ const BASE_THEME: Theme = {
   backgroundVideoPath: null,
   textColor: '#FFFFFF',
   fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
+  fontWeight: 600,
+  fontStyle: 'normal',
   fontSizePercent: 100,
   textAlign: 'center',
   textPosition: 'center',

@@ -9,121 +9,83 @@
 @tailwind utilities;
 
 /*
- * Present — design tokens
+ * Present — design tokens (2026-11 redesign)
  *
- * Color system is HSL-components-only so every utility is composable
- * with Tailwind's alpha syntax (`bg-background/40`, etc).
+ * Dark-first, built for a dim AV booth and long editing sessions.
+ * Principles (see docs/superpowers/specs/2026-11-05-ui-redesign-design.md):
  *
- * The dark palette is the default — Present lives in church AV booths
- * and long editor sessions, not a sunlit browser tab. The :root block
- * below is deliberately DARK; a `.light` class (if we add a toggle
- * later) would override back to light values.
+ *   1. Soft charcoal, never pure black. Depth comes from LAYERED SURFACES
+ *      (app → panel → raised → hover), not from borders around everything.
+ *   2. Colour carries MEANING only:
+ *        live    red    — the projector is showing content right now
+ *        warn    amber  — something needs attention before/while presenting
+ *        ok      green  — ready / healthy
+ *        accent  orange — brand, focus ring, current selection
+ *      Primary actions are a calm high-contrast light button, not a colour.
+ *   3. Every text token passes WCAG AA (4.5:1) on --panel except --dim,
+ *      which is reserved for disabled/placeholder text.
  *
- * --brand is signal orange (#E23C0F) — sacred, readable, not corporate.
- * Used for primary actions only. Everything else is neutral slate.
+ * Values are HSL components so Tailwind alpha syntax composes
+ * (`bg-live/15`, `border-accent/40`).
+ *
+ * The projector output never uses these — it renders the USER's theme.
  */
 
 @layer base {
   :root {
-    /* ── KLB surfaces ────────────────────────────────────────────────
-       Opaque hairline system. Values are HSL components (not hex) so
-       Tailwind's alpha syntax composes: `border-signal/45` is used on
-       every warning surface and active chip in the design. */
-    --background: 0 0% 4%;          /* #0A0A0A page */
-    --foreground: 0 0% 100%;        /* #FFFFFF   */
+    /* ── Surfaces (darkest → lightest) ─────────────────────────────── */
+    --app: 228 9% 6%;               /* #0E0F11 window background / sidebar */
+    --panel: 228 7% 9%;             /* #151619 main content panel          */
+    --raised: 228 7% 12%;           /* #1C1D21 cards, inputs, menus        */
+    --hover: 228 7% 15%;            /* #232429 hover / pressed             */
+    --selected: 228 9% 18%;         /* #2A2C32 selected row (neutral)      */
 
-    --card: 0 0% 7%;                /* #111111 panel */
-    --card-foreground: 0 0% 100%;
+    /* ── Lines ─────────────────────────────────────────────────────── */
+    --border: 228 7% 19%;           /* #2E3036 control & card outlines     */
+    --rule: 228 7% 14%;             /* #212226 quiet dividers inside panels*/
 
-    --popover: 0 0% 7%;
-    --popover-foreground: 0 0% 100%;
+    /* ── Text ──────────────────────────────────────────────────────── */
+    --foreground: 225 14% 94%;      /* #EDEEF2 primary text                */
+    --bone: 225 10% 86%;            /* #D8DAE0 body text on panels         */
+    --quiet-fg: 225 6% 72%;         /* #B3B5BC secondary emphasis          */
+    --soft-fg: 225 5% 62%;          /* #9A9CA3 secondary text  (~6.6:1)    */
+    --muted-foreground: 225 5% 55%; /* #8A8C93 tertiary/meta   (~5.3:1)    */
+    --dim: 225 5% 38%;              /* #5D5F66 disabled & placeholder only */
 
-    /* Legacy semantic names from the pre-KLB palette. Every screen is
-       now converted (redesign complete), but these are NOT all dead:
-       `text-muted-foreground` in particular is still a real, actively
-       used secondary-text token across every converted screen (~65
-       call sites), not migration debt. `--accent` / `--accent-foreground`
-       have zero remaining call sites and could be dropped; `--secondary`
-       is likewise unused directly but shares its value with
-       `--panel-hi`, which IS live, so removing it buys nothing. */
-    --muted: 60 4% 11%;             /* #1C1C1A */
-    --muted-foreground: 60 1% 41%;  /* #6B6B68 */
-    --accent: 60 4% 9%;             /* #181816 */
-    --accent-foreground: 0 0% 100%;
-    --secondary: 60 5% 8%;          /* #161614 — same value as --panel-hi */
-    --secondary-foreground: 0 0% 100%;
+    /* ── Meaning ───────────────────────────────────────────────────── */
+    --accent: 22 88% 58%;           /* #F27A33 brand / focus / selection   */
+    --accent-foreground: 228 9% 6%;
+    --live: 0 84% 60%;              /* #EF4444 ON AIR                      */
+    --warn: 38 92% 56%;             /* #F6A623 needs attention             */
+    --ok: 145 63% 46%;              /* #2BBF64 ready                       */
 
-    --border: 60 2% 16%;            /* #2A2A28 */
-    --input: 60 2% 16%;
-    --ring: 13 88% 47%;
-
-    --primary: 0 0% 100%;
-    --primary-foreground: 0 0% 4%;
-
-    --destructive: 0 74% 42%;       /* #B91C1C */
+    /* ── shadcn-style aliases (kept so existing utilities resolve) ─── */
+    --background: var(--app);
+    --card: var(--panel);
+    --card-foreground: var(--foreground);
+    --popover: var(--raised);
+    --popover-foreground: var(--foreground);
+    --muted: var(--raised);
+    --secondary: var(--raised);
+    --secondary-foreground: var(--foreground);
+    --input: var(--border);
+    --ring: var(--accent);
+    --primary: var(--foreground);           /* light button on dark */
+    --primary-foreground: var(--app);
+    --destructive: var(--live);
     --destructive-foreground: 0 0% 100%;
 
-    /* ── Signal ──────────────────────────────────────────────────────
-       #E23C0F. Replaces the old warm gold. Operator chrome only — the
-       projector renders the USER's theme and is untouched. */
-    --brand: 13 88% 47%;
+    /* Legacy KLB names → new roles, so unconverted call sites degrade
+       gracefully during the migration. New code should not use them:
+       signal → accent, ember → accent/10, panel-hi → raised. */
+    --brand: var(--accent);
     --brand-foreground: 0 0% 100%;
-    --brand-muted: 0 74% 42%;
+    --brand-muted: 22 70% 48%;
+    --ember: 22 45% 13%;
+    --panel-hi: var(--raised);
 
-    /* ── KLB-specific roles ──────────────────────────────────────── */
-    --rule: 60 4% 11%;              /* #1C1C1A inner hairline, list rows */
-    --dim: 60 2% 28%;               /* #4A4A47 disabled, inactive labels */
-    --soft-fg: 60 1% 55%;           /* #8F8F8C secondary body */
-    --quiet-fg: 60 3% 71%;          /* #B8B8B4 inactive slide-card text */
-    --bone: 37 17% 91%;             /* #ECE9E4 primary body on panels */
-    --ok: 147 65% 38%;              /* #22A05B pre-flight READY only */
-    --ember: 16 41% 7%;             /* #1A0F0B active row background */
-    --panel-hi: 60 5% 8%;           /* #161614 hover, inactive card header */
-
-    /* Squares every rounded-* utility in the codebase in one line,
-       because tailwind.config.js derives all seven radii — DEFAULT,
-       sm, md, lg, xl, 2xl, 3xl — from this. (Not five: DEFAULT and 3xl
-       are outside the sm–2xl scale and must be derived too, or a bare
-       `rounded` / `rounded-3xl` utility keeps Tailwind's stock radius
-       even at --radius: 0.) */
-    --radius: 0;
-  }
-
-  /* Light-mode override — unmaintained and unreachable. Nothing in the
-     app ever applies the `.light` class (no toggle UI exists), and this
-     block was never updated for the KLB redesign: it still carries the
-     pre-redesign palette (the old gold `--brand`, none of the new
-     `--rule` / `--dim` / `--soft-fg` / `--quiet-fg` / `--bone` / `--ok` /
-     `--ember` / `--panel-hi` roles the KLB screens actually render
-     with). Applying `.light` today would leave every KLB-specific
-     utility — `text-soft`, `text-bone`, `bg-panel-hi`, `border-rule`,
-     etc. — resolving to their DARK-palette values on a light background,
-     which is actively illegible (e.g. `--bone`'s near-white text would
-     vanish against white). Do not wire up a light-mode toggle against
-     this block without recomputing every KLB role first. */
-  .light {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 6%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 6%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 6%;
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 240 5% 96%;
-    --accent-foreground: 240 6% 10%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 10%;
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --ring: 38 92% 50%;
-    --primary: 240 6% 10%;
-    --primary-foreground: 0 0% 98%;
-    --destructive: 0 72% 50%;
-    --destructive-foreground: 0 0% 98%;
-    --brand: 38 92% 52%;
-    --brand-foreground: 0 0% 100%;
-    --brand-muted: 38 50% 45%;
+    /* Corner radius. Controls use --radius; panels use rounded-xl. */
+    --radius: 8px;
   }
 }
 
@@ -138,8 +100,15 @@
     height: 100%;
   }
 
+  :root {
+    /* Native date/time pickers, scrollbars and checkboxes render dark. */
+    color-scheme: dark;
+    accent-color: hsl(var(--accent));
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
+    font-size: 14px;
     font-feature-settings: 'cv11' 1, 'ss01' 1;
     font-family:
       'Inter Variable',
@@ -152,7 +121,7 @@
   }
 
   ::selection {
-    background-color: hsl(var(--brand) / 0.25);
+    background-color: hsl(var(--accent) / 0.3);
     color: hsl(var(--foreground));
   }
 }
@@ -165,6 +134,7 @@
   }
   .scroll-hairline::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
+    border-radius: 999px;
   }
   .scroll-hairline::-webkit-scrollbar-track {
     background: transparent;
