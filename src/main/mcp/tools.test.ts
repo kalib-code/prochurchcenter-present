@@ -79,6 +79,12 @@ beforeEach(async () => {
       songs.push(s)
       return s
     },
+    updateSong: async (id, patch) => {
+      const i = songs.findIndex((s) => s.id === id)
+      if (i < 0) throw new Error(`Song not found: ${id}`)
+      songs[i] = { ...songs[i], ...patch }
+      return songs[i]
+    },
     lookupScripture: async (_t, ref) =>
       ref.startsWith('John')
         ? {
@@ -117,7 +123,8 @@ describe('Present MCP tools', () => {
       'create_song',
       'get_setlist',
       'list_setlists',
-      'search_songs'
+      'search_songs',
+      'update_song'
     ])
   })
 
@@ -207,6 +214,23 @@ describe('Present MCP tools', () => {
     expect(s.data.setlist).toMatchObject({ name: 'Youth Night', date: '2026-11-14', start_time: '18:30' })
     const badDate = await call('create_setlist', { name: 'X', date: 'next sunday' })
     expect(badDate.isError).toBe(true)
+  })
+
+  it('updates a song in place: only the fields given, logged for the operator', async () => {
+    const { data } = await call('update_song', { song_id: 's1', lyrics: '[Verse 1]\r\nNew line' })
+    expect(data.ok).toBe(true)
+    expect(songs[0]).toMatchObject({ id: 's1', title: 'Amazing Grace', rawText: '[Verse 1]\nNew line' })
+    expect(changes.at(-1)).toEqual({ kind: 'songs' })
+    expect(activity.at(-1)!.summary).toBe('Updated song "Amazing Grace" (lyrics)')
+
+    await call('update_song', { song_id: 's1', author: '  John Newton ', ccli: '' })
+    expect(songs[0]).toMatchObject({ author: 'John Newton', ccli: null, rawText: '[Verse 1]\nNew line' })
+  })
+
+  it('rejects an update with nothing to change or an unknown song', async () => {
+    expect((await call('update_song', { song_id: 's1' })).isError).toBe(true)
+    expect((await call('update_song', { song_id: 'nope', title: 'X' })).isError).toBe(true)
+    expect(songs).toHaveLength(2)
   })
 
   it('describes setlist items in plain words', async () => {

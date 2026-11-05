@@ -13,7 +13,7 @@ import { mcpUrl, type LibraryChange, type McpActivity, type McpState, type McpSt
 import { getOperatorWindow } from '../windows'
 import { getMediaDir } from '../storage/paths'
 import { listSetlists, getSetlist, createSetlist, updateSetlist, insertSetlistItems } from '../storage/setlists'
-import { listSongs, createSong } from '../storage/songs'
+import { listSongs, createSong, updateSong } from '../storage/songs'
 import { lookupScripture } from '../ipc/bible'
 import { loadMcpConfig, newToken, saveMcpConfig, isValidPort, type McpConfig } from './config'
 import { startMcpHttpServer, PortInUseError, type RunningMcpHttp } from './httpServer'
@@ -86,6 +86,7 @@ function createMcpServer() {
     insertSetlistItems,
     listSongs,
     createSong,
+    updateSong,
     lookupScripture,
     importPptx: (src) => importPptx(src, getMediaDir()),
     onLibraryChange: broadcastLibraryChange,

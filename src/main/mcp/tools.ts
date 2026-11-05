@@ -17,7 +17,7 @@ import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { BibleLookupResult, Setlist, SetlistItem, Song } from '@shared/types'
-import type { CreateSetlistInput, CreateSongInput } from '@shared/ipc-contract'
+import type { CreateSetlistInput, CreateSongInput, UpdateSongPatch } from '@shared/ipc-contract'
 import { formatReference } from '@shared/bibleReference'
 import { MCP_SERVER_NAME, type LibraryChange } from '@shared/mcp'
 import type { ImportedPptx, PptxSource } from './importPptx'
@@ -29,6 +29,7 @@ export interface PresentToolDeps {
   insertSetlistItems(id: string, items: SetlistItem[], position?: number): Promise<Setlist>
   listSongs(): Promise<Song[]>
   createSong(input: CreateSongInput): Promise<Song>
+  updateSong(id: string, patch: UpdateSongPatch): Promise<Song>
   lookupScripture(translationId: string, reference: string): Promise<BibleLookupResult>
   importPptx(src: PptxSource): Promise<ImportedPptx>
   /** Tell open Present windows the library changed. */
@@ -46,7 +47,7 @@ const INSTRUCTIONS = `Present is the worship presentation app running this churc
 
 - Call list_setlists first to find the service. If none exists for the date, create_setlist.
 - add_pptx_to_setlist: if the .pptx is on this computer, pass file_path (absolute). Otherwise send file_base64 + file_name.
-- Songs must exist in the library before they can be added: search_songs, then add_song_to_setlist with the song id. create_song adds a new song.
+- Songs must exist in the library before they can be added: search_songs, then add_song_to_setlist with the song id. create_song adds a new song; update_song fixes an existing one (e.g. fills in placeholder lyrics) instead of creating a duplicate.
 - Positions are 0-based; omit position to add at the end of the service.
 - You cannot control the projector or delete anything. The operator reviews the setlist in Present.`
 
@@ -345,6 +346,52 @@ export function buildPresentServer(deps: PresentToolDeps): McpServer {
       })
       deps.onLibraryChange({ kind: 'songs' })
       deps.onActivity(`Created song "${song.title}"`, client())
+      return json({
+        ok: true,
+        song: { id: song.id, title: song.title, sections: song.sections.map((s) => s.label) }
+      })
+    }
+  )
+
+  server.registerTool(
+    'update_song',
+    {
+      title: 'Update a song',
+      description:
+        'Change an existing song in the library: replace its lyrics, or correct its title, author, CCLI number or copyright. Only the fields you pass change; pass an empty string to clear author, ccli or copyright. Lyrics use the same format as create_song. Get song_id from search_songs. Only add lyrics the church is licensed to project.',
+      inputSchema: {
+        song_id: z.string().min(1),
+        title: z.string().min(1).max(200).optional(),
+        lyrics: z.string().min(1).optional(),
+        author: z.string().max(200).optional(),
+        ccli: z.string().max(40).optional(),
+        copyright: z.string().max(300).optional()
+      },
+      annotations: { destructiveHint: false, idempotentHint: true }
+    },
+    async ({ song_id, title, lyrics, author, ccli, copyright }) => {
+      const existing = (await deps.listSongs()).find((s) => s.id === song_id)
+      if (!existing) throw new Error(`No song with id "${song_id}". Use search_songs to find it.`)
+
+      // Optional text field → trimmed value, or null to clear; undefined = leave alone.
+      const orNull = (v: string | undefined): string | null | undefined =>
+        v === undefined ? undefined : v.trim() || null
+      const patch: UpdateSongPatch = {}
+      if (title !== undefined) patch.title = title.trim()
+      if (lyrics !== undefined) patch.rawText = lyrics.replace(/\r\n?/g, '\n')
+      if (author !== undefined) patch.author = orNull(author)
+      if (ccli !== undefined) patch.ccli = orNull(ccli)
+      if (copyright !== undefined) patch.copyright = orNull(copyright)
+
+      const changed = Object.keys(patch).map((k) => (k === 'rawText' ? 'lyrics' : k))
+      if (changed.length === 0) {
+        throw new Error('Nothing to update: pass at least one of title, lyrics, author, ccli, copyright.')
+      }
+
+      const song = await deps.updateSong(song_id, patch)
+      deps.onLibraryChange({ kind: 'songs' })
+      // Name the song as it was before the edit, so a renamed song is still recognisable.
+      deps.onActivity(`Updated song "${existing.title}" (${changed.join(', ')})`, client())
       return json({
         ok: true,
         song: { id: song.id, title: song.title, sections: song.sections.map((s) => s.label) }
