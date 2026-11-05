@@ -31,7 +31,7 @@
  *   comment. This file mounts the calculated style directly rather than
  *   either (a) importing the whole `SlideCard` component, whose own
  *   border/hover-ring/dark-header-bar/chip-shortcut chrome would fight
- *   this grid's `HairlineGrid` seams and KLB mono header, or (b) mounting
+ *   this grid's rounded thumbnails and caption row, or (b) mounting
  *   a full `SlideRenderer` per card. `SlideRenderer` is deliberately NOT
  *   used here: it drives an ambient `<video>` element when the theme has
  *   `backgroundVideoPath` set, plus auto-fit measurement effects and a
@@ -49,7 +49,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import type { Song, SongLanguage, Theme, ThemeOverride } from '@shared/types'
 import type { SlidePayload, UpdateSongPatch } from '@shared/ipc-contract'
 import { useLibraryStore } from '../stores/useLibraryStore'
@@ -69,10 +69,11 @@ import { ThemeOverrideEditor } from '../components/ThemeOverrideEditor'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
-import { MonoLabel } from '../components/ui/MonoLabel'
+import { EmptyState } from '../components/ui/EmptyState'
+import { Field, Input, Select, Textarea } from '../components/ui/Input'
+import { PageHeader } from '../components/ui/PageHeader'
 import { SaveStatePill } from '../components/ui/SaveStatePill'
-import { HairlineGrid } from '../components/ui/HairlineGrid'
-import { cn } from '../lib/utils'
+import { TrashIcon } from '../components/icons'
 
 /**
  * Local editor state — a draft of the song fields. Kept separate from
@@ -141,7 +142,17 @@ function parseYear(raw: string): number | null {
   return n >= 1000 && n <= 2100 ? n : null
 }
 
+/**
+ * Keyed by id so moving from one song straight to another remounts the
+ * editor: a reused instance would keep the previous song's draft and
+ * autosave it under the new id (the same bug fixed in SetlistEditor).
+ */
 export function SongEditor(): JSX.Element {
+  const { id } = useParams<{ id: string }>()
+  return <SongEditorForId key={id ?? ''} />
+}
+
+function SongEditorForId(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { songs, load, update, remove, getById } = useLibraryStore()
@@ -180,7 +191,7 @@ export function SongEditor(): JSX.Element {
   if (!id) {
     return (
       <div className="flex h-full w-full min-h-0 flex-col text-foreground">
-        <BackLink />
+        <PageHeader back={BACK} title="Song" />
         <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           No song id in URL.
         </main>
@@ -191,7 +202,7 @@ export function SongEditor(): JSX.Element {
   if (!draft) {
     return (
       <div className="flex h-full w-full min-h-0 flex-col text-foreground">
-        <BackLink />
+        <PageHeader back={BACK} title="Song" />
         <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Reading from disk…
         </main>
@@ -272,37 +283,31 @@ export function SongEditor(): JSX.Element {
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col text-foreground">
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <header className="flex shrink-0 items-center justify-between border-b border-border bg-card px-6 py-4">
-        <div className="min-w-0">
-          <Link
-            to="/library"
-            className="mb-2 block font-mono text-[9.5px] font-semibold uppercase leading-none tracking-[0.12em] text-muted-foreground transition-colors hover:text-signal"
-          >
-            ← SONGS
-          </Link>
-          <h1 className="truncate text-[26px] font-extrabold leading-none tracking-[-0.03em] text-foreground">
-            {draft.title.trim() || 'Untitled Song'}
-          </h1>
-          <p className="mt-1 truncate text-[12px] text-soft">
-            {draft.author || 'Unknown author'}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-3.5">
-          <SaveStatePill status={status} error={error} />
-          <Button type="button" variant="danger" size="md" onClick={handleDelete}>
-            DELETE
-          </Button>
-        </div>
-      </header>
+      <PageHeader
+        back={BACK}
+        title={draft.title.trim() || 'Untitled Song'}
+        description={draft.author || 'Unknown author'}
+        action={
+          <>
+            <SaveStatePill status={status} error={error} />
+            <Button type="button" variant="danger" size="md" onClick={handleDelete}>
+              <TrashIcon size={15} />
+              Delete
+            </Button>
+          </>
+        }
+      />
 
-      {/* Two-column body */}
-      <div className="grid flex-1 grid-cols-[47%_53%] overflow-hidden">
-        {/* ── Left: metadata + raw text ──────────────────────── */}
-        <section className="scroll-hairline flex flex-col gap-[22px] overflow-y-auto border-r border-border px-6 py-[22px] pb-10">
-          {/* Details — title, author, and cataloging metadata */}
-          <Panel title="DETAILS">
-            <div className="grid grid-cols-2 gap-3.5 p-4">
+      {/* Two panes: editing on the left, live preview on the right. Each
+          scrolls on its own, so the preview stays in view while typing. */}
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-8 border-t border-rule px-8">
+        {/* ── Left: details, lyrics, notes, theme override ──── */}
+        <section
+          aria-label="Song details"
+          className="scroll-hairline -mr-3 flex flex-col gap-7 overflow-y-auto pb-12 pr-3 pt-6"
+        >
+          <Panel title="Details" className="shrink-0">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 p-4">
               <Field label="Title" className="col-span-2">
                 <Input
                   value={draft.title}
@@ -319,12 +324,12 @@ export function SongEditor(): JSX.Element {
                   placeholder="e.g. Chris Tomlin"
                 />
               </Field>
-              <Field label="CCLI #">
+              <Field label="CCLI number">
                 <Input
                   value={draft.ccli}
                   onChange={(e) => patch({ ccli: e.target.value })}
-                  placeholder="optional"
-                  className="font-mono"
+                  placeholder="Optional"
+                  className="tabular-nums"
                 />
               </Field>
 
@@ -332,7 +337,7 @@ export function SongEditor(): JSX.Element {
                 <Input
                   value={draft.copyright}
                   onChange={(e) => patch({ copyright: e.target.value })}
-                  placeholder="optional"
+                  placeholder="Optional"
                 />
               </Field>
               <Field label="Year">
@@ -340,8 +345,8 @@ export function SongEditor(): JSX.Element {
                   inputMode="numeric"
                   value={draft.year}
                   onChange={(e) => patch({ year: e.target.value })}
-                  placeholder="optional"
-                  className="font-mono"
+                  placeholder="Optional"
+                  className="tabular-nums"
                 />
               </Field>
 
@@ -357,7 +362,7 @@ export function SongEditor(): JSX.Element {
                   <option value="other">Other</option>
                 </Select>
               </Field>
-              <Field label="Categories" hint="comma-separated">
+              <Field label="Categories" hint="Comma-separated">
                 <Input
                   value={draft.categories}
                   onChange={(e) => patch({ categories: e.target.value })}
@@ -367,68 +372,83 @@ export function SongEditor(): JSX.Element {
             </div>
           </Panel>
 
-          {/* Lyrics */}
-          <Panel
-            title="LYRICS"
-            action={
-              <span className="font-mono text-[10px] tracking-[0.04em] text-dim">
-                [SECTION] HEADERS · BLANK LINE = NEW SLIDE
+          {/* Lyrics — the only place song content is edited. */}
+          <div className="flex shrink-0 flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="song-lyrics" className="text-[15px] font-semibold text-foreground">
+                Lyrics
+              </label>
+              <span className="text-[12.5px] text-muted-foreground">
+                [Section] headers · blank line = new slide
               </span>
-            }
-          >
-            <textarea
+            </div>
+            <Textarea
+              id="song-lyrics"
               value={draft.rawText}
               onChange={(e) => patch({ rawText: e.target.value })}
               spellCheck={false}
-              className="min-h-[300px] w-full resize-y border-0 bg-background p-4 font-mono text-[13px] leading-[2] text-bone outline-none placeholder:text-muted-foreground/50"
+              className="min-h-[380px] resize-y px-4 py-3 font-mono text-[13.5px] leading-[1.9] text-bone"
               placeholder={`[Verse 1]\nAmazing grace, how sweet the sound\nThat saved a wretch like me\n\n[Chorus]\nMy chains are gone, I've been set free`}
             />
-          </Panel>
+          </div>
 
           {/* Operator notes */}
-          <Panel title="OPERATOR NOTES · NEVER PROJECTED">
-            <textarea
+          <div className="flex shrink-0 flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="song-notes" className="text-[15px] font-semibold text-foreground">
+                Operator notes
+              </label>
+              <span className="text-[12.5px] text-muted-foreground">Never projected</span>
+            </div>
+            <Textarea
+              id="song-notes"
               value={draft.notes}
               onChange={(e) => patch({ notes: e.target.value })}
-              className="min-h-[72px] w-full resize-y border-0 bg-background px-4 py-3.5 text-[13px] leading-[1.6] text-bone outline-none placeholder:text-muted-foreground/50"
+              className="min-h-[84px] resize-y px-4 py-3 text-[13.5px] leading-[1.6] text-bone"
               placeholder="Key of G. Skip bridge if running long."
             />
-          </Panel>
+          </div>
 
           {/* Theme override — only usable once the global theme has loaded
               because the override editor displays the merged (effective)
               theme, not just the raw override fields. */}
           {globalTheme && (
-            <ThemeOverrideEditor
-              override={draft.themeOverride}
-              globalTheme={globalTheme}
-              onChange={(next) => patch({ themeOverride: next })}
-              previewSlide={themePreviewPayload}
-            />
+            <div className="shrink-0">
+              <ThemeOverrideEditor
+                override={draft.themeOverride}
+                globalTheme={globalTheme}
+                onChange={(next) => patch({ themeOverride: next })}
+                previewSlide={themePreviewPayload}
+              />
+            </div>
           )}
         </section>
 
         {/* ── Right: live preview ───────────────────────────── */}
-        <section className="scroll-hairline overflow-y-auto px-6 py-[22px] pb-10">
-          <div className="mb-[14px] flex items-center justify-between">
-            <MonoLabel size="sm">
-              LIVE PREVIEW · {previewSlides.length} SLIDE{previewSlides.length === 1 ? '' : 'S'}
-            </MonoLabel>
-            <Badge tone="signal">MAX {maxLines} LINES</Badge>
+        <section aria-label="Slide preview" className="scroll-hairline -mr-3 overflow-y-auto pb-12 pr-3">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-panel pb-3 pt-6">
+            <div className="flex items-baseline gap-2.5">
+              <h2 className="text-[15px] font-semibold text-foreground">Preview</h2>
+              <span className="text-[13px] tabular-nums text-soft">
+                {previewSlides.length} slide{previewSlides.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <Badge tone="neutral">
+              Max {maxLines} line{maxLines === 1 ? '' : 's'} per slide
+            </Badge>
           </div>
 
           {previewSlides.length === 0 ? (
-            <div className="border border-dashed border-dim px-6 py-10 text-center text-[12px] text-dim">
-              Start typing lyrics on the left. Use{' '}
-              <span className="font-mono text-[11px] text-soft">[Section]</span> markers to
-              split into verses, chorus, and bridge.
-            </div>
+            <EmptyState
+              title="No slides yet"
+              description="Start typing lyrics on the left. Use [Section] markers to split them into verses, chorus and bridge."
+            />
           ) : (
-            <HairlineGrid cols={2}>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-4">
               {previewSlides.map((slide) => (
                 <SlidePreviewCard key={slide.key} slide={slide} theme={effectiveTheme} />
               ))}
-            </HairlineGrid>
+            </div>
           )}
         </section>
       </div>
@@ -436,85 +456,18 @@ export function SongEditor(): JSX.Element {
   )
 }
 
-// ─── Local primitives used only on this page ────────────────────────
+// ─── Local pieces used only on this page ────────────────────────────
 
-/** Bare back-to-library link, used by the loading/error fallback states
- * above so the operator is never stranded without a way out. */
-function BackLink(): JSX.Element {
-  return (
-    <div className="shrink-0 border-b border-border bg-card px-6 py-4">
-      <Link
-        to="/library"
-        className="font-mono text-[9.5px] font-semibold uppercase leading-none tracking-[0.12em] text-muted-foreground transition-colors hover:text-signal"
-      >
-        ← SONGS
-      </Link>
-    </div>
-  )
-}
-
-function Input({
-  className,
-  ...rest
-}: React.InputHTMLAttributes<HTMLInputElement>): JSX.Element {
-  return (
-    <input
-      type="text"
-      {...rest}
-      className={cn(
-        'h-9 w-full border border-border bg-background px-3 text-[13px] text-foreground outline-none transition-colors',
-        'placeholder:text-muted-foreground/60',
-        'focus:border-signal/50',
-        className
-      )}
-    />
-  )
-}
-
-function Select({
-  className,
-  ...rest
-}: React.SelectHTMLAttributes<HTMLSelectElement>): JSX.Element {
-  return (
-    <select
-      {...rest}
-      className={cn(
-        'h-9 w-full border border-border bg-background px-2 text-[13px] text-foreground outline-none transition-colors',
-        'focus:border-signal/50',
-        className
-      )}
-    />
-  )
-}
-
-function Field({
-  label,
-  hint,
-  className,
-  children
-}: {
-  label: string
-  hint?: string
-  className?: string
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <label className={cn('flex flex-col gap-1.5', className)}>
-      <span className="flex items-baseline justify-between">
-        <MonoLabel size="xs">{label}</MonoLabel>
-        {hint && <span className="text-[10px] text-dim">{hint}</span>}
-      </span>
-      {children}
-    </label>
-  )
-}
+/** Breadcrumb back to the library — also on the loading/error states so
+ * the operator is never stranded without a way out. */
+const BACK = { to: '/library', label: 'Songs' }
 
 /**
- * SlidePreviewCard — one cell of the right-column layout grid: a mono
- * header bar (section label), a 16:9 body themed with the song's
- * EFFECTIVE theme (background colour/image + real font/text colour —
- * see the module doc for why video and auto-fit are deliberately not
- * reproduced here), and a corner shortcut glyph.
+ * SlidePreviewCard — one rounded 16:9 thumbnail themed with the song's
+ * EFFECTIVE theme (background colour/image + real font/text colour — see
+ * the module doc for why video and auto-fit are deliberately not
+ * reproduced here), with the section label chip and the slide's
+ * keyboard shortcut underneath.
  */
 function SlidePreviewCard({
   slide,
@@ -528,14 +481,9 @@ function SlidePreviewCard({
   const textStyle = themedTextStyle(theme)
 
   return (
-    <div className="bg-card">
-      <div className="border-b border-border px-2.5 py-[7px]">
-        <MonoLabel size="xs" tone="soft">
-          {slide.sectionLabel || '—'}
-        </MonoLabel>
-      </div>
+    <figure className="min-w-0">
       <div
-        className="relative flex aspect-video items-center justify-center overflow-hidden p-3.5"
+        className="relative flex aspect-video items-center justify-center overflow-hidden rounded-lg p-3.5 ring-1 ring-inset ring-white/5"
         style={bodyStyle}
       >
         {/* Deliberately NO scrim here, unlike SlideCard.tsx's `bg-black/25`
@@ -546,7 +494,7 @@ function SlidePreviewCard({
             projector actually renders) has no scrim either, so this is
             the honest rendering, not an incomplete one. */}
         {slide.lines.length === 0 ? (
-          <span className="text-[10px] italic text-dim">(empty)</span>
+          <span className="text-[12px] italic text-muted-foreground">Empty slide</span>
         ) : (
           <div
             className="whitespace-pre-line text-center text-[12px] font-bold leading-[1.5]"
@@ -555,12 +503,20 @@ function SlidePreviewCard({
             {slide.lines.join('\n')}
           </div>
         )}
-        {slide.shortcut && (
-          <div className="pointer-events-none absolute bottom-1.5 right-2 font-mono text-[10px] text-dim">
-            {slide.shortcut}
-          </div>
-        )}
       </div>
-    </div>
+      <figcaption className="mt-1.5 flex items-center justify-between gap-2 px-0.5">
+        <Badge tone="neutral" className="min-w-0 truncate">
+          {slide.sectionLabel || 'Untitled'}
+        </Badge>
+        {slide.shortcut && (
+          <kbd
+            className="shrink-0 rounded border border-border px-1.5 py-0.5 font-sans text-[12px] leading-none text-muted-foreground"
+            title="Keyboard shortcut in Service Mode"
+          >
+            {slide.shortcut}
+          </kbd>
+        )}
+      </figcaption>
+    </figure>
   )
 }
