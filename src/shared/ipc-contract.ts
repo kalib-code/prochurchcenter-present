@@ -30,6 +30,7 @@ import type {
   CanvaImportProgress,
   CanvaImportResult
 } from './canva'
+import type { LibraryChange, McpState } from './mcp'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output slide payload — what the output window renders at any given moment
@@ -581,6 +582,28 @@ export interface PresentApi {
     onImportProgress(callback: (p: CanvaImportProgress) => void): () => void
   }
 
+  /**
+   * AI connections — the local MCP server AI tools on this computer (Claude
+   * Code, Codex) connect to. See shared/mcp.ts and main/mcp/.
+   */
+  mcp: {
+    getState(): Promise<McpState>
+    setEnabled(enabled: boolean): Promise<McpState>
+    /** Issue a new token; every connected AI tool must be set up again. */
+    regenerateToken(): Promise<McpState>
+    setPort(port: number): Promise<McpState>
+    /** Status / activity changes. Returns an unsubscribe function. */
+    onStateChange(callback: (state: McpState) => void): () => void
+  }
+
+  library: {
+    /**
+     * Fired when something outside the renderer (an AI tool) changed
+     * songs or setlists. Returns an unsubscribe function.
+     */
+    onExternalChange(callback: (change: LibraryChange) => void): () => void
+  }
+
   output: {
     /** Send a new slide to the output window. Fire-and-forget. */
     setSlide(payload: SlidePayload): Promise<void>
@@ -813,6 +836,18 @@ export const CHANNELS = {
     deletePdf: 'canva:deletePdf',
     // Broadcast main -> operator window during an import
     eventImportProgress: 'canva:event:importProgress'
+  },
+  mcp: {
+    getState: 'mcp:getState',
+    setEnabled: 'mcp:setEnabled',
+    regenerateToken: 'mcp:regenerateToken',
+    setPort: 'mcp:setPort',
+    // Broadcast main -> operator window on status or activity change
+    eventState: 'mcp:event:state'
+  },
+  library: {
+    // Broadcast main -> operator window after an AI tool changes the library
+    eventExternalChange: 'library:event:externalChange'
   },
   output: {
     setSlide: 'output:setSlide',

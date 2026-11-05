@@ -35,7 +35,7 @@
  * position-specific header ("Insert at position N" / "Add to the end").
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   DndContext,
@@ -76,6 +76,7 @@ import { GapInsert } from '../components/ui/GapInsert'
 import { formatServiceDate } from '../lib/setlist-helpers'
 import { probePdfPageCount } from '../lib/pdfLoader'
 import { evictPptxDeck, probeVisibleSlideCount } from '../lib/pptxLoader'
+import { mergeExternalSetlist, sameSetlistFields } from '../lib/mergeExternalSetlist'
 
 interface Draft {
   name: string
@@ -140,12 +141,33 @@ function SetlistEditorForId(): JSX.Element {
     if (songs.length === 0) loadLibrary()
   }, [setlists.length, songs.length, loadSetlists, loadLibrary])
 
+  // What this editor last knew was on disk — the "base" of the three-way
+  // merge when an AI tool saves this setlist while it is open.
+  const baseRef = useRef<Draft | null>(null)
+
   useEffect(() => {
     if (draft) return
     if (!id) return
     const s = getById(id)
-    if (s) setDraft(setlistToDraft(s))
+    if (s) {
+      baseRef.current = setlistToDraft(s)
+      setDraft(setlistToDraft(s))
+    }
   }, [id, draft, setlists, getById])
+
+  // An AI tool (MCP) saved this setlist: fold its change into the draft
+  // instead of letting the next autosave write over it. Pending local
+  // edits survive; see mergeExternalSetlist for the rules.
+  useEffect(() => {
+    if (!id) return
+    return window.api.library.onExternalChange((change) => {
+      if (change.kind !== 'setlist' || change.setlist.id !== id) return
+      const remote = setlistToDraft(change.setlist)
+      const base = baseRef.current ?? remote
+      baseRef.current = remote
+      setDraft((prev) => (prev ? mergeExternalSetlist(base, prev, remote) : remote))
+    })
+  }, [id])
 
   // Background staleness check: which Canva-sourced decks in this setlist
   // have changed in Canva since import. Deliberately fire-and-forget and
@@ -195,7 +217,17 @@ function SetlistEditorForId(): JSX.Element {
     value: draft,
     onSave: async (value) => {
       if (!value || !id) return
-      await update(id, draftToPatch(value))
+      const patch = draftToPatch(value)
+      const asDraft: Draft = {
+        name: patch.name ?? value.name,
+        date: patch.date ?? value.date,
+        items: patch.items ?? value.items,
+        startTime: patch.startTime
+      }
+      // A merged-in AI change with no local edits is already on disk.
+      if (sameSetlistFields(asDraft, baseRef.current)) return
+      const saved = await update(id, patch)
+      baseRef.current = setlistToDraft(saved)
     }
   })
 

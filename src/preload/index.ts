@@ -19,6 +19,7 @@ import {
   type BackupImportMode
 } from '@shared/ipc-contract'
 import type { CanvaImportProgress } from '@shared/canva'
+import type { LibraryChange, McpState } from '@shared/mcp'
 import type { Theme, ThemeOverride } from '@shared/types'
 
 /**
@@ -122,6 +123,24 @@ const api: PresentApi = {
       const listener = (_: IpcRendererEvent, p: CanvaImportProgress): void => callback(p)
       ipcRenderer.on(CHANNELS.canva.eventImportProgress, listener)
       return () => ipcRenderer.removeListener(CHANNELS.canva.eventImportProgress, listener)
+    }
+  },
+  mcp: {
+    getState: () => ipcRenderer.invoke(CHANNELS.mcp.getState),
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke(CHANNELS.mcp.setEnabled, enabled),
+    regenerateToken: () => ipcRenderer.invoke(CHANNELS.mcp.regenerateToken),
+    setPort: (port: number) => ipcRenderer.invoke(CHANNELS.mcp.setPort, port),
+    onStateChange: (callback: (state: McpState) => void): (() => void) => {
+      const listener = (_: IpcRendererEvent, state: McpState): void => callback(state)
+      ipcRenderer.on(CHANNELS.mcp.eventState, listener)
+      return () => ipcRenderer.removeListener(CHANNELS.mcp.eventState, listener)
+    }
+  },
+  library: {
+    onExternalChange: (callback: (change: LibraryChange) => void): (() => void) => {
+      const listener = (_: IpcRendererEvent, change: LibraryChange): void => callback(change)
+      ipcRenderer.on(CHANNELS.library.eventExternalChange, listener)
+      return () => ipcRenderer.removeListener(CHANNELS.library.eventExternalChange, listener)
     }
   },
   output: {

@@ -30,6 +30,7 @@ import { useServiceStore } from '../stores/useServiceStore'
 import { SlideRenderer } from '../components/SlideRenderer'
 import { ThemeFields } from '../components/ThemeFields'
 import { CanvaConnectionCard } from '../components/CanvaConnectionCard'
+import { AiConnectionsCard } from '../components/AiConnectionsCard'
 import { FEATURES } from '@shared/features'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
@@ -66,7 +67,7 @@ type Section = 'display' | 'theme' | 'output' | 'data' | 'connections' | 'about'
 
 type IconComponent = (p: { size?: number; className?: string }) => JSX.Element
 
-const ALL_SECTIONS: {
+const SECTIONS: {
   id: Section
   label: string
   description: string
@@ -100,7 +101,7 @@ const ALL_SECTIONS: {
   {
     id: 'connections',
     label: 'Connections',
-    description: 'Link Present to the other tools your church already uses.',
+    description: 'Link Present to AI assistants and the other tools your church already uses.',
     icon: LinkChainIcon
   },
   {
@@ -110,10 +111,6 @@ const ALL_SECTIONS: {
     icon: InfoCircleIcon
   }
 ]
-
-// Connections only holds the Canva account card, so the whole tab hides
-// while Canva is feature-flagged off (see shared/features.ts).
-const SECTIONS = ALL_SECTIONS.filter((s) => s.id !== 'connections' || FEATURES.canva)
 
 const FALLBACK_LINES = [
   'For God so loved the world',
@@ -254,7 +251,12 @@ export function Settings(): JSX.Element {
 
             {section === 'data' && <DataSection />}
 
-            {section === 'connections' && FEATURES.canva && <CanvaConnectionCard />}
+            {section === 'connections' && (
+              <div className="space-y-5">
+                <AiConnectionsCard />
+                {FEATURES.canva && <CanvaConnectionCard />}
+              </div>
+            )}
 
             {section === 'about' && <AboutSection />}
           </div>

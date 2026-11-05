@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, readdir, rm } from 'fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { atomicWriteJson, pendingWriteCount, waitForPendingWrites, withFileLock } from './atomic'
@@ -80,5 +80,15 @@ describe('pending write tracking (quit drain)', () => {
     await expect(atomicWriteJson(join(dir, 'missing-dir', 'a.json'), {})).rejects.toThrow()
     expect(pendingWriteCount()).toBe(0)
     expect(await waitForPendingWrites(10)).toBe(true)
+  })
+})
+
+describe('atomicWriteJson mode', () => {
+  it.skipIf(process.platform === 'win32')('creates the file with the requested permissions', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'present-atomic-mode-'))
+    const file = join(dir, 'secret.json')
+    await atomicWriteJson(file, { token: 'x' }, { mode: 0o600 })
+    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    await rm(dir, { recursive: true, force: true })
   })
 })
