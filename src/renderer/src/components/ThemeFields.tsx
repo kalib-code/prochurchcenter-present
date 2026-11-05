@@ -14,21 +14,22 @@
  * because the preview depends on the parent's context (current service
  * slide, current song draft, etc).
  *
- * Presentation matches the KLB row layout used throughout Settings.tsx —
- * bordered `Panel` groups with a mono head, each row a
- * `flex items-center gap-4 border-b border-rule px-4 py-3.5` with the
- * label on the left and the control on the right. The props and
- * `onChange` patch contract are unchanged from the pre-redesign version;
- * only presentation moved.
+ * Presentation uses the shared Settings vocabulary (components/settings/
+ * SettingsKit): `SettingsGroup` panels with a sentence-case title and
+ * description, and `SettingRow`s with the label on the left and the
+ * control on the right. The props and `onChange` patch contract are
+ * unchanged from the pre-redesign version; only presentation moved.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Theme, TextAlign, TextPosition, TextEffect, Transition } from '@shared/types'
 import type { PickFileKind } from '@shared/ipc-contract'
 import { useFontsStore } from '../stores/useFontsStore'
+import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
-import { Panel } from './ui/Card'
+import { Input, Select } from './ui/Input'
 import { Segmented } from './ui/Segmented'
+import { ColorInput, RangeInput, SettingRow, SettingsGroup } from './settings/SettingsKit'
 
 const BUILT_IN_FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'System', value: 'system-ui, -apple-system, Segoe UI, sans-serif' },
@@ -68,12 +69,13 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
   return (
     <div className="space-y-4">
       {/* Typography */}
-      <Group title="TYPOGRAPHY" description="Font and text color for song lyrics and scripture.">
-        <Row label="Font">
-          <select
+      <Group title="Typography" description="Font and text color for song lyrics and scripture.">
+        <Row label="Font" htmlFor="theme-font">
+          <Select
+            id="theme-font"
             value={theme.fontFamily}
             onChange={(e) => onChange({ fontFamily: e.target.value })}
-            className={selectClass}
+            className="w-56"
           >
             <optgroup label="Built-in">
               {BUILT_IN_FONT_OPTIONS.map((f) => (
@@ -102,36 +104,24 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
             )}
             {/* Fallback option for legacy themes whose fontFamily
                 doesn't match any of the above (e.g. older saved value). */}
-            {![...BUILT_IN_FONT_OPTIONS.map((f) => f.value),
-               ...customFonts.map((f) => `"${f.family}"`),
-               ...systemFonts.map((f) => `"${f}"`)].includes(theme.fontFamily) && (
-              <option value={theme.fontFamily}>Custom value</option>
-            )}
-          </select>
+            {![
+              ...BUILT_IN_FONT_OPTIONS.map((f) => f.value),
+              ...customFonts.map((f) => `"${f.family}"`),
+              ...systemFonts.map((f) => `"${f}"`)
+            ].includes(theme.fontFamily) && <option value={theme.fontFamily}>Custom value</option>}
+          </Select>
         </Row>
 
-        <Row label="Custom fonts">
-          <div className="flex flex-col items-end gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void uploadCustom()
-              }}
-            >
-              Upload font file…
-            </Button>
-            <p className="max-w-[220px] text-right text-[10.5px] leading-[1.5] text-muted-foreground">
-              .ttf, .otf, .woff, .woff2 — uploaded fonts are available
-              to every theme.
-            </p>
-            {customFonts.length > 0 && (
-              <ul className="mt-1 flex w-full flex-col gap-1">
+        <Row
+          label="Custom fonts"
+          description=".ttf, .otf, .woff or .woff2. Uploaded fonts are available to every theme."
+          below={
+            customFonts.length > 0 ? (
+              <ul className="flex flex-col gap-1">
                 {customFonts.map((f) => (
                   <li
                     key={f.family}
-                    className="flex items-center justify-between gap-2 border border-rule px-2 py-1 text-[11px]"
+                    className="flex items-center justify-between gap-3 rounded-md bg-hover/60 px-3 py-1.5 text-[13.5px] text-bone"
                   >
                     <span
                       className="truncate"
@@ -145,49 +135,51 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
                       onClick={() => {
                         void deleteCustom(f.family)
                       }}
-                      className="shrink-0 text-muted-foreground hover:text-signal"
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[12.5px] text-muted-foreground transition-colors hover:text-live focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                       title="Remove font"
+                      aria-label={`Remove font ${f.family}`}
                     >
                       Remove
                     </button>
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
+            ) : undefined
+          }
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void uploadCustom()
+            }}
+          >
+            Upload font…
+          </Button>
         </Row>
 
-        <Row label="Size">
-          <div className="flex items-center gap-2">
-            <input
-              type="range"
-              min={50}
-              max={150}
-              step={5}
-              value={theme.fontSizePercent}
-              onChange={(e) =>
-                onChange({ fontSizePercent: Number(e.target.value) })
-              }
-              className="w-28"
-            />
-            <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
-              {theme.fontSizePercent}%
-            </span>
-          </div>
+        <Row label="Size" htmlFor="theme-font-size">
+          <RangeInput
+            id="theme-font-size"
+            min={50}
+            max={150}
+            step={5}
+            value={theme.fontSizePercent}
+            onChange={(e) => onChange({ fontSizePercent: Number(e.target.value) })}
+            readout={`${theme.fontSizePercent}%`}
+          />
         </Row>
 
         <Row label="Text color">
-          <ColorField
-            value={theme.textColor}
-            onChange={(v) => onChange({ textColor: v })}
-          />
+          <ColorField value={theme.textColor} onChange={(v) => onChange({ textColor: v })} />
         </Row>
       </Group>
 
       {/* Background */}
       <Group
-        title="BACKGROUND"
-        description="The base layer behind every slide. Picking an image clears the video and vice versa."
+        title="Background"
+        description="The layer behind every slide. Choosing an image clears the video, and the other way round."
       >
         <Row label="Color">
           <ColorField
@@ -200,9 +192,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
           label="Image"
           value={theme.backgroundImagePath}
           kind="image"
-          onPick={(path) =>
-            onChange({ backgroundImagePath: path, backgroundVideoPath: null })
-          }
+          onPick={(path) => onChange({ backgroundImagePath: path, backgroundVideoPath: null })}
           onClear={() => onChange({ backgroundImagePath: null })}
         />
 
@@ -210,15 +200,13 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
           label="Video"
           value={theme.backgroundVideoPath}
           kind="video"
-          onPick={(path) =>
-            onChange({ backgroundVideoPath: path, backgroundImagePath: null })
-          }
+          onPick={(path) => onChange({ backgroundVideoPath: path, backgroundImagePath: null })}
           onClear={() => onChange({ backgroundVideoPath: null })}
         />
       </Group>
 
       {/* Placement */}
-      <Group title="TEXT PLACEMENT" description="Where lyrics land on the slide.">
+      <Group title="Text placement" description="Where lyrics land on the slide.">
         <Row label="Horizontal">
           <Segmented<TextAlign>
             value={theme.textAlign}
@@ -247,10 +235,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
       </Group>
 
       {/* Effects */}
-      <Group
-        title="TEXT EFFECTS"
-        description="Makes text legible against busy backgrounds."
-      >
+      <Group title="Text effects" description="Makes text legible against busy backgrounds.">
         <Row label="Effect">
           <Segmented<TextEffect>
             value={theme.textEffect}
@@ -276,7 +261,7 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
       </Group>
 
       {/* Transitions */}
-      <Group title="TRANSITIONS" description="How one slide hands off to the next.">
+      <Group title="Transitions" description="How one slide hands off to the next.">
         <Row label="Type">
           <Segmented<Transition>
             value={theme.transition}
@@ -290,31 +275,24 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
         </Row>
 
         {theme.transition === 'fade' && (
-          <Row label="Duration">
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={50}
-                max={1000}
-                step={50}
-                value={theme.transitionDurationMs}
-                onChange={(e) =>
-                  onChange({ transitionDurationMs: Number(e.target.value) })
-                }
-                className="w-28"
-              />
-              <span className="w-14 text-right text-[11px] tabular-nums text-muted-foreground">
-                {theme.transitionDurationMs}ms
-              </span>
-            </div>
+          <Row label="Duration" htmlFor="theme-transition-duration">
+            <RangeInput
+              id="theme-transition-duration"
+              min={50}
+              max={1000}
+              step={50}
+              value={theme.transitionDurationMs}
+              onChange={(e) => onChange({ transitionDurationMs: Number(e.target.value) })}
+              readout={`${theme.transitionDurationMs} ms`}
+            />
           </Row>
         )}
       </Group>
 
       {/* Standby */}
       <Group
-        title="STANDBY IMAGE"
-        description="Shown when you press L during a service (e.g. church logo)."
+        title="Standby image"
+        description="Shown when you press L during a service, such as your church logo."
       >
         <MediaPickerRow
           label="Image"
@@ -329,44 +307,11 @@ export function ThemeFields({ theme, onChange }: ThemeFieldsProps): JSX.Element 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Local layout primitives
+// Local layout primitives — thin aliases over the shared Settings kit
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Group({
-  title,
-  description,
-  children
-}: {
-  title: string
-  description?: string
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <Panel title={title}>
-      {description && (
-        <div className="border-b border-rule px-4 py-2.5 text-[11px] leading-[1.5] text-muted-foreground">
-          {description}
-        </div>
-      )}
-      {children}
-    </Panel>
-  )
-}
-
-function Row({
-  label,
-  children
-}: {
-  label: string
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <div className="flex items-center gap-4 border-b border-rule px-4 py-3.5 last:border-b-0">
-      <span className="text-[13px] font-semibold text-foreground">{label}</span>
-      <div className="min-w-0 flex-1 text-right">{children}</div>
-    </div>
-  )
-}
+const Group = SettingsGroup
+const Row = SettingRow
 
 function ColorField({
   value,
@@ -377,17 +322,18 @@ function ColorField({
 }): JSX.Element {
   return (
     <div className="flex items-center justify-end gap-2">
-      <input
-        type="color"
+      <ColorInput
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 w-11 cursor-pointer border border-border bg-transparent"
+        aria-label="Pick color"
       />
-      <input
+      <Input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-24 border border-border bg-background px-2 py-1 text-right font-mono text-[11px] text-foreground outline-none focus:border-signal/50"
+        aria-label="Hex color"
+        spellCheck={false}
+        className="w-28 px-2.5 text-[13px] tabular-nums"
       />
     </div>
   )
@@ -411,31 +357,51 @@ function MediaPickerRow({
     if (picked) onPick(picked)
   }
 
+  // Flag a theme file that has been moved or deleted: the projector
+  // silently drops a missing background, so say so where it's fixed.
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    if (!value) {
+      setMissing(false)
+      return
+    }
+    window.api.files
+      .checkExists([value])
+      .then((r) => {
+        if (!cancelled) setMissing(r[value] === false)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [value])
+
   return (
-    <Row label={label}>
-      <div className="flex items-center justify-end gap-2">
-        {value && (
-          <span
-            className="max-w-[10rem] truncate font-mono text-[10px] text-muted-foreground"
-            title={value}
-          >
-            {displayFileName(value)}
+    <Row
+      label={label}
+      description={
+        value ? (
+          <span className="flex max-w-[18rem] items-center gap-1.5" title={value}>
+            <span className={missing ? 'truncate text-warn' : 'truncate text-soft'}>
+              {displayFileName(value)}
+            </span>
+            {missing && <Badge tone="warn">Missing</Badge>}
           </span>
-        )}
-        <Button type="button" variant="outline" size="sm" onClick={handlePick}>
-          {value ? 'Change…' : 'Choose…'}
-        </Button>
+        ) : (
+          'None'
+        )
+      }
+    >
+      <div className="flex items-center justify-end gap-1.5">
         {value && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-signal-deep hover:text-signal"
-            onClick={onClear}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
             Clear
           </Button>
         )}
+        <Button type="button" variant="secondary" size="sm" onClick={handlePick}>
+          {value ? 'Change…' : 'Choose…'}
+        </Button>
       </div>
     </Row>
   )
@@ -445,6 +411,3 @@ function displayFileName(path: string): string {
   const parts = path.split(/[/\\]/)
   return parts[parts.length - 1] || path
 }
-
-const selectClass =
-  'w-56 border border-border bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus:border-signal/50'
