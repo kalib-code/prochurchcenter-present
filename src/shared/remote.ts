@@ -176,8 +176,8 @@ const OSC_TRIGGERS = new Map<string, RemoteCommand['type']>(Object.entries({
 export function oscToCommand(address: string, args: OscArg[]): RemoteCommand | null {
   const trigger = OSC_TRIGGERS.get(address)
   if (trigger) {
-    // TouchOSC-style buttons send 1 on press and 0 on release.
-    if (args.length > 0 && args[0] === 0) return null
+    // TouchOSC-style buttons send 1 (or T) on press and 0 (or F) on release.
+    if (args.length > 0 && (args[0] === 0 || args[0] === false)) return null
     return { type: trigger } as RemoteCommand
   }
   if (address === '/present/item') {
