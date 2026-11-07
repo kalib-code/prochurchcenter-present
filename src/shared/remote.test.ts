@@ -16,6 +16,7 @@ describe('parseRemoteCommand', () => {
       expect(parseRemoteCommand({ type })).toEqual({ type })
     }
     expect(parseRemoteCommand({ type: 'goToItem', number: 3 })).toEqual({ type: 'goToItem', number: 3 })
+    expect(parseRemoteCommand({ type: 'goToSlide', number: 4 })).toEqual({ type: 'goToSlide', number: 4 })
     expect(parseRemoteCommand({ type: 'goToSection', section: 'Chorus' })).toEqual({
       type: 'goToSection',
       section: 'Chorus'
@@ -25,6 +26,9 @@ describe('parseRemoteCommand', () => {
     expect(parseRemoteCommand({ type: 'explode' })).toBeNull()
     for (const number of [0, -1, 1.5, '3']) {
       expect(parseRemoteCommand({ type: 'goToItem', number })).toBeNull()
+    }
+    for (const number of [0, -1, 1.5, '3']) {
+      expect(parseRemoteCommand({ type: 'goToSlide', number })).toBeNull()
     }
     expect(parseRemoteCommand({ type: 'goToSection', section: '' })).toBeNull()
     expect(parseRemoteCommand({ type: 'goToSection', section: '   ' })).toBeNull()
@@ -105,6 +109,12 @@ describe('midiToCommand', () => {
     expect(midiToCommand([0x9f, 81, 90], 16)).toEqual({ type: 'goToSection', section: 'Verse 2' })
     expect(midiToCommand([0xcf, 2], 16)).toEqual({ type: 'goToItem', number: 3 })
   })
+  it('note 100 is go to slide, velocity = slide number', () => {
+    expect(midiToCommand([0x9f, 100, 5], 16)).toEqual({ type: 'goToSlide', number: 5 })
+    expect(midiToCommand([0x9f, 100, 127], 16)).toEqual({ type: 'goToSlide', number: 127 })
+    expect(midiToCommand([0x9f, 100, 0], 16)).toBeNull()
+    expect(midiToCommand([0x90, 100, 5], 16)).toBeNull()
+  })
   it('ignores everything else', () => {
     expect(midiToCommand([0x9f, 60, 0], 16)).toBeNull()
     expect(midiToCommand([0x90, 60, 100], 16)).toBeNull()
@@ -124,6 +134,12 @@ describe('oscToCommand', () => {
     expect(oscToCommand('/present/item', [3])).toEqual({ type: 'goToItem', number: 3 })
     expect(oscToCommand('/present/item', [3.0])).toEqual({ type: 'goToItem', number: 3 })
     expect(oscToCommand('/present/item', [2.5])).toBeNull()
+    expect(oscToCommand('/present/slide', [3])).toEqual({ type: 'goToSlide', number: 3 })
+    expect(oscToCommand('/present/slide', [3.0])).toEqual({ type: 'goToSlide', number: 3 })
+    expect(oscToCommand('/present/slide', [0])).toBeNull()
+    expect(oscToCommand('/present/slide', [-2])).toBeNull()
+    expect(oscToCommand('/present/slide', [2.5])).toBeNull()
+    expect(oscToCommand('/present/slide', [])).toBeNull()
     expect(oscToCommand('/present/section', ['bridge'])).toEqual({ type: 'goToSection', section: 'bridge' })
     expect(oscToCommand('/present/section', [])).toBeNull()
     expect(oscToCommand('/other', [])).toBeNull()
@@ -139,6 +155,7 @@ describe('describeCommand', () => {
       [{ type: 'nextItem' }, 'Next song'],
       [{ type: 'prevItem' }, 'Previous song'],
       [{ type: 'goToItem', number: 3 }, 'Go to song 3'],
+      [{ type: 'goToSlide', number: 4 }, 'Go to slide 4'],
       [{ type: 'goToSection', section: 'Chorus' }, 'Go to Chorus'],
       [{ type: 'black' }, 'Black screen'],
       [{ type: 'logo' }, 'Logo screen'],

@@ -59,6 +59,14 @@ function run(cmd: RemoteCommand, now: number): RemoteResult {
       if (cmd.number < 1 || cmd.number > st.items.length) return { ok: false, reason: 'not-found' }
       svc.jumpTo(cmd.number - 1, 0)
       break
+    case 'goToSlide': {
+      const item = st.items[st.itemIndex]
+      if (!item || cmd.number < 1 || cmd.number > item.slides.length) {
+        return { ok: false, reason: 'not-found' }
+      }
+      svc.jumpTo(st.itemIndex, cmd.number - 1)
+      break
+    }
     case 'goToSection': {
       const item = st.items[st.itemIndex]
       if (!item || item.kind !== 'song') return { ok: false, reason: 'not-a-song' }

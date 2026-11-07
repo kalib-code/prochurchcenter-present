@@ -154,6 +154,35 @@ describe('executeRemoteCommand', () => {
     expect(pos()).toEqual({ i: 1, s: 0 })
   })
 
+  it('goToSlide jumps within the current item, any kind', () => {
+    start()
+    expect(run({ type: 'goToSlide', number: 3 }).ok).toBe(true)
+    expect(pos()).toEqual({ i: 0, s: 2 })
+    expect(run({ type: 'goToSlide', number: 1 }).ok).toBe(true)
+    expect(pos()).toEqual({ i: 0, s: 0 })
+    useServiceStore.getState().jumpTo(1, 0)
+    expect(run({ type: 'goToSlide', number: 1 }).ok).toBe(true)
+    expect(pos()).toEqual({ i: 1, s: 0 })
+  })
+
+  it('goToSlide out of range is not-found and does not move', () => {
+    start()
+    useServiceStore.getState().jumpTo(0, 1)
+    expect(run({ type: 'goToSlide', number: 4 })).toEqual({ ok: false, reason: 'not-found' })
+    expect(pos()).toEqual({ i: 0, s: 1 })
+    useServiceStore.getState().jumpTo(1, 0)
+    expect(run({ type: 'goToSlide', number: 2 })).toEqual({ ok: false, reason: 'not-found' })
+    expect(pos()).toEqual({ i: 1, s: 0 })
+  })
+
+  it('goToSlide follows the pause and no-service rules', () => {
+    expect(run({ type: 'goToSlide', number: 1 })).toEqual({ ok: false, reason: 'no-service' })
+    start()
+    useRemoteStore.getState().setPaused(true)
+    expect(run({ type: 'goToSlide', number: 2 })).toEqual({ ok: false, reason: 'paused' })
+    expect(pos()).toEqual({ i: 0, s: 0 })
+  })
+
   it('black is idempotent', () => {
     start()
     run({ type: 'black' })

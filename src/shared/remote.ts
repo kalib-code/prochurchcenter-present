@@ -13,6 +13,7 @@ export type RemoteCommand =
   | { type: 'nextItem' }
   | { type: 'prevItem' }
   | { type: 'goToItem'; number: number } // 1-based
+  | { type: 'goToSlide'; number: number } // 1-based, within the current item
   | { type: 'goToSection'; section: string } // <= 40 chars
   | { type: 'black' }
   | { type: 'logo' }
@@ -65,7 +66,7 @@ export function parseRemoteCommand(raw: unknown): RemoteCommand | null {
   if ((SIMPLE_TYPES as readonly unknown[]).includes(type)) {
     return { type } as RemoteCommand
   }
-  if (type === 'goToItem') {
+  if (type === 'goToItem' || type === 'goToSlide') {
     const n = o.number
     if (typeof n === 'number' && Number.isInteger(n) && n >= 1) return { type, number: n }
     return null
@@ -137,6 +138,9 @@ const MIDI_NOTE_COMMANDS = new Map<number, RemoteCommand>(Object.entries({
   66: { type: 'live' }
 } as Record<string, RemoteCommand>).map(([k, v]) => [Number(k), v]))
 
+/** Note On velocity is the slide number (ProPresenter/FreeShow "slide at index"). */
+const MIDI_SLIDE_NOTE = 100
+
 const MIDI_SECTION_NOTES = new Map<number, string>(Object.entries({
   70: 'Intro',
   71: 'Pre-Chorus',
@@ -155,6 +159,7 @@ export function midiToCommand(data: ArrayLike<number>, channel: number): RemoteC
   if (kind === 0xc0) return { type: 'goToItem', number: data[1] + 1 }
   if (kind !== 0x90 || data.length < 3 || data[2] <= 0) return null
   const note = data[1]
+  if (note === MIDI_SLIDE_NOTE) return { type: 'goToSlide', number: data[2] }
   const simple = MIDI_NOTE_COMMANDS.get(note)
   if (simple) return { ...simple }
   const label = MIDI_SECTION_NOTES.get(note)
@@ -183,6 +188,9 @@ export function oscToCommand(address: string, args: OscArg[]): RemoteCommand | n
   if (address === '/present/item') {
     return parseRemoteCommand({ type: 'goToItem', number: args[0] })
   }
+  if (address === '/present/slide') {
+    return parseRemoteCommand({ type: 'goToSlide', number: args[0] })
+  }
   if (address === '/present/section') {
     return parseRemoteCommand({ type: 'goToSection', section: args[0] })
   }
@@ -201,6 +209,8 @@ export function describeCommand(cmd: RemoteCommand): string {
       return 'Previous song'
     case 'goToItem':
       return `Go to song ${cmd.number}`
+    case 'goToSlide':
+      return `Go to slide ${cmd.number}`
     case 'goToSection':
       return `Go to ${cmd.section}`
     case 'black':
