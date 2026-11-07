@@ -62,6 +62,7 @@ import { resolveNext } from '../lib/serviceNext'
 import { cn } from '../lib/utils'
 import type { PptxThumbError } from '../components/MediaPreview'
 import type { PptxSlideErrorKind } from '../components/PptxSlideView'
+import { RemoteChip } from '../components/service/RemoteChip'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { isPlaybackExpected, PLAYBACK_STALL_MS } from '../lib/videoPlayback'
 import type { Song } from '@shared/types'
@@ -989,6 +990,7 @@ function RunningView({
 
         <div className="flex shrink-0 items-center gap-2">
           <DisplayModeSwitch value={state.displayMode} onChange={handleDisplayModeChange} />
+          <RemoteChip />
           <div className="ml-2 flex items-center gap-0.5">
             <ShortcutButton keyLabel="B" title="Toggle blackout (B)" onClick={toggleBlack} />
             <ShortcutButton keyLabel="L" title="Toggle logo / standby (L)" onClick={toggleLogo} />

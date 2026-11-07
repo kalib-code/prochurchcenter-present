@@ -35,7 +35,7 @@ function useMcpState(): [McpState | null, (s: McpState) => void] {
   return [state, setState]
 }
 
-function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }): JSX.Element {
+export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   describeCommand,
+  isIPv4,
   midiToCommand,
   oscToCommand,
   parseRemoteCommand,
@@ -102,5 +103,21 @@ describe('describeCommand', () => {
       [{ type: 'status' }, 'Status request']
     ]
     for (const [cmd, text] of cases) expect(describeCommand(cmd)).toBe(text)
+  })
+})
+
+describe('isIPv4', () => {
+  it('accepts canonical addresses', () => {
+    for (const a of ['0.0.0.0', '10.0.0.1', '192.168.1.20', '255.255.255.255']) {
+      expect(isIPv4(a)).toBe(true)
+    }
+  })
+  it('rejects leading-zero octets', () => {
+    for (const a of ['01.2.3.4', '192.168.001.020', '1.2.3.04']) expect(isIPv4(a)).toBe(false)
+  })
+  it('rejects malformed input', () => {
+    for (const a of ['', '1.2.3', '1.2.3.4.5', '256.1.1.1', 'a.b.c.d', '1.2.3.-4']) {
+      expect(isIPv4(a)).toBe(false)
+    }
   })
 })

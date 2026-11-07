@@ -182,7 +182,9 @@ export function isIPv4(s: string): boolean {
   const parts = s.split('.')
   return (
     parts.length === 4 &&
-    parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
+    // No leading zeros: real sender addresses are canonical, so a padded
+    // entry would never match and would silently block every cue.
+    parts.every((p) => /^(0|[1-9]\d{0,2})$/.test(p) && Number(p) <= 255)
   )
 }
 
