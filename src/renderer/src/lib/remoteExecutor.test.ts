@@ -92,6 +92,61 @@ describe('executeRemoteCommand', () => {
     expect(pos()).toEqual({ i: 0, s: 2 })
   })
 
+  describe('duplicate goToSection', () => {
+    const twoChoruses: RenderableItem[] = [
+      { id: 'c', kind: 'song', label: 'Song', slides: [t('Verse 1'), t('Chorus'), t('Verse 2'), t('Chorus'), t('Bridge')] }
+    ]
+    const begin = () =>
+      useServiceStore.getState().start({ setlistId: 's', setlistName: 'S', items: twoChoruses })
+    const cue = (section: string, now: number, source: 'http' | 'osc' | 'midi' = 'osc') =>
+      executeRemoteCommand({ type: 'goToSection', section }, source, null, now)
+
+    it('an identical cue within 750 ms (any source) is a no-op that still reports ok', () => {
+      begin()
+      expect(cue('Chorus', 10_000).ok).toBe(true)
+      expect(pos()).toEqual({ i: 0, s: 1 })
+      const r = cue('chorus', 10_400, 'midi')
+      expect(r).toMatchObject({ ok: true, position: { section: 'Chorus', slideNumber: 2 } })
+      expect(pos()).toEqual({ i: 0, s: 1 })
+      expect(cue('C', 10_750, 'http').ok).toBe(true)
+      expect(pos()).toEqual({ i: 0, s: 1 })
+    })
+
+    it('the window runs from the last cue that moved, not from the duplicates', () => {
+      begin()
+      cue('Chorus', 10_000)
+      cue('Chorus', 10_700)
+      cue('Chorus', 10_751)
+      expect(pos()).toEqual({ i: 0, s: 3 })
+    })
+
+    it('a later repeat goes to the next occurrence', () => {
+      begin()
+      cue('Chorus', 10_000)
+      cue('Chorus', 11_000)
+      expect(pos()).toEqual({ i: 0, s: 3 })
+      cue('Chorus', 12_000)
+      expect(pos()).toEqual({ i: 0, s: 1 })
+    })
+
+    it('a different section within 750 ms still moves', () => {
+      begin()
+      cue('Chorus', 10_000)
+      cue('Bridge', 10_100)
+      expect(pos()).toEqual({ i: 0, s: 4 })
+      cue('Chorus', 10_200)
+      expect(pos()).toEqual({ i: 0, s: 1 })
+    })
+
+    it('is not a duplicate once something else has moved the slide', () => {
+      begin()
+      cue('Chorus', 10_000)
+      executeRemoteCommand({ type: 'next' }, 'osc', null, 10_100)
+      cue('Chorus', 10_200)
+      expect(pos()).toEqual({ i: 0, s: 3 })
+    })
+  })
+
   it('goToItem', () => {
     start()
     expect(run({ type: 'goToItem', number: 3 })).toEqual({ ok: false, reason: 'not-found' })

@@ -1,5 +1,7 @@
 import {
   describeCommand,
+  sectionKey,
+  sectionLabelKey,
   type RemoteCommand,
   type RemotePosition,
   type RemoteResult,
@@ -26,7 +28,20 @@ function readPosition(): RemotePosition | null {
   }
 }
 
-function run(cmd: RemoteCommand): RemoteResult {
+/**
+ * An identical goToSection within this long of the last one that moved is a
+ * duplicate (double-tapped pad, retried request, two controllers sending the
+ * same cue) and does not advance to the next occurrence.
+ */
+const DUPLICATE_SECTION_MS = 750
+
+/** The last goToSection that moved: which section, when, and where it landed. */
+let lastSection: { id: string; at: number; itemIndex: number; slideIndex: number } | null = null
+
+/** "Chorus", "chorus 2" and "C" are the same section; unknown names compare by label. */
+const sectionCueId = (cue: string): string => sectionKey(cue) ?? sectionLabelKey(cue)
+
+function run(cmd: RemoteCommand, now: number): RemoteResult {
   if (cmd.type === 'status') return { ok: true, position: readPosition() }
 
   if (useRemoteStore.getState().paused) return { ok: false, reason: 'paused' }
@@ -47,9 +62,22 @@ function run(cmd: RemoteCommand): RemoteResult {
     case 'goToSection': {
       const item = st.items[st.itemIndex]
       if (!item || item.kind !== 'song') return { ok: false, reason: 'not-a-song' }
+      const id = sectionCueId(cmd.section)
+      const prev = lastSection
+      if (
+        prev &&
+        prev.id === id &&
+        now - prev.at <= DUPLICATE_SECTION_MS &&
+        // Still where that cue landed; if anything moved since, run it again.
+        prev.itemIndex === st.itemIndex &&
+        prev.slideIndex === st.slideIndex
+      ) {
+        return { ok: true, position: readPosition() }
+      }
       const target = findSectionStart(item, st.slideIndex, cmd.section)
       if (target === null) return { ok: false, reason: 'not-found' }
       svc.jumpTo(st.itemIndex, target)
+      lastSection = { id, at: now, itemIndex: st.itemIndex, slideIndex: target }
       break
     }
     case 'black': svc.setDisplayMode('black'); break
@@ -67,6 +95,7 @@ let lastPausedRecordAt = -Infinity
 /** Forget per-session executor memory (tests; a fresh operator window). */
 export function resetRemoteExecutor(): void {
   lastPausedRecordAt = -Infinity
+  lastSection = null
 }
 
 /** The single place every remote cue is executed against the Service Mode store. */
@@ -76,7 +105,7 @@ export function executeRemoteCommand(
   from: string | null,
   now: number = Date.now()
 ): RemoteResult {
-  const result = run(cmd)
+  const result = run(cmd, now)
   if (cmd.type === 'status') return result
   if (!result.ok && result.reason === 'paused') {
     if (now - lastPausedRecordAt < PAUSED_RECORD_EVERY_MS) return result
