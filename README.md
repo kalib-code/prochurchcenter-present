@@ -36,6 +36,7 @@ internet connection changes nothing.
 - **Pre-flight check.** Run on launch: it confirms the projector is detected, media files are present, and a backup exists, all before Sunday.
 - **Backups.** One-click and automatic backups of your whole library, with safe restore.
 - **⌘K command palette.** Jump to any song, setlist, or screen.
+- **AI tools (MCP).** Let an AI assistant on your computer, such as Claude Code, help prepare a service: create setlists, add or fix songs, and add scripture and slide decks. It's off by default, local-only, and protected by a token. It can't control the projector or delete anything.
 
 ## Screenshots
 
