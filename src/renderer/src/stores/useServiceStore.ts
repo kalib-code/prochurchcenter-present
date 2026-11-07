@@ -59,6 +59,8 @@ interface ServiceActions {
   prevItem: () => void
   jumpTo: (itemIndex: number, slideIndex?: number) => void
 
+  /** Explicit (idempotent) display mode — used by remote control. */
+  setDisplayMode: (mode: OutputMode) => void
   toggleBlack: () => void
   toggleLogo: () => void
   toggleCheatSheet: () => void
@@ -325,6 +327,14 @@ export const useServiceStore = create<Store>((set, get) => ({
     set({ state: { ...s, itemIndex, slideIndex: safeSlide } })
     if (isItemChange) broadcastItemOverride(s.items, itemIndex)
     broadcastSlide(s.items, itemIndex, safeSlide)
+  },
+
+  setDisplayMode: (mode) => {
+    const s = get().state
+    if (s.mode !== 'running') return
+    if (s.displayMode === mode) return
+    set({ state: { ...s, displayMode: mode } })
+    broadcastMode(mode)
   },
 
   toggleBlack: () => {

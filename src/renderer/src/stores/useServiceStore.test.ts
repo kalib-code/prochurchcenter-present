@@ -113,3 +113,29 @@ describe('useServiceStore — lower thirds cleanup', () => {
     expect(output.setLowerThirdsContent).toHaveBeenLastCalledWith(hidden)
   })
 })
+
+describe('useServiceStore — setDisplayMode', () => {
+  let output: ReturnType<typeof stubOutputApi>
+  beforeEach(() => {
+    output = stubOutputApi()
+    useServiceStore.setState({ state: { mode: 'idle' } })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('sets the mode and broadcasts once; repeating is a no-op', () => {
+    startService()
+    const { setDisplayMode } = useServiceStore.getState()
+    setDisplayMode('black')
+    setDisplayMode('black')
+    const st = useServiceStore.getState().state
+    expect(st.mode === 'running' && st.displayMode).toBe('black')
+    expect(output.setBlack).toHaveBeenCalledTimes(1)
+  })
+
+  it('is a no-op when not running', () => {
+    useServiceStore.getState().setDisplayMode('black')
+    expect(output.setBlack).not.toHaveBeenCalled()
+  })
+})
