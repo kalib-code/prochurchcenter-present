@@ -30,7 +30,41 @@ permissions:
   contents: write # required for electron-builder to create the GitHub release
 
 jobs:
+  # Create the draft release ONCE, before the three builds start.
+  #
+  # Without this, each matrix job's electron-builder lists releases,
+  # finds none for the tag, and creates its own draft. Two jobs doing
+  # that in the same second produce two drafts for one tag, with mac
+  # assets in one and win/linux in the other (happened on v0.3.1).
+  # electron-builder reuses an existing DRAFT whose tag_name matches,
+  # so pre-creating it makes every job upload into the same release.
+  #
+  # Idempotent: on a re-run the release already exists and is reused.
+  # The tag comes from github.ref_name via env, never inlined into the
+  # script, keeping the "no untrusted interpolation" property above.
+  create-draft:
+    runs-on: ubuntu-latest
+    name: Create draft release
+    steps:
+      - name: Create draft release for this tag (if missing)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release for $TAG already exists; builds will upload into it."
+          else
+            # Title = version without the "v", matching what
+            # electron-builder names releases it creates itself.
+            gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
+              --title "${TAG#v}" --notes ""
+            echo "Created draft release for $TAG."
+          fi
+
   release:
+    needs: create-draft
     strategy:
       fail-fast: false
       matrix:

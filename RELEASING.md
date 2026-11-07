@@ -130,6 +130,10 @@ GitHub's auto-injected `GITHUB_TOKEN` should work for own-repo releases. If you 
 
 This is intentional. `electron-updater.checkForUpdates()` is a no-op when `app.isPackaged === false` because the version is `0.0.0` and there's no `app-update.yml` manifest in dev. To test the updater, run `pnpm build:mac` and launch the built `.app` from `dist/`.
 
+### Two draft releases for the same tag (files split between them)
+
+Fixed by the `create-draft` job in `release.yml`, which creates the draft once before the three builds start. Before it existed, each build's electron-builder created its own draft if none existed yet, and two builds checking in the same second produced two drafts (v0.3.1: Mac files in one, Windows + Linux in the other). If it ever happens again, **don't publish either draft**. Copy the missing files into one draft, check that every `latest*.yml` points at files that are there, then delete the other draft **by release ID** (`gh api -X DELETE repos/OWNER/REPO/releases/ID`). Deleting by tag is ambiguous, and `--cleanup-tag` would remove the tag the remaining draft needs.
+
 ### Tag pushed but no CI run
 
 Check `.github/workflows/release.yml` exists on the branch you tagged from. The workflow also needs the `contents: write` permission, which is set at the workflow level.
