@@ -177,6 +177,15 @@ export function describeCommand(cmd: RemoteCommand): string {
   }
 }
 
+/** Dotted IPv4: four decimal octets 0-255, no signs or spaces. */
+export function isIPv4(s: string): boolean {
+  const parts = s.split('.')
+  return (
+    parts.length === 4 &&
+    parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
+  )
+}
+
 /** Per-computer remote-control settings, stored in `<userData>/remote.json`. */
 export interface RemoteConfig {
   enabled: boolean
@@ -187,6 +196,8 @@ export interface RemoteConfig {
   midiEnabled: boolean
   midiInput: string | null
   midiChannel: number // 1..16
+  /** Only accept OSC from this IPv4 sender; null accepts any (OSC has no auth). */
+  oscAllowFrom: string | null
   token: string
 }
 

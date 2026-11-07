@@ -40,7 +40,7 @@ describe('createDispatcher', () => {
     expect(() => d.reply(sent[0].id, { ok: true, position: null })).not.toThrow()
   })
 
-  it('sends in call order with distinct ids', () => {
+  it('dispatch preserves order', () => {
     const sent: RemoteCommandEvent[] = []
     const d = createDispatcher((m) => (sent.push(m), true))
     void d.dispatch({ type: 'next' }, 'http', null)

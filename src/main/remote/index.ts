@@ -15,7 +15,7 @@ import { createSocket, type Socket } from 'dgram'
 import { networkInterfaces } from 'os'
 import { CHANNELS } from '@shared/ipc-contract'
 import {
-  oscToCommand,
+  isIPv4,
   type RemoteConfig,
   type RemoteResult,
   type RemoteState
@@ -25,7 +25,7 @@ import { isValidPort, newToken } from '../mcp/config'
 import { PortInUseError } from '../mcp/httpServer'
 import { loadRemoteConfig, saveRemoteConfig } from './config'
 import { startRemoteHttpServer } from './httpServer'
-import { decodeOscPacket } from './osc'
+import { oscPacketToCommands } from './oscIntake'
 import { createDispatcher } from './dispatch'
 
 let config: RemoteConfig | null = null
@@ -78,6 +78,7 @@ function normalizeFallback(): RemoteConfig {
     midiEnabled: false,
     midiInput: null,
     midiChannel: 16,
+    oscAllowFrom: null,
     token: ''
   }
 }
@@ -100,17 +101,16 @@ function startOsc(c: RemoteConfig): Promise<Socket> {
     const sock = createSocket('udp4')
     let bound = false
     sock.on('error', (err: NodeJS.ErrnoException) => {
-      if (!bound) return reject(err)
+      if (!bound) {
+        try { sock.close() } catch { /* already closed */ }
+        return reject(err)
+      }
       console.error('[remote] osc socket error', err.message)
     })
     sock.on('message', (buf, rinfo) => {
-      try {
-        for (const m of decodeOscPacket(buf)) {
-          const cmd = oscToCommand(m.address, m.args)
-          if (cmd) void dispatcher.dispatch(cmd, 'osc', rinfo.address).catch(() => {})
-        }
-      } catch (err) {
-        console.error('[remote] osc message failed', err)
+      // Read live config so oscAllowFrom changes apply to the next packet.
+      for (const cmd of oscPacketToCommands(buf, rinfo.address, config?.oscAllowFrom ?? null)) {
+        void dispatcher.dispatch(cmd, 'osc', rinfo.address).catch(() => {})
       }
     })
     sock.bind(c.oscPort, hostFor(c), () => {
@@ -213,6 +213,14 @@ function validatePatch(p: unknown): Patch {
   if ('scope' in r) {
     if (r.scope !== 'local' && r.scope !== 'network') throw new Error('Invalid scope.')
     out.scope = r.scope
+  }
+  if ('oscAllowFrom' in r) {
+    const v = r.oscAllowFrom
+    if (v !== null && typeof v !== 'string') throw new Error('Invalid OSC sender address.')
+    const t = v === null ? '' : v.trim()
+    if (t === '') out.oscAllowFrom = null
+    else if (isIPv4(t)) out.oscAllowFrom = t
+    else throw new Error('Enter an IPv4 address like 192.168.1.20, or leave it empty.')
   }
   if ('midiInput' in r) {
     if (r.midiInput !== null && typeof r.midiInput !== 'string') throw new Error('Invalid MIDI input.')

@@ -15,7 +15,8 @@ describe('normalizeRemoteConfig', () => {
       oscPort: 39219,
       midiEnabled: false,
       midiInput: null,
-      midiChannel: 16
+      midiChannel: 16,
+      oscAllowFrom: null
     })
     expect(c.token.length).toBeGreaterThanOrEqual(32)
   })
@@ -35,5 +36,11 @@ describe('normalizeRemoteConfig', () => {
     })
     expect(c).toMatchObject({ enabled: true, scope: 'network', httpPort: 40000, oscPort: 40000, midiInput: 'IAC', midiChannel: 3 })
     expect(c.token).toBe('x'.repeat(40))
+  })
+
+  it('keeps only a valid trimmed IPv4 oscAllowFrom', () => {
+    expect(normalizeRemoteConfig({ oscAllowFrom: ' 10.0.0.5 ' }).oscAllowFrom).toBe('10.0.0.5')
+    expect(normalizeRemoteConfig({ oscAllowFrom: 'nope' }).oscAllowFrom).toBeNull()
+    expect(normalizeRemoteConfig({ oscAllowFrom: 5 }).oscAllowFrom).toBeNull()
   })
 })

@@ -12,6 +12,7 @@ import {
   REMOTE_HTTP_DEFAULT_PORT,
   REMOTE_MIDI_DEFAULT_CHANNEL,
   REMOTE_OSC_DEFAULT_PORT,
+  isIPv4,
   type RemoteConfig
 } from '@shared/remote'
 import { atomicWriteJson } from '../storage/atomic'
@@ -38,6 +39,10 @@ export function normalizeRemoteConfig(raw: unknown): RemoteConfig {
       typeof ch === 'number' && Number.isInteger(ch) && ch >= 1 && ch <= 16
         ? ch
         : REMOTE_MIDI_DEFAULT_CHANNEL,
+    oscAllowFrom:
+      typeof r.oscAllowFrom === 'string' && isIPv4(r.oscAllowFrom.trim())
+        ? r.oscAllowFrom.trim()
+        : null,
     token: typeof r.token === 'string' && r.token.length >= 32 ? r.token : newToken()
   }
 }
