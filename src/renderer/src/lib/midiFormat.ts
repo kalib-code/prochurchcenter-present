@@ -1,10 +1,14 @@
 const hex = (b: number): string => b.toString(16).toUpperCase().padStart(2, '0')
 
-/** Human-readable summary of a raw MIDI message; null for realtime noise (clock, active sensing). */
+/**
+ * Human-readable summary of a raw MIDI message for the monitor. Null for
+ * every system message (status >= 0xF0: clock, MTC, transport, active
+ * sensing, sysex): none of them are cues and some arrive ~100/s.
+ */
 export function formatMidiMessage(data: ArrayLike<number>): string | null {
   if (data.length === 0) return null
   const status = data[0]
-  if (status === 0xf8 || status === 0xfe) return null
+  if (status >= 0xf0) return null
   const ch = (status & 0x0f) + 1
   const d1 = data[1]
   const d2 = data[2]

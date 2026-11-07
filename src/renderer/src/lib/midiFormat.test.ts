@@ -20,9 +20,13 @@ describe('formatMidiMessage', () => {
   it('falls back to hex bytes', () => {
     expect(formatMidiMessage([0xe0, 0, 64])).toBe('E0 00 40')
   })
-  it('ignores clock and active sensing', () => {
-    expect(formatMidiMessage([0xf8])).toBeNull()
-    expect(formatMidiMessage([0xfe])).toBeNull()
+  it('ignores every system message', () => {
+    expect(formatMidiMessage([0xf8])).toBeNull() // clock
+    expect(formatMidiMessage([0xfe])).toBeNull() // active sensing
+    expect(formatMidiMessage([0xf1, 0x23])).toBeNull() // MTC quarter frame
+    expect(formatMidiMessage([0xf2, 0x10, 0x02])).toBeNull() // song position
+    for (const b of [0xfa, 0xfb, 0xfc, 0xff]) expect(formatMidiMessage([b])).toBeNull()
+    expect(formatMidiMessage([0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7])).toBeNull() // sysex
   })
   it('returns null for empty', () => {
     expect(formatMidiMessage([])).toBeNull()
