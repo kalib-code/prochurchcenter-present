@@ -49,8 +49,18 @@ mac:
   notarize: false
   hardenedRuntime: true
   gatekeeperAssess: false
+  # The zip is what electron-updater installs on macOS (it can't update
+  # from a DMG). It only takes effect once the app is Developer ID-
+  # signed; until then updater.ts sends Mac users to the download page.
+  # Hyphenated name: productName has a space, which GitHub rewrites in
+  # uploaded asset names and would break the URL in latest-mac.yml.
+  artifactName: ${name}-${version}-${arch}-mac.${ext}
   target:
     - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
       arch:
         - arm64
         - x64
