@@ -71,6 +71,7 @@ import { canSelfUpdateOnMac } from './macSignature'
 const FIRST_CHECK_DELAY_MS = 5_000
 
 const RELEASES_URL = 'https://github.com/kalib-code/prochurchcenter-present/releases'
+const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
 
 let initialized = false
 
@@ -105,7 +106,13 @@ async function showDownloadDialog(version: string): Promise<void> {
     })
 
     if (result.response === 0) {
-      void shell.openExternal(`${RELEASES_URL}/tag/v${version}`)
+      // `version` comes from the remote feed. Only a plain semver goes
+      // into the URL; anything else falls back to the latest release,
+      // so a crafted value can't steer the browser to another page.
+      const page = SEMVER.test(version)
+        ? `${RELEASES_URL}/tag/v${encodeURIComponent(version)}`
+        : `${RELEASES_URL}/latest`
+      void shell.openExternal(page)
     }
   } finally {
     downloadDialogOpen = false
