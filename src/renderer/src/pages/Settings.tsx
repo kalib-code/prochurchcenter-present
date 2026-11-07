@@ -30,6 +30,7 @@ import { useServiceStore } from '../stores/useServiceStore'
 import { SlideRenderer } from '../components/SlideRenderer'
 import { ThemeFields } from '../components/ThemeFields'
 import { CanvaConnectionCard } from '../components/CanvaConnectionCard'
+import { RemoteControlCard } from '../components/RemoteControlCard'
 import { AiConnectionsCard } from '../components/AiConnectionsCard'
 import { FEATURES } from '@shared/features'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -253,6 +254,7 @@ export function Settings(): JSX.Element {
 
             {section === 'connections' && (
               <div className="space-y-5">
+                <RemoteControlCard />
                 <AiConnectionsCard />
                 {FEATURES.canva && <CanvaConnectionCard />}
               </div>

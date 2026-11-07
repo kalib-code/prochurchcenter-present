@@ -13,6 +13,8 @@ import { useFontsStore } from './stores/useFontsStore'
 import { useSetlistStore } from './stores/useSetlistStore'
 import { useLibraryStore } from './stores/useLibraryStore'
 import { AppShell } from './components/AppShell'
+import { useRemoteControl } from './hooks/useRemoteControl'
+import { useMidiInput } from './hooks/useMidiInput'
 
 /**
  * Determine which renderer "kind" this window is by inspecting the
@@ -54,6 +56,10 @@ function App(): JSX.Element {
       else void useLibraryStore.getState().load()
     })
   }, [kind])
+
+  // Remote cues (HTTP/OSC) forwarded by main: operator window only.
+  useRemoteControl(kind === 'operator')
+  useMidiInput(kind === 'operator')
 
   return (
     <HashRouter>
