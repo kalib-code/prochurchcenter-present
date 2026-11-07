@@ -37,6 +37,7 @@ internet connection changes nothing.
 - **Backups.** One-click and automatic backups of your whole library, with safe restore.
 - **⌘K command palette.** Jump to any song, setlist, or screen.
 - **AI tools (MCP).** Let an AI assistant on your computer, such as Claude Code, help prepare a service: create setlists, add or fix songs, and add scripture and slide decks. It's off by default, local-only, and protected by a token. It can't control the projector or delete anything.
+- **Remote control.** Let a playback app, MIDI controller, or Stream Deck move the lyrics in time with the band: jump to the chorus, the next song, or blackout. MIDI, OSC, or a simple HTTP API; off by default. See [docs/remote-control.md](docs/remote-control.md).
 
 ## Screenshots
 
