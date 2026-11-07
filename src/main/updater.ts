@@ -36,12 +36,14 @@
  *   via the "Restart now" dialog — never as a side-effect of a
  *   panicked mid-service quit.
  *
- * macOS caveat (Phase 10b):
- *   Squirrel.Mac requires a valid Developer ID signature to apply
- *   updates. Until we're notarized, the download will succeed but
- *   installation will silently fail. We log a warning on update-
- *   downloaded when running unsigned on Darwin so the console at
- *   least shows what's happening.
+ * macOS without a Developer ID signature (until Phase 10b):
+ *   Squirrel.Mac only installs updates for Developer ID-signed apps, so
+ *   on an unsigned build the steps above can't work. At startup we ask
+ *   `codesign` (see macSignature.ts). If we can't self-update, we turn
+ *   off auto-download (no point fetching 140 MB that can't install) and
+ *   on `update-available` show a "Download" dialog that opens the
+ *   GitHub release page instead. Once the build is signed, the check
+ *   passes and the normal flow above takes over with no code change.
  *
  * Dev mode behavior:
  *   electron-updater's checkForUpdates() is a no-op in development
@@ -60,14 +62,55 @@
  *   version than interrupt her with a popup mid-service.
  */
 
-import { app, dialog } from 'electron'
+import { app, dialog, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { getOperatorWindow } from './windows'
 import { isNewerVersion } from './versionCompare'
+import { canSelfUpdateOnMac } from './macSignature'
 
 const FIRST_CHECK_DELAY_MS = 5_000
 
+const RELEASES_URL = 'https://github.com/kalib-code/prochurchcenter-present/releases'
+
 let initialized = false
+
+/**
+ * True when this is a macOS build that can't install its own updates
+ * (no Developer ID signature). Decided once by `updateModeReady`, which
+ * every check awaits so a manual "Check for updates" click can't race
+ * the codesign probe and start a download that would fail.
+ */
+let manualMacUpdates = false
+let updateModeReady: Promise<void> = Promise.resolve()
+
+/** Same re-stacking guard as restartDialogOpen, for the download dialog. */
+let downloadDialogOpen = false
+
+async function showDownloadDialog(version: string): Promise<void> {
+  if (downloadDialogOpen) return
+  downloadDialogOpen = true
+
+  const parent = getOperatorWindow() ?? undefined
+
+  try {
+    const result = await dialog.showMessageBox(parent!, {
+      type: 'info',
+      buttons: ['Download', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update available',
+      message: `ProChurchCenter Present v${version} is available.`,
+      detail:
+        'Click Download to open the download page in your browser. Install the new version the same way you installed this one. Your songs, setlists, and settings will be kept.\n\nIn the middle of a service? Click Later. We\'ll remind you the next time you open the app.'
+    })
+
+    if (result.response === 0) {
+      void shell.openExternal(`${RELEASES_URL}/tag/v${version}`)
+    }
+  } finally {
+    downloadDialogOpen = false
+  }
+}
 
 /**
  * Prevents the "Restart now?" dialog from re-stacking if multiple
@@ -127,6 +170,7 @@ export function initAutoUpdater(): void {
   })
   autoUpdater.on('update-available', (info) => {
     console.log(`[updater] update available: v${info.version}`)
+    if (manualMacUpdates) void showDownloadDialog(info.version)
   })
   autoUpdater.on('update-not-available', () => {
     console.log('[updater] up to date')
@@ -141,14 +185,6 @@ export function initAutoUpdater(): void {
     console.log(
       `[updater] update downloaded: v${info.version} — prompting user to restart`
     )
-    if (process.platform === 'darwin' && !app.isPackaged) {
-      // Unreachable here (we early-return in dev), but documents the
-      // real concern: unsigned macOS builds will silently fail to
-      // install. Phase 10b (notarization) fixes this.
-      console.warn(
-        '[updater] macOS auto-install requires a valid Developer ID signature'
-      )
-    }
     void showRestartDialog(info.version)
   })
   autoUpdater.on('error', (err) => {
@@ -156,12 +192,24 @@ export function initAutoUpdater(): void {
     console.error('[updater] update check failed:', err.message ?? err)
   })
 
+  if (process.platform === 'darwin') {
+    updateModeReady = canSelfUpdateOnMac(app.getPath('exe')).then((canSelfUpdate) => {
+      manualMacUpdates = !canSelfUpdate
+      if (manualMacUpdates) {
+        autoUpdater.autoDownload = false
+        console.log('[updater] unsigned macOS build: updates will link to the download page')
+      }
+    })
+  }
+
   // Defer the first check so the windows are visible before any
   // network activity competes with the first paint.
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((err) => {
-      console.error('[updater] checkForUpdates threw:', err)
-    })
+    updateModeReady
+      .then(() => autoUpdater.checkForUpdates())
+      .catch((err) => {
+        console.error('[updater] checkForUpdates threw:', err)
+      })
   }, FIRST_CHECK_DELAY_MS)
 }
 
@@ -187,6 +235,7 @@ export async function manualCheckForUpdates(): Promise<ManualCheckResult> {
   }
 
   try {
+    await updateModeReady
     const result = await autoUpdater.checkForUpdates()
     if (!result) {
       return { status: 'up-to-date', currentVersion }
