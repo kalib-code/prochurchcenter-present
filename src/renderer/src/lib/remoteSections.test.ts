@@ -134,4 +134,9 @@ describe('findSectionStart known-or-exact matching', () => {
   it('a single character keeps grid parity (first-letter keys)', () => {
     expect(findSectionStart(song([slide('Verse 1'), slide('Coda')]), 0, 'C')).toBe(1)
   })
+
+  it('a free-text label that merely starts with a section name is not that section', () => {
+    expect(findSectionStart(song([slide('Verse 1'), slide('Tagalog')]), 0, 'Tag')).toBeNull()
+    expect(findSectionStart(song([slide('Verse 1'), slide('Introit')]), 0, 'Intro')).toBeNull()
+  })
 })

@@ -195,9 +195,11 @@ Only Note On (with velocity above 0) and Program Change do anything. Note Off, a
 | Note 73 | `goToSection` "Bridge" |
 | Note 74 | `goToSection` "Tag" |
 | Note 75 | `goToSection` "Outro" |
-| Note 100 | `goToSlide`; the **velocity** (1 to 127) is the slide number |
 | Notes 80 to 91 | `goToSection` "Verse 1" to "Verse 12" (note 80 is Verse 1) |
+| Note 100 | `goToSlide`; the **velocity** (1 to 127) is the slide number |
 | Program Change 0 to 127 | `goToItem` 1 to 128 (program 0 is the first item) |
+
+Note 100 needs a **fixed velocity** from the controller. Pads with velocity curves send arbitrary numbers, so set the velocity per cue, the same as in ProPresenter/FreeShow setups.
 
 **Note names differ between apps.** Note 60 is "C3" in some apps (Ableton Live, Logic) and "C4" in others (most other software). Choose by the **number**, not the name. MIDI channel numbers have the same trap: some tools count channels from 0. Present's channel 16 is the one the app calls 16.
 
@@ -247,7 +249,7 @@ Work down the list:
 4. **A cue appears with a reason.**
    - *No service running*: start Service Mode.
    - *Paused in Service Mode*: click the **Remote paused** chip.
-   - *No such section or item*: the song has no such section, the item number is past the end of the service (items are counted from 1 and include videos and scripture, not only songs), or the slide number is past the end of the current item. Recognised names are matched loosely (Chorus, C, Verse 2, v2); a name Present doesn't recognise (Coda, Interlude, Post-Chorus) must match the section label exactly, or use `goToSlide`.
+   - *Not found (no such section, item or slide)*: the song has no such section, the item number is past the end of the service (items are counted from 1 and include videos and scripture, not only songs), or the slide number is past the end of the current item. Recognised names are matched loosely (Chorus, C, Verse 2, v2); a name Present doesn't recognise (Coda, Interlude, Post-Chorus) must match the section label exactly, or use `goToSlide`.
    - *Current item isn't a song*: `goToSection` only works on songs. Send `goToItem` first.
-   - *Present didn't answer in time* or *Couldn't run that cue*: the operator window is busy (a dialog is open) or closed. Keep the Present operator window open during the service. A timed-out cue is reported only to the sender; it never appears under Recent cues, and it almost certainly didn't run. If it matters, check `GET /api/v1/status` before resending. A timed-out cue is discarded, never run late. Before resending a relative cue (`next`, `prev`, `nextItem`, `prevItem`), call `GET /api/v1/status` to see where you are, so you don't move twice. `goToItem`, `goToSlide`, `black`, `logo` and `live` are always safe to resend. A `goToSection` that timed out never ran, so resending it is fine too; if unsure, check `status` first, since a section cue that did run steps to the next occurrence when repeated after 0.75 seconds.
+   - *Present didn't answer in time* or *Couldn't run that cue*: the operator window is busy (a dialog is open) or closed. Keep the Present operator window open during the service. A timed-out cue is reported only to the sender; it normally doesn't appear under Recent cues, and it almost certainly didn't run. If it matters, check `GET /api/v1/status` before resending. A timed-out cue is discarded, never run late. Before resending a relative cue (`next`, `prev`, `nextItem`, `prevItem`), call `GET /api/v1/status` to see where you are, so you don't move twice. `goToItem`, `goToSlide`, `black`, `logo` and `live` are always safe to resend. For `goToSection`, check `status` first if unsure: a section cue that did run steps to the next occurrence when repeated after 0.75 seconds.
 5. **It works but lands on the wrong section.** `goToSection` goes to the next match after the current slide. If you want the first chorus every time, jump to the song with `goToItem` first, then send the section.

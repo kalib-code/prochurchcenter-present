@@ -160,9 +160,26 @@ describe('executeRemoteCommand', () => {
     expect(pos()).toEqual({ i: 0, s: 2 })
     expect(run({ type: 'goToSlide', number: 1 }).ok).toBe(true)
     expect(pos()).toEqual({ i: 0, s: 0 })
-    useServiceStore.getState().jumpTo(1, 0)
-    expect(run({ type: 'goToSlide', number: 1 }).ok).toBe(true)
-    expect(pos()).toEqual({ i: 1, s: 0 })
+  })
+
+  it('goToSlide works on a multi-slide non-song item', () => {
+    useServiceStore.getState().start({
+      setlistId: 's',
+      setlistName: 'S',
+      items: [{ id: 'p', kind: 'pptx', label: 'Deck', slides: [t('p1'), t('p2'), t('p3')] }]
+    })
+    expect(run({ type: 'goToSlide', number: 2 }).ok).toBe(true)
+    expect(pos()).toEqual({ i: 0, s: 1 })
+  })
+
+  it('goToSlide counts the empty Intro transition slide', () => {
+    useServiceStore.getState().start({
+      setlistId: 's',
+      setlistName: 'S',
+      items: [{ id: 'a', kind: 'song', label: 'Song', slides: [t('Intro', []), t('Verse 1'), t('Chorus')] }]
+    })
+    expect(run({ type: 'goToSlide', number: 2 }).ok).toBe(true)
+    expect(pos()).toEqual({ i: 0, s: 1 })
   })
 
   it('goToSlide out of range is not-found and does not move', () => {

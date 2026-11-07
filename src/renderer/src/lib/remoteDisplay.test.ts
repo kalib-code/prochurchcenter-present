@@ -5,7 +5,7 @@ describe('remoteDisplay', () => {
   it('words every failure plainly', () => {
     expect(failureText('no-service')).toBe('No service running')
     expect(failureText('paused')).toBe('Paused in Service Mode')
-    expect(failureText('not-found')).toBe('No such section or item')
+    expect(failureText('not-found')).toBe('Not found (no such section, item or slide)')
     expect(failureText('not-a-song')).toBe("Current item isn't a song")
     expect(failureText('timeout')).toBe("Present didn't answer in time")
     expect(failureText('invalid')).toBe("Couldn't run that cue")

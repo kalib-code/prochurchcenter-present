@@ -31,18 +31,21 @@ export function shortcutFromLabel(label: string): string {
 /**
  * Like `shortcutFromLabel` but only for recognised section names: returns ''
  * where `shortcutFromLabel` would fall back to the label's first letter
- * ("Coda", "Post-Chorus", "Interlude"). Used by remote-control matching so a
+ * ("Coda", "Post-Chorus", "Interlude"). A recognised name must end at a
+ * word boundary, so "Tagalog" and "Introit" are not Tag / Intro. Used by remote-control matching so a
  * named cue never lands on an unrelated section that merely shares a letter.
  */
 export function knownShortcutFromLabel(label: string): string {
   const lower = (label ?? '').toLowerCase().trim()
   const verseMatch = lower.match(/verse\s*(\d+)/)
   if (verseMatch) return String(Number(verseMatch[1]))
-  if (lower.startsWith('pre-chorus') || lower.startsWith('prechorus') || lower.startsWith('pre chorus')) return 'P'
-  if (lower.startsWith('chorus')) return 'C'
-  if (lower.startsWith('bridge')) return 'B'
-  if (lower.startsWith('intro')) return 'I'
-  if (lower.startsWith('outro')) return 'O'
-  if (lower.startsWith('tag')) return 'T'
+  const named = (...names: string[]): boolean =>
+    names.some((n) => lower.startsWith(n) && !/[a-z]/.test(lower.charAt(n.length)))
+  if (named('pre-chorus', 'prechorus', 'pre chorus')) return 'P'
+  if (named('chorus')) return 'C'
+  if (named('bridge')) return 'B'
+  if (named('intro')) return 'I'
+  if (named('outro')) return 'O'
+  if (named('tag')) return 'T'
   return ''
 }

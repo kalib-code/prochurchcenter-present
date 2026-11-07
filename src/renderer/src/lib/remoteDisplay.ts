@@ -3,7 +3,7 @@ import type { RemoteFailure, RemoteSource } from '@shared/remote'
 const FAILURE_TEXT: Record<RemoteFailure, string> = {
   'no-service': 'No service running',
   paused: 'Paused in Service Mode',
-  'not-found': 'No such section or item',
+  'not-found': 'Not found (no such section, item or slide)',
   'not-a-song': "Current item isn't a song",
   timeout: "Present didn't answer in time",
   invalid: "Couldn't run that cue"
