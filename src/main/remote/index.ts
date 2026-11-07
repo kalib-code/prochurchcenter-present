@@ -7,6 +7,8 @@
  * Each cue is forwarded to the operator window (which owns Service Mode)
  * and its result is returned to the caller; see dispatch.ts.
  *
+ * OSC cues pass a per-sender rate limit (rateLimit.ts) before dispatch.
+ *
  * Partial failure: if one listener fails (e.g. OSC port taken) the other
  * stays up, and status is 'error' with a message naming the failed part.
  */
@@ -27,6 +29,7 @@ import { loadRemoteConfig, saveRemoteConfig } from './config'
 import { startRemoteHttpServer } from './httpServer'
 import { oscPacketToCommands } from './oscIntake'
 import { createDispatcher } from './dispatch'
+import { createSenderRateLimiter } from './rateLimit'
 
 let config: RemoteConfig | null = null
 let http: { port: number; close(): Promise<void> } | null = null
@@ -41,6 +44,9 @@ const dispatcher = createDispatcher((msg) => {
   win.webContents.send(CHANNELS.remote.eventCommand, msg)
   return true
 })
+
+/** Per-sender flood guard for OSC (unauthenticated UDP): burst 16, then 10/s. */
+const oscLimiter = createSenderRateLimiter()
 
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const next = queue.then(fn, fn)
@@ -110,6 +116,7 @@ function startOsc(c: RemoteConfig): Promise<Socket> {
     sock.on('message', (buf, rinfo) => {
       // Read live config so oscAllowFrom changes apply to the next packet.
       for (const cmd of oscPacketToCommands(buf, rinfo.address, config?.oscAllowFrom ?? null)) {
+        if (!oscLimiter.allow(rinfo.address)) continue
         void dispatcher.dispatch(cmd, 'osc', rinfo.address).catch(() => {})
       }
     })

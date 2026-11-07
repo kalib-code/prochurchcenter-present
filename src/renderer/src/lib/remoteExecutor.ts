@@ -59,21 +59,35 @@ function run(cmd: RemoteCommand): RemoteResult {
   return { ok: true, position: readPosition() }
 }
 
+/** Paused rejections are logged at most this often, so a flood can't churn the store. */
+const PAUSED_RECORD_EVERY_MS = 1000
+
+let lastPausedRecordAt = -Infinity
+
+/** Forget per-session executor memory (tests; a fresh operator window). */
+export function resetRemoteExecutor(): void {
+  lastPausedRecordAt = -Infinity
+}
+
 /** The single place every remote cue is executed against the Service Mode store. */
 export function executeRemoteCommand(
   cmd: RemoteCommand,
   source: RemoteSource,
-  from: string | null
+  from: string | null,
+  now: number = Date.now()
 ): RemoteResult {
   const result = run(cmd)
-  if (cmd.type !== 'status') {
-    useRemoteStore.getState().record({
-      at: new Date().toISOString(),
-      source,
-      from,
-      summary: describeCommand(cmd),
-      result
-    })
+  if (cmd.type === 'status') return result
+  if (!result.ok && result.reason === 'paused') {
+    if (now - lastPausedRecordAt < PAUSED_RECORD_EVERY_MS) return result
+    lastPausedRecordAt = now
   }
+  useRemoteStore.getState().record({
+    at: new Date(now).toISOString(),
+    source,
+    from,
+    summary: describeCommand(cmd),
+    result
+  })
   return result
 }

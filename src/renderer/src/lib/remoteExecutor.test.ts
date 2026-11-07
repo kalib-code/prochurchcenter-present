@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RenderableItem } from './slideify'
 import { useServiceStore } from '../stores/useServiceStore'
 import { useRemoteStore } from '../stores/useRemoteStore'
-import { executeRemoteCommand } from './remoteExecutor'
+import { executeRemoteCommand, resetRemoteExecutor } from './remoteExecutor'
 
 const t = (label: string, lines = ['x']) => ({ kind: 'text' as const, lines, sectionLabel: label })
 
@@ -30,6 +30,7 @@ describe('executeRemoteCommand', () => {
     vi.stubGlobal('window', { api: { output } })
     useServiceStore.setState({ state: { mode: 'idle' } })
     useRemoteStore.setState({ paused: false, activity: [] })
+    resetRemoteExecutor()
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -54,6 +55,21 @@ describe('executeRemoteCommand', () => {
     expect(run({ type: 'next' })).toEqual({ ok: false, reason: 'paused' })
     expect(pos()).toEqual({ i: 0, s: 0 })
     expect(run({ type: 'status' }).ok).toBe(true)
+  })
+
+  it('records paused rejections at most once per second', () => {
+    start()
+    useRemoteStore.getState().setPaused(true)
+    const at = (now: number) => executeRemoteCommand({ type: 'next' }, 'osc', '10.0.0.5', now)
+    for (let n = 0; n < 50; n++) expect(at(5000 + n)).toEqual({ ok: false, reason: 'paused' })
+    expect(useRemoteStore.getState().activity).toHaveLength(1)
+    at(5999)
+    expect(useRemoteStore.getState().activity).toHaveLength(1)
+    at(6000)
+    expect(useRemoteStore.getState().activity).toHaveLength(2)
+    useRemoteStore.getState().setPaused(false)
+    at(6001)
+    expect(useRemoteStore.getState().activity).toHaveLength(3)
   })
 
   it('goToSection errors', () => {

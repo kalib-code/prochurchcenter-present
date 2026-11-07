@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils'
-import { useRemoteStore } from '../../stores/useRemoteStore'
+import { selectLastCueSummary, useRemoteStore } from '../../stores/useRemoteStore'
 import { useRemoteState } from '../remote/useRemoteState'
 
 /**
@@ -10,11 +10,12 @@ export function RemoteChip(): JSX.Element | null {
   const [state] = useRemoteState()
   const paused = useRemoteStore((s) => s.paused)
   const setPaused = useRemoteStore((s) => s.setPaused)
-  const last = useRemoteStore((s) => s.activity[0])
+  // Narrow, primitive selectors: a burst of cues must not re-render the header.
+  const last = useRemoteStore(selectLastCueSummary)
   if (!state?.enabled) return null
 
   const action = paused ? 'Click to resume remote control.' : 'Click to pause remote control.'
-  const title = `${last ? `Last cue: ${last.summary}. ` : 'No cues yet. '}${action}`
+  const title = `${last ? `Last cue: ${last}. ` : 'No cues yet. '}${action}`
   return (
     <button
       type="button"

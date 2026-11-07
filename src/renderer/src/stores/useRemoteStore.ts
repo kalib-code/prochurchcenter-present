@@ -34,3 +34,10 @@ export const useRemoteStore = create<RemoteStore>((set) => ({
   setLastMidi: (lastMidi) => set({ lastMidi }),
   setMidiStatus: (midiInputs, midiError) => set({ midiInputs, midiError })
 }))
+
+/**
+ * Summary of the newest cue, or null. A primitive, so subscribers (the
+ * Service Mode chip) don't re-render when an identical cue repeats.
+ */
+export const selectLastCueSummary = (s: Pick<RemoteStore, 'activity'>): string | null =>
+  s.activity[0]?.summary ?? null
