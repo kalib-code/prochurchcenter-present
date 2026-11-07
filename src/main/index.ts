@@ -8,6 +8,7 @@ import { getSettings } from './storage/settings'
 import { readAllSetlists } from './storage/setlists'
 import { sweepOrphanPdfs } from './canva/import'
 import { registerAllIpcHandlers } from './ipc'
+import { initMcp, shutdownMcp } from './mcp'
 import { isAllowedExternalUrl } from './ipc/system'
 import { attachOutputReplay } from './ipc/output'
 import {
@@ -450,6 +451,11 @@ app.whenReady().then(async () => {
   // here. See src/main/storage/autoBackup.ts.
   void runAutoBackupOnLaunch()
 
+  // AI connections: start the local MCP server if the operator left it
+  // on. After createWindows so its first status broadcast has a window
+  // to reach. Failures (port taken) land in Settings, never here.
+  void initMcp().catch((err) => console.error('[mcp] init failed', err))
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindows()
   })
@@ -511,3 +517,9 @@ app.on('before-quit', (event) => {
   holdQuitForPendingWrites(event, 'before-quit')
 })
 app.on('will-quit', (event) => holdQuitForPendingWrites(event, 'will-quit'))
+
+// Close the AI-connections listener so the port is free for the next
+// launch straight away. Process exit would close it too; this is tidy.
+app.on('will-quit', () => {
+  void shutdownMcp()
+})

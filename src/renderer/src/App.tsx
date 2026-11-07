@@ -10,6 +10,8 @@ import { OutputView } from './output/OutputView'
 import { StageView } from './output/StageView'
 import { LowerThirdsView } from './output/LowerThirdsView'
 import { useFontsStore } from './stores/useFontsStore'
+import { useSetlistStore } from './stores/useSetlistStore'
+import { useLibraryStore } from './stores/useLibraryStore'
 import { AppShell } from './components/AppShell'
 
 /**
@@ -39,6 +41,19 @@ function App(): JSX.Element {
   useEffect(() => {
     void loadCustomFonts()
   }, [loadCustomFonts])
+
+  // AI tools (MCP) can add songs and setlist items while the operator
+  // window is open. Keep the stores current so Home, the sidebar and the
+  // library show the change; an open SetlistEditor also merges it into
+  // its draft (see mergeExternalSetlist). Operator window only — the
+  // projector windows never read these stores.
+  useEffect(() => {
+    if (kind !== 'operator') return
+    return window.api.library.onExternalChange((change) => {
+      if (change.kind === 'setlist') useSetlistStore.getState().applyExternal(change.setlist)
+      else void useLibraryStore.getState().load()
+    })
+  }, [kind])
 
   return (
     <HashRouter>

@@ -8,7 +8,7 @@
 import { readFile, readdir, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { Setlist } from '@shared/types'
+import type { Setlist, SetlistItem } from '@shared/types'
 import type { UpdateSetlistPatch } from '@shared/ipc-contract'
 import { getSetlistsDir } from './paths'
 import { atomicWriteJson, withFileLock } from './atomic'
@@ -108,6 +108,32 @@ async function updateSetlistLocked(id: string, patch: UpdateSetlistPatch): Promi
   }
   await atomicWriteJson(setlistPath(id), updated)
   return updated
+}
+
+/**
+ * Insert items into a setlist under its file lock, so the read and the
+ * write can't interleave with an autosave patch.
+ *
+ * `position` is a 0-based index; omitted or past the end appends.
+ * Used by AI connections (main/mcp), which add to setlists from outside
+ * the renderer.
+ */
+export async function insertSetlistItems(
+  id: string,
+  items: SetlistItem[],
+  position?: number
+): Promise<Setlist> {
+  return withFileLock(setlistPath(id), async () => {
+    const existing = await getSetlist(id)
+    if (!existing) throw new Error(`Setlist not found: ${id}`)
+    const at =
+      position === undefined
+        ? existing.items.length
+        : Math.max(0, Math.min(Math.floor(position), existing.items.length))
+    const nextItems = [...existing.items]
+    nextItems.splice(at, 0, ...items)
+    return updateSetlistLocked(id, { items: nextItems })
+  })
 }
 
 export async function deleteSetlist(id: string): Promise<void> {

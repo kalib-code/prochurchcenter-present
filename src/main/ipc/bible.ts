@@ -71,62 +71,70 @@ export function registerBibleHandlers(): void {
 
   ipcMain.handle(
     CHANNELS.bible.lookup,
-    async (
-      _,
-      translationId: string,
-      reference: string
-    ): Promise<BibleLookupResult> => {
-      const parsed = parseReference(reference)
-      if (!parsed) {
+    (_, translationId: string, reference: string): Promise<BibleLookupResult> =>
+      lookupScripture(translationId, reference)
+  )
+}
+
+/**
+ * Resolve a typed reference ("John 3:16", "Romans 12:1-3") to verse text,
+ * from the chapter cache or helloao. Shared by the renderer's Lookup
+ * button (via IPC) and AI connections (main/mcp), so both get the same
+ * parsing, caching and error copy.
+ */
+export async function lookupScripture(
+  translationId: string,
+  reference: string
+): Promise<BibleLookupResult> {
+  const parsed = parseReference(reference)
+  if (!parsed) {
+    return {
+      ok: false,
+      error:
+        'Could not understand that reference. Try something like "John 3:16" or "Romans 12:1-3".'
+    }
+  }
+
+  try {
+    const verses = await getChapter(
+      translationId,
+      parsed.bookId,
+      parsed.chapter,
+      () => fetchChapter(translationId, parsed.bookId, parsed.chapter)
+    )
+
+    // Filter to the requested verse range. Whole-chapter requests
+    // (verseStart undefined) return all verses unchanged.
+    let filtered: BibleVerse[] = verses
+    if (parsed.verseStart !== undefined) {
+      const end = parsed.verseEnd ?? parsed.verseStart
+      filtered = verses.filter(
+        (v) => v.number >= parsed.verseStart! && v.number <= end
+      )
+      if (filtered.length === 0) {
         return {
           ok: false,
-          error:
-            'Could not understand that reference. Try something like "John 3:16" or "Romans 12:1-3".'
-        }
-      }
-
-      try {
-        const verses = await getChapter(
-          translationId,
-          parsed.bookId,
-          parsed.chapter,
-          () => fetchChapter(translationId, parsed.bookId, parsed.chapter)
-        )
-
-        // Filter to the requested verse range. Whole-chapter requests
-        // (verseStart undefined) return all verses unchanged.
-        let filtered: BibleVerse[] = verses
-        if (parsed.verseStart !== undefined) {
-          const end = parsed.verseEnd ?? parsed.verseStart
-          filtered = verses.filter(
-            (v) => v.number >= parsed.verseStart! && v.number <= end
-          )
-          if (filtered.length === 0) {
-            return {
-              ok: false,
-              error: `No verses found in ${parsed.bookName} ${parsed.chapter}:${parsed.verseStart}${parsed.verseEnd ? '-' + parsed.verseEnd : ''}.`
-            }
-          }
-        }
-
-        // Display text: each verse on its own line, no verse numbers
-        // by default (the operator can edit after). Verse numbers tend
-        // to clutter projector slides — most churches read them aloud
-        // separately or include them in the reference label instead.
-        const text = filtered.map((v) => v.text).join('\n')
-
-        return {
-          ok: true,
-          reference: parsed,
-          verses: filtered,
-          text
-        }
-      } catch (err) {
-        return {
-          ok: false,
-          error: err instanceof Error ? err.message : 'Bible lookup failed.'
+          error: `No verses found in ${parsed.bookName} ${parsed.chapter}:${parsed.verseStart}${parsed.verseEnd ? '-' + parsed.verseEnd : ''}.`
         }
       }
     }
-  )
+
+    // Display text: each verse on its own line, no verse numbers
+    // by default (the operator can edit after). Verse numbers tend
+    // to clutter projector slides — most churches read them aloud
+    // separately or include them in the reference label instead.
+    const text = filtered.map((v) => v.text).join('\n')
+
+    return {
+      ok: true,
+      reference: parsed,
+      verses: filtered,
+      text
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Bible lookup failed.'
+    }
+  }
 }

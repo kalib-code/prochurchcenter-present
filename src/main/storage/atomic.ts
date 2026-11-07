@@ -77,10 +77,17 @@ function uniqueTmpPath(path: string): string {
   return join(dirname(path), `${stem}.${process.pid}-${++tmpCounter}${ext}.tmp`)
 }
 
-async function writeThenRename(path: string, data: string | Uint8Array): Promise<void> {
+async function writeThenRename(
+  path: string,
+  data: string | Uint8Array,
+  mode?: number
+): Promise<void> {
   const tmp = uniqueTmpPath(path)
-  if (typeof data === 'string') await writeFile(tmp, data, 'utf8')
-  else await writeFile(tmp, data)
+  // `mode` applies when the tmp file is created, and rename keeps it, so
+  // a restricted file (e.g. one holding a token) is never briefly
+  // readable at the default permissions.
+  if (typeof data === 'string') await writeFile(tmp, data, { encoding: 'utf8', mode })
+  else await writeFile(tmp, data, { mode })
   try {
     await rename(tmp, path)
   } catch (err) {
@@ -145,8 +152,14 @@ export async function waitForPendingWrites(timeoutMs: number): Promise<boolean> 
   return true
 }
 
-export async function atomicWriteJson(path: string, data: unknown): Promise<void> {
-  await track(withFileLock(path, () => writeThenRename(path, JSON.stringify(data, null, 2))))
+export async function atomicWriteJson(
+  path: string,
+  data: unknown,
+  options: { mode?: number } = {}
+): Promise<void> {
+  await track(
+    withFileLock(path, () => writeThenRename(path, JSON.stringify(data, null, 2), options.mode))
+  )
 }
 
 /**

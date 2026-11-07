@@ -24,6 +24,8 @@ interface SetlistState {
   update: (id: string, patch: UpdateSetlistPatch) => Promise<Setlist>
   remove: (id: string) => Promise<void>
   clone: (sourceId: string, newName: string, newDate: string) => Promise<Setlist>
+  /** Upsert a setlist saved outside the renderer (an AI tool via MCP). */
+  applyExternal: (setlist: Setlist) => void
 
   getById: (id: string) => Setlist | undefined
 }
@@ -74,6 +76,16 @@ export const useSetlistStore = create<SetlistState>((set, get) => ({
     const cloned = await window.api.setlists.clone(sourceId, newName, newDate)
     set((state) => ({ setlists: sortByDateDesc([...state.setlists, cloned]) }))
     return cloned
+  },
+
+  applyExternal: (setlist) => {
+    set((state) => {
+      const exists = state.setlists.some((s) => s.id === setlist.id)
+      const next = exists
+        ? state.setlists.map((s) => (s.id === setlist.id ? setlist : s))
+        : [...state.setlists, setlist]
+      return { setlists: sortByDateDesc(next) }
+    })
   },
 
   getById: (id) => get().setlists.find((s) => s.id === id)

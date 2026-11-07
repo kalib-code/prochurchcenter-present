@@ -19,6 +19,7 @@ import { registerUpdaterHandlers } from './updater'
 import { registerSystemHandlers } from './system'
 import { registerFilesHandlers } from './files'
 import { registerCanvaHandlers } from './canva'
+import { registerMcpHandlers } from './mcp'
 
 export function registerAllIpcHandlers(): void {
   registerSongHandlers()
@@ -34,4 +35,5 @@ export function registerAllIpcHandlers(): void {
   registerSystemHandlers()
   registerFilesHandlers()
   registerCanvaHandlers()
+  registerMcpHandlers()
 }
