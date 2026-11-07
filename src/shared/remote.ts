@@ -86,11 +86,11 @@ export function sectionKey(input: string): string | null {
   const s = input.trim().replace(/\s+/g, ' ')
   if (!s) return null
   const verse = s.match(/^v(?:erse)?\s*(\d+)$/i) ?? s.match(/^(\d+)$/)
-  if (verse) return verse[1]
+  if (verse) return String(Number(verse[1]))
   return shortcutFromLabel(s) || null
 }
 
-const MIDI_NOTE_COMMANDS: Record<number, RemoteCommand> = {
+const MIDI_NOTE_COMMANDS = new Map<number, RemoteCommand>(Object.entries({
   60: { type: 'next' },
   61: { type: 'prev' },
   62: { type: 'nextItem' },
@@ -98,16 +98,16 @@ const MIDI_NOTE_COMMANDS: Record<number, RemoteCommand> = {
   64: { type: 'black' },
   65: { type: 'logo' },
   66: { type: 'live' }
-}
+} as Record<string, RemoteCommand>).map(([k, v]) => [Number(k), v]))
 
-const MIDI_SECTION_NOTES: Record<number, string> = {
+const MIDI_SECTION_NOTES = new Map<number, string>(Object.entries({
   70: 'Intro',
   71: 'Pre-Chorus',
   72: 'Chorus',
   73: 'Bridge',
   74: 'Tag',
   75: 'Outro'
-}
+} as Record<string, string>).map(([k, v]) => [Number(k), v]))
 
 /** `channel` is 1-based (1..16). Only Note On (velocity > 0) and Program Change act. */
 export function midiToCommand(data: ArrayLike<number>, channel: number): RemoteCommand | null {
@@ -118,15 +118,15 @@ export function midiToCommand(data: ArrayLike<number>, channel: number): RemoteC
   if (kind === 0xc0) return { type: 'goToItem', number: data[1] + 1 }
   if (kind !== 0x90 || data.length < 3 || data[2] <= 0) return null
   const note = data[1]
-  const simple = MIDI_NOTE_COMMANDS[note]
+  const simple = MIDI_NOTE_COMMANDS.get(note)
   if (simple) return { ...simple }
-  const label = MIDI_SECTION_NOTES[note]
+  const label = MIDI_SECTION_NOTES.get(note)
   if (label) return { type: 'goToSection', section: label }
   if (note >= 80 && note <= 91) return { type: 'goToSection', section: `Verse ${note - 80 + 1}` }
   return null
 }
 
-const OSC_TRIGGERS: Record<string, RemoteCommand['type']> = {
+const OSC_TRIGGERS = new Map<string, RemoteCommand['type']>(Object.entries({
   '/present/next': 'next',
   '/present/prev': 'prev',
   '/present/item/next': 'nextItem',
@@ -134,10 +134,10 @@ const OSC_TRIGGERS: Record<string, RemoteCommand['type']> = {
   '/present/black': 'black',
   '/present/logo': 'logo',
   '/present/live': 'live'
-}
+} as Record<string, RemoteCommand['type']>))
 
 export function oscToCommand(address: string, args: OscArg[]): RemoteCommand | null {
-  const trigger = OSC_TRIGGERS[address]
+  const trigger = OSC_TRIGGERS.get(address)
   if (trigger) {
     // TouchOSC-style buttons send 1 on press and 0 on release.
     if (args.length > 0 && args[0] === 0) return null

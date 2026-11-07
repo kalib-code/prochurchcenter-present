@@ -28,6 +28,9 @@ describe('parseRemoteCommand', () => {
     expect(parseRemoteCommand({ type: 'goToSection', section: '   ' })).toBeNull()
     expect(parseRemoteCommand({ type: 'goToSection', section: 'x'.repeat(41) })).toBeNull()
     expect(parseRemoteCommand({ type: 'goToSection' })).toBeNull()
+    for (const type of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(parseRemoteCommand({ type })).toBeNull()
+    }
     for (const raw of [null, undefined, 'next', 5, []]) expect(parseRemoteCommand(raw)).toBeNull()
   })
   it('trims section and allows 40 chars', () => {
@@ -49,6 +52,7 @@ describe('sectionKey', () => {
     expect(sectionKey(' verse  2 ')).toBe('2')
     expect(sectionKey('2')).toBe('2')
     expect(sectionKey('Pre-Chorus')).toBe('P')
+    expect(sectionKey('Verse 02')).toBe('2')
     expect(sectionKey('')).toBeNull()
   })
 })
@@ -79,6 +83,7 @@ describe('oscToCommand', () => {
     expect(oscToCommand('/present/section', ['bridge'])).toEqual({ type: 'goToSection', section: 'bridge' })
     expect(oscToCommand('/present/section', [])).toBeNull()
     expect(oscToCommand('/other', [])).toBeNull()
+    for (const a of ['constructor', '__proto__', 'toString']) expect(oscToCommand(a, [])).toBeNull()
   })
 })
 
