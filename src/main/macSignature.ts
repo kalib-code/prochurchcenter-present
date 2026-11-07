@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'child_process'
-import { resolve } from 'path'
+import { posix } from 'path'
 
 /**
  * Pure parser for `codesign -dv --verbose=2` output (which codesign
@@ -28,9 +28,13 @@ export function isDeveloperIdSigned(codesignOutput: string): boolean {
 /**
  * The `.app` bundle that contains the running executable:
  * `<Bundle>.app/Contents/MacOS/<exe>` → `<Bundle>.app`.
+ *
+ * Always POSIX: this only ever handles macOS paths, but the test suite
+ * also runs on the Windows CI runner, where plain `path.resolve` would
+ * turn `/Applications/...` into `D:\Applications\...`.
  */
 export function appBundlePath(exePath: string): string {
-  return resolve(exePath, '..', '..', '..')
+  return posix.resolve(exePath, '..', '..', '..')
 }
 
 /**
