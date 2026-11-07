@@ -63,6 +63,13 @@ describe('executeRemoteCommand', () => {
     expect(run({ type: 'goToSection', section: 'Chorus' })).toEqual({ ok: false, reason: 'not-a-song' })
   })
 
+  it('goToSection with an unknown name is not-found and nothing moves', () => {
+    start()
+    expect(run({ type: 'goToSection', section: 'Coda' })).toEqual({ ok: false, reason: 'not-found' })
+    expect(run({ type: 'goToSection', section: 'Channel' })).toEqual({ ok: false, reason: 'not-found' })
+    expect(pos()).toEqual({ i: 0, s: 0 })
+  })
+
   it('goToSection jumps within a song', () => {
     start()
     expect(run({ type: 'goToSection', section: 'verse 2' }).ok).toBe(true)

@@ -6,6 +6,7 @@ import {
   oscToCommand,
   parseRemoteCommand,
   sectionKey,
+  sectionLabelKey,
   type RemoteCommand
 } from './remote'
 
@@ -55,6 +56,45 @@ describe('sectionKey', () => {
     expect(sectionKey('Pre-Chorus')).toBe('P')
     expect(sectionKey('Verse 02')).toBe('2')
     expect(sectionKey('')).toBeNull()
+  })
+  it('knows the standard names, with or without a trailing number', () => {
+    expect(sectionKey('prechorus')).toBe('P')
+    expect(sectionKey('pre_chorus')).toBe('P')
+    expect(sectionKey('P')).toBe('P')
+    expect(sectionKey('Bridge 2')).toBe('B')
+    expect(sectionKey('intro')).toBe('I')
+    expect(sectionKey('Outro')).toBe('O')
+    expect(sectionKey('tag')).toBe('T')
+    expect(sectionKey('verse')).toBeNull()
+    expect(sectionKey('V 3')).toBe('3')
+  })
+  it('a single character is a shortcut key', () => {
+    expect(sectionKey('x')).toBe('X')
+  })
+  it('unknown names have no shortcut key (no first-letter fallback)', () => {
+    for (const s of ['Coda', 'Channel', 'Breakdown', 'Instrumental', 'Interlude', 'Turnaround', 'Post-Chorus', 'Vamp']) {
+      expect(sectionKey(s)).toBeNull()
+    }
+  })
+})
+
+describe('sectionLabelKey', () => {
+  it('normalizes case, spaces, hyphens and underscores', () => {
+    expect(sectionLabelKey('  Post-Chorus ')).toBe('post chorus')
+    expect(sectionLabelKey('post__chorus')).toBe('post chorus')
+    expect(sectionLabelKey('Post - Chorus')).toBe('post chorus')
+  })
+  it('drops a trailing number for non-verse names', () => {
+    expect(sectionLabelKey('Chorus 2')).toBe('chorus')
+    expect(sectionLabelKey('Interlude2')).toBe('interlude')
+  })
+  it('keeps the verse number, without leading zeros', () => {
+    expect(sectionLabelKey('Verse 02')).toBe('verse 2')
+    expect(sectionLabelKey('v2')).toBe('verse 2')
+    expect(sectionLabelKey('2')).toBe('verse 2')
+  })
+  it('is empty for empty input', () => {
+    expect(sectionLabelKey('  ')).toBe('')
   })
 })
 

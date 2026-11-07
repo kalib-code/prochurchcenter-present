@@ -3,8 +3,6 @@
  * OSC and MIDI front-ends, plus the pure mappings into it. No Node/Electron
  * imports so both main and renderer can use it.
  */
-import { shortcutFromLabel } from './sectionShortcut'
-
 export const REMOTE_HTTP_DEFAULT_PORT = 39218
 export const REMOTE_OSC_DEFAULT_PORT = 39219
 export const REMOTE_MIDI_DEFAULT_CHANNEL = 16
@@ -81,13 +79,52 @@ export function parseRemoteCommand(raw: unknown): RemoteCommand | null {
   return null
 }
 
-/** "verse 2" -> "2", "chorus" -> "C", "Pre-Chorus" -> "P". Null when empty. */
+/** Lowercase, trim, and collapse runs of spaces/hyphens/underscores to one space. */
+function normalizeSectionName(input: string): string {
+  return input.toLowerCase().replace(/[\s_-]+/g, ' ').trim()
+}
+
+const VERSE_RE = /^(?:verse ?|v ?)?(\d+)$/
+/** Standard non-verse names -> the shortcut key the Service Mode grid shows. */
+const KNOWN_SECTIONS: [RegExp, string][] = [
+  [/^(?:chorus|c)$/, 'C'],
+  [/^(?:pre ?chorus|p)$/, 'P'],
+  [/^(?:bridge|b)$/, 'B'],
+  [/^(?:intro|i)$/, 'I'],
+  [/^(?:outro|o)$/, 'O'],
+  [/^(?:tag|t)$/, 'T']
+]
+const TRAILING_NUMBER_RE = / ?\d+$/
+
+/**
+ * Shortcut key for a section cue: "verse 2" / "v2" / "2" -> "2", "chorus" /
+ * "chorus 2" / "c" -> "C", "Pre-Chorus" -> "P", any single character -> that
+ * character uppercased. Null for an empty or unknown name ("Coda",
+ * "Interlude", "Post-Chorus"): unknown names match only by exact label
+ * (see sectionLabelKey), never by first letter.
+ */
 export function sectionKey(input: string): string | null {
-  const s = input.trim().replace(/\s+/g, ' ')
+  const s = normalizeSectionName(input)
   if (!s) return null
-  const verse = s.match(/^v(?:erse)?\s*(\d+)$/i) ?? s.match(/^(\d+)$/)
+  const verse = s.match(VERSE_RE)
   if (verse) return String(Number(verse[1]))
-  return shortcutFromLabel(s) || null
+  const base = s.replace(TRAILING_NUMBER_RE, '')
+  for (const [re, key] of KNOWN_SECTIONS) if (re.test(base)) return key
+  if (s.length === 1) return s.toUpperCase()
+  return null
+}
+
+/**
+ * Comparable form of a section name, for exact-label matching of both the
+ * cue and a song's section labels: normalized, verses as "verse N" (no
+ * leading zeros), other names without a trailing number ("Chorus 2" ->
+ * "chorus", "Post-Chorus" -> "post chorus"). Empty for empty input.
+ */
+export function sectionLabelKey(input: string): string {
+  const s = normalizeSectionName(input)
+  const verse = s.match(VERSE_RE)
+  if (verse) return `verse ${Number(verse[1])}`
+  return s.replace(TRAILING_NUMBER_RE, '')
 }
 
 const MIDI_NOTE_COMMANDS = new Map<number, RemoteCommand>(Object.entries({

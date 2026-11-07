@@ -1,6 +1,5 @@
 import {
   describeCommand,
-  sectionKey,
   type RemoteCommand,
   type RemotePosition,
   type RemoteResult,
@@ -48,9 +47,7 @@ function run(cmd: RemoteCommand): RemoteResult {
     case 'goToSection': {
       const item = st.items[st.itemIndex]
       if (!item || item.kind !== 'song') return { ok: false, reason: 'not-a-song' }
-      const key = sectionKey(cmd.section)
-      if (!key) return { ok: false, reason: 'not-found' }
-      const target = findSectionStart(item, st.slideIndex, key)
+      const target = findSectionStart(item, st.slideIndex, cmd.section)
       if (target === null) return { ok: false, reason: 'not-found' }
       svc.jumpTo(st.itemIndex, target)
       break
