@@ -109,3 +109,29 @@ describe('findSectionStart cue names', () => {
     expect(findSectionStart(s, 0, 'Interlude')).toBe(1)
   })
 })
+
+describe('findSectionStart known-or-exact matching', () => {
+  it('a known cue never lands on an unrecognised look-alike label', () => {
+    expect(findSectionStart(song([slide('Verse 1'), slide('Post-Chorus')]), 0, 'Pre-Chorus')).toBeNull()
+    expect(findSectionStart(song([slide('Verse 1'), slide('Coda')]), 0, 'Chorus')).toBeNull()
+    expect(findSectionStart(song([slide('Verse 1'), slide('Breakdown')]), 0, 'Bridge')).toBeNull()
+    expect(findSectionStart(song([slide('Verse 1'), slide('Turnaround')]), 0, 'Tag')).toBeNull()
+    expect(findSectionStart(song([slide('Verse 1'), slide('Interlude'), slide('Instrumental')]), 0, 'Intro')).toBeNull()
+  })
+
+  it('Prechorus and Post-Chorus resolve to their own runs', () => {
+    const s = song([slide('Verse 1'), slide('Pre-Chorus'), slide('Post-Chorus')])
+    expect(findSectionStart(s, 0, 'Prechorus')).toBe(1)
+    expect(findSectionStart(s, 0, 'Pre Chorus')).toBe(1)
+    expect(findSectionStart(s, 0, 'Post-Chorus')).toBe(2)
+  })
+
+  it('suffixed labels match by their known prefix', () => {
+    expect(findSectionStart(song([slide('Verse 1'), slide('Chorus (x2)')]), 0, 'Chorus')).toBe(1)
+    expect(findSectionStart(song([slide('Intro'), slide('Verse 1 (alt)')]), 0, 'Verse 1')).toBe(1)
+  })
+
+  it('a single character keeps grid parity (first-letter keys)', () => {
+    expect(findSectionStart(song([slide('Verse 1'), slide('Coda')]), 0, 'C')).toBe(1)
+  })
+})

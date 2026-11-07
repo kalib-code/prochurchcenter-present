@@ -27,3 +27,22 @@ export function shortcutFromLabel(label: string): string {
   if (lower.startsWith('tag')) return 'T'
   return label.trim()[0]?.toUpperCase() ?? ''
 }
+
+/**
+ * Like `shortcutFromLabel` but only for recognised section names: returns ''
+ * where `shortcutFromLabel` would fall back to the label's first letter
+ * ("Coda", "Post-Chorus", "Interlude"). Used by remote-control matching so a
+ * named cue never lands on an unrelated section that merely shares a letter.
+ */
+export function knownShortcutFromLabel(label: string): string {
+  const lower = (label ?? '').toLowerCase().trim()
+  const verseMatch = lower.match(/verse\s*(\d+)/)
+  if (verseMatch) return String(Number(verseMatch[1]))
+  if (lower.startsWith('pre-chorus') || lower.startsWith('prechorus') || lower.startsWith('pre chorus')) return 'P'
+  if (lower.startsWith('chorus')) return 'C'
+  if (lower.startsWith('bridge')) return 'B'
+  if (lower.startsWith('intro')) return 'I'
+  if (lower.startsWith('outro')) return 'O'
+  if (lower.startsWith('tag')) return 'T'
+  return ''
+}

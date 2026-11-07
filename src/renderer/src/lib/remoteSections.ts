@@ -1,5 +1,5 @@
 import { sectionKey, sectionLabelKey } from '@shared/remote'
-import { shortcutFromLabel } from '@shared/sectionShortcut'
+import { knownShortcutFromLabel, shortcutFromLabel } from '@shared/sectionShortcut'
 import type { RenderableItem } from './slideify'
 
 const isEmpty = (s: RenderableItem['slides'][number]): boolean =>
@@ -19,9 +19,12 @@ const labelOf = (s: RenderableItem['slides'][number]): string | null =>
  * Matching, in order:
  *  1. runs whose label equals the cue exactly (see sectionLabelKey), so
  *     "Interlude" lands on an "Interlude" run and "Intro" prefers "Intro";
- *  2. only when the cue is a standard name or a single character
- *     (sectionKey), runs with the same Service Mode shortcut key;
- *  3. otherwise nothing: an unknown name like "Coda" never moves.
+ *  2. a standard multi-character name ("Chorus", "Pre-Chorus", "v2"): only
+ *     runs whose label is a recognised name with the same key, so "Chorus"
+ *     never lands on "Coda" nor "Pre-Chorus" on "Post-Chorus";
+ *  3. a single character: runs with the same Service Mode grid key (first
+ *     letter for unrecognised labels, exactly what the operator sees);
+ *  4. otherwise nothing: an unknown name like "Coda" never moves.
  */
 export function findSectionStart(
   item: RenderableItem,
@@ -49,7 +52,8 @@ export function findSectionStart(
   let matches = wanted ? runs.filter((r) => sectionLabelKey(r.label) === wanted) : []
   if (matches.length === 0) {
     const key = sectionKey(cue)
-    matches = key ? runs.filter((r) => shortcutFromLabel(r.label) === key) : []
+    const labelKey = cue.trim().length === 1 ? shortcutFromLabel : knownShortcutFromLabel
+    matches = key ? runs.filter((r) => labelKey(r.label) === key) : []
   }
   const starts = matches.map((r) => r.start)
   if (starts.length === 0) return null

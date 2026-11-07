@@ -124,7 +124,7 @@ export function sectionLabelKey(input: string): string {
   const s = normalizeSectionName(input)
   const verse = s.match(VERSE_RE)
   if (verse) return `verse ${Number(verse[1])}`
-  return s.replace(TRAILING_NUMBER_RE, '')
+  return s.replace(TRAILING_NUMBER_RE, '').replace(/^prechorus\b/, 'pre chorus')
 }
 
 const MIDI_NOTE_COMMANDS = new Map<number, RemoteCommand>(Object.entries({
