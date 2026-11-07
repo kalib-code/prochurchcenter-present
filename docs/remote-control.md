@@ -55,6 +55,7 @@ Every request needs `Authorization: Bearer <token>`. Browsers are refused (any r
 | `nextItem` | | Next item in the service. |
 | `prevItem` | | Previous item. If you are partway through the current item, it first goes back to that item's first slide; send it again to reach the previous item. |
 | `goToItem` | `number`: integer, 1 or more (1 is the first item) | Jump to the first slide of that item. |
+| `goToSlide` | `number`: integer, 1 or more (1 is the first slide) | Jump to that slide of the **current** item (a song, scripture, PDF, slides, anything). Numbering matches Service Mode's "Slide N of M". |
 | `goToSection` | `section`: text, 1 to 40 characters | Jump to a section of the current song. |
 | `black` | | Show a black screen. |
 | `logo` | | Show the logo screen. |
@@ -72,6 +73,7 @@ curl -X POST -H "$H" -d '{"type":"prev"}' $U
 curl -X POST -H "$H" -d '{"type":"nextItem"}' $U
 curl -X POST -H "$H" -d '{"type":"prevItem"}' $U
 curl -X POST -H "$H" -d '{"type":"goToItem","number":3}' $U
+curl -X POST -H "$H" -d '{"type":"goToSlide","number":5}' $U
 curl -X POST -H "$H" -d '{"type":"goToSection","section":"Verse 2"}' $U
 curl -X POST -H "$H" -d '{"type":"black"}' $U
 curl -X POST -H "$H" -d '{"type":"logo"}' $U
@@ -96,11 +98,16 @@ curl -H "$H" http://127.0.0.1:39218/api/v1/status
   | `Outro`, `O` | Outro |
   | `Tag`, `T` | Tag |
 
-  Any other single letter matches by shortcut letter too. A section whose label Present doesn't recognize gets its first letter as its shortcut, so on a song with an "Interlude" but no "Intro", `Intro` (or `I`) lands on the Interlude.
-- **Any other name only matches its exact label.** `Coda`, `Breakdown`, `Vamp`, `Interlude` and the like never fall back to a first letter: on a song without that section you get `not-found` and nothing moves.
+  A multi-character name (`Chorus`, `Pre-Chorus`, `Intro`...) only matches a section whose label starts with a **recognised section name**: Verse N, Pre-Chorus, Chorus, Bridge, Intro, Outro and Tag. Labels with extras still count, so `Chorus (x2)` and `Verse 1 (alt)` match `Chorus` and `Verse 1`.
+  A **single letter** matches what Service Mode's grid shows on each card. The grid gives a section it doesn't recognise its first letter, so on a song with a "Coda" but no Chorus, `C` lands on the Coda. Use the full name when you want certainty.
+- **Unrecognised section names are reachable only by their exact name, or by `goToSlide`.** `Coda`, `Interlude`, `Post-Chorus`, `Breakdown`, `Turnaround` and the like are never reached by another name: `Pre-Chorus` on a song with only a "Post-Chorus" gives `not-found` and nothing moves.
 - It goes to the **next** matching section after the slide you are on, and wraps around to the first one. Send `Chorus` again (more than 0.75 seconds later) and it steps to the next chorus. The same section cue within 0.75 seconds of the last one is treated as a duplicate and does not move (unless something else has moved the slides in between).
 - It only works while the current item is a song. Otherwise you get `not-a-song`.
 - If the song has no such section you get `not-found`, and nothing moves.
+
+### Go to slide N
+
+`goToSlide` is the position-based cue ProPresenter, FreeShow and MultiTracks Playback use: the same idea as ProPresenter/FreeShow "slide at index", where a MIDI Note On's velocity is the slide number. It jumps within the item you are on, so it never needs section names. Slide numbers match Service Mode's "Slide N of M", and they include the blank Intro slide when **Song transition slide** is on (Settings → Display), so with it on, the first lyric slide is number 2. A number past the last slide gives `not-found` and nothing moves.
 
 ### Responses
 
@@ -131,7 +138,7 @@ Failure:
 | --- | --- | --- |
 | 409 | `{"ok":false,"reason":"no-service"}` | Service Mode isn't running (or the operator window is closed). |
 | 409 | `{"ok":false,"reason":"paused"}` | The **Remote** chip in Service Mode is paused. |
-| 409 | `{"ok":false,"reason":"not-found"}` | No such item number (`goToItem` counts every item: songs, videos, scripture), or no such section in the current song. |
+| 409 | `{"ok":false,"reason":"not-found"}` | No such item number (`goToItem` counts every item: songs, videos, scripture), no such slide number in the current item (`goToSlide`), or no such section in the current song. |
 | 409 | `{"ok":false,"reason":"not-a-song"}` | `goToSection` while the current item isn't a song. |
 | 409 | `{"ok":false,"reason":"timeout"}` | Present didn't answer within 1 second. The cue is discarded; it never runs late. |
 | 400 | `{"ok":false,"reason":"invalid"}` | Bad JSON, unknown `type`, or a bad field. |
@@ -153,13 +160,14 @@ OSC arrives over UDP on port **39219** by default (**OSC port** in Settings). Tu
 | `/present/item/next` | none | `nextItem` |
 | `/present/item/prev` | none | `prevItem` |
 | `/present/item` | one integer, 1 or more | `goToItem` |
+| `/present/slide` | one integer, 1 or more | `goToSlide` |
 | `/present/section` | one string, up to 40 characters | `goToSection` |
 | `/present/black` | none | `black` |
 | `/present/logo` | none | `logo` |
 | `/present/live` | none | `live` |
 
 - Button-style apps such as TouchOSC send `1` on press and `0` on release. A first argument of `0` is ignored, so a button fires once.
-- `/present/item` also accepts a float with a whole value (`3.0`), since some apps send every number as a float.
+- `/present/item` and `/present/slide` also accept a float with a whole value (`3.0`), since some apps send every number as a float.
 - Button-style apps that send booleans work the same way: `T` (true) presses, `F` (false) is ignored.
 - A packet or bundle can carry at most 16 cues; the rest are dropped.
 - Each sender gets a burst of 16 cues, then about 10 cues per second. Cues beyond that are dropped silently. Normal use never comes close.
@@ -187,6 +195,7 @@ Only Note On (with velocity above 0) and Program Change do anything. Note Off, a
 | Note 73 | `goToSection` "Bridge" |
 | Note 74 | `goToSection` "Tag" |
 | Note 75 | `goToSection` "Outro" |
+| Note 100 | `goToSlide`; the **velocity** (1 to 127) is the slide number |
 | Notes 80 to 91 | `goToSection` "Verse 1" to "Verse 12" (note 80 is Verse 1) |
 | Program Change 0 to 127 | `goToItem` 1 to 128 (program 0 is the first item) |
 
@@ -238,7 +247,7 @@ Work down the list:
 4. **A cue appears with a reason.**
    - *No service running*: start Service Mode.
    - *Paused in Service Mode*: click the **Remote paused** chip.
-   - *No such section or item*: the song has no such section, or the item number is past the end of the service (items are counted from 1 and include videos and scripture, not only songs). Standard names are matched loosely (Chorus, C, Verse 2, v2); any other name must match a section label in the song.
+   - *No such section or item*: the song has no such section, the item number is past the end of the service (items are counted from 1 and include videos and scripture, not only songs), or the slide number is past the end of the current item. Recognised names are matched loosely (Chorus, C, Verse 2, v2); a name Present doesn't recognise (Coda, Interlude, Post-Chorus) must match the section label exactly, or use `goToSlide`.
    - *Current item isn't a song*: `goToSection` only works on songs. Send `goToItem` first.
-   - *Present didn't answer in time* or *Couldn't run that cue*: the operator window is busy (a dialog is open) or closed. Keep the Present operator window open during the service. A timed-out cue is discarded, never run late. Before resending a relative cue (`next`, `prev`, `nextItem`, `prevItem`), call `GET /api/v1/status` to see where you are, so you don't move twice. `goToItem`, `black`, `logo` and `live` are always safe to resend. A `goToSection` that timed out never ran, so resending it is fine too; if unsure, check `status` first, since a section cue that did run steps to the next occurrence when repeated after 0.75 seconds.
+   - *Present didn't answer in time* or *Couldn't run that cue*: the operator window is busy (a dialog is open) or closed. Keep the Present operator window open during the service. A timed-out cue is reported only to the sender; it never appears under Recent cues, and it almost certainly didn't run. If it matters, check `GET /api/v1/status` before resending. A timed-out cue is discarded, never run late. Before resending a relative cue (`next`, `prev`, `nextItem`, `prevItem`), call `GET /api/v1/status` to see where you are, so you don't move twice. `goToItem`, `goToSlide`, `black`, `logo` and `live` are always safe to resend. A `goToSection` that timed out never ran, so resending it is fine too; if unsure, check `status` first, since a section cue that did run steps to the next occurrence when repeated after 0.75 seconds.
 5. **It works but lands on the wrong section.** `goToSection` goes to the next match after the current slide. If you want the first chorus every time, jump to the song with `goToItem` first, then send the section.
