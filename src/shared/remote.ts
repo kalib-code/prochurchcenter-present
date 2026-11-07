@@ -176,3 +176,16 @@ export function describeCommand(cmd: RemoteCommand): string {
       return 'Status request'
   }
 }
+
+/** Per-computer remote-control settings, stored in `<userData>/remote.json`. */
+export interface RemoteConfig {
+  enabled: boolean
+  scope: 'local' | 'network'
+  httpPort: number
+  oscEnabled: boolean
+  oscPort: number
+  midiEnabled: boolean
+  midiInput: string | null
+  midiChannel: number // 1..16
+  token: string
+}
