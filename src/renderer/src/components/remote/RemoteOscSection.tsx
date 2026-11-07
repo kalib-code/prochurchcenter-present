@@ -3,7 +3,7 @@ import type { RemoteState } from '@shared/remote'
 import { Input } from '../ui/Input'
 import { Notice, SettingRow, Switch } from '../settings/SettingsKit'
 import { PortField } from './PortField'
-import { useRemoteSave } from './useRemoteState'
+import { FieldError, useRemoteSave } from './useRemoteState'
 
 export function RemoteOscSection({
   state,
@@ -12,14 +12,14 @@ export function RemoteOscSection({
   state: RemoteState
   setState: (s: RemoteState) => void
 }): JSX.Element {
-  const { error, save } = useRemoteSave(setState)
+  const { errors, save } = useRemoteSave(setState)
   const saved = state.oscAllowFrom ?? ''
   const [draft, setDraft] = useState(saved)
   useEffect(() => setDraft(saved), [saved])
 
   const commitAllow = async (): Promise<void> => {
     if (draft.trim() === saved) return
-    await save({ oscAllowFrom: draft.trim() || null })
+    await save('oscAllowFrom', { oscAllowFrom: draft.trim() || null })
   }
 
   return (
@@ -28,9 +28,14 @@ export function RemoteOscSection({
         <Switch
           id="remote-osc"
           checked={state.oscEnabled}
-          onChange={(e) => void save({ oscEnabled: e.target.checked })}
+          onChange={(e) => void save('oscEnabled', { oscEnabled: e.target.checked })}
         />
       </SettingRow>
+      {errors.oscEnabled && (
+        <div className="px-4 py-2">
+          <FieldError message={errors.oscEnabled} />
+        </div>
+      )}
       {state.oscEnabled && (
         <>
           <div className="px-4 py-3">
@@ -42,20 +47,15 @@ export function RemoteOscSection({
             <PortField
               id="remote-osc-port"
               saved={state.oscPort}
-              onSave={(p) => save({ oscPort: p })}
+              error={errors.oscPort}
+              onSave={(p) => save('oscPort', { oscPort: p })}
             />
           </SettingRow>
           <SettingRow
             label="Only accept OSC from (optional)"
             htmlFor="remote-osc-allow"
             description="Leave empty to accept OSC from any computer on this network."
-            below={
-              error ? (
-                <p role="alert" className="text-[12px] text-warn">
-                  {error}
-                </p>
-              ) : undefined
-            }
+            below={errors.oscAllowFrom ? <FieldError message={errors.oscAllowFrom} /> : undefined}
           >
             <Input
               id="remote-osc-allow"

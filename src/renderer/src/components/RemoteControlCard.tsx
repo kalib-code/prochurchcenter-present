@@ -36,7 +36,7 @@ function StatusBadge({ state }: { state: RemoteState }): JSX.Element {
 
 export function RemoteControlCard(): JSX.Element | null {
   const [state, setState] = useRemoteState()
-  const { error, save } = useRemoteSave(setState)
+  const { errors, save } = useRemoteSave(setState)
   if (!state) return null
 
   return (
@@ -50,13 +50,13 @@ export function RemoteControlCard(): JSX.Element | null {
           <Switch
             id="remote-enabled"
             checked={state.enabled}
-            onChange={(e) => void save({ enabled: e.target.checked })}
+            onChange={(e) => void save('enabled', { enabled: e.target.checked })}
           />
         </SettingRow>
 
-        {(state.error || error) && (
+        {(state.error || errors.enabled || errors.scope) && (
           <div className="px-4 py-3">
-            <Notice tone="warn">{error ?? state.error}</Notice>
+            <Notice tone="warn">{errors.enabled ?? errors.scope ?? state.error}</Notice>
           </div>
         )}
 
@@ -87,12 +87,12 @@ export function RemoteControlCard(): JSX.Element | null {
                   { value: 'network', label: 'Other computers on this network' }
                 ]}
                 value={state.scope}
-                onChange={(scope) => void save({ scope })}
+                onChange={(scope) => void save('scope', { scope })}
               />
             </SettingRow>
             <RemoteTokenRow state={state} setState={setState} />
             <SettingRow label="Port" htmlFor="remote-http-port" description="Change this only if another app already uses it.">
-              <PortField id="remote-http-port" saved={state.httpPort} onSave={(p) => save({ httpPort: p })} />
+              <PortField id="remote-http-port" saved={state.httpPort} error={errors.httpPort} onSave={(p) => save('httpPort', { httpPort: p })} />
             </SettingRow>
             <RemoteOscSection state={state} setState={setState} />
             <RemoteMidiSection state={state} setState={setState} />

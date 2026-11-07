@@ -2,7 +2,7 @@ import type { RemoteState } from '@shared/remote'
 import { Select } from '../ui/Input'
 import { SettingRow, Switch } from '../settings/SettingsKit'
 import { useRemoteStore } from '../../stores/useRemoteStore'
-import { useRemoteSave } from './useRemoteState'
+import { FieldError, useRemoteSave } from './useRemoteState'
 
 const CHANNELS = Array.from({ length: 16 }, (_, i) => i + 1)
 
@@ -13,7 +13,7 @@ export function RemoteMidiSection({
   state: RemoteState
   setState: (s: RemoteState) => void
 }): JSX.Element {
-  const { error, save } = useRemoteSave(setState)
+  const { errors, save } = useRemoteSave(setState)
   // MIDI listening itself is attached once in App; here we only read what it found.
   const inputs = useRemoteStore((s) => s.midiInputs)
   const midiError = useRemoteStore((s) => s.midiError)
@@ -28,9 +28,14 @@ export function RemoteMidiSection({
         <Switch
           id="remote-midi"
           checked={state.midiEnabled}
-          onChange={(e) => void save({ midiEnabled: e.target.checked })}
+          onChange={(e) => void save('midiEnabled', { midiEnabled: e.target.checked })}
         />
       </SettingRow>
+      {errors.midiEnabled && (
+        <div className="px-4 py-2">
+          <FieldError message={errors.midiEnabled} />
+        </div>
+      )}
       {state.midiEnabled && (
         <>
           <SettingRow label="MIDI input" htmlFor="remote-midi-input">
@@ -38,7 +43,7 @@ export function RemoteMidiSection({
               id="remote-midi-input"
               className="w-56"
               value={state.midiInput ?? ''}
-              onChange={(e) => void save({ midiInput: e.target.value || null })}
+              onChange={(e) => void save('midiInput', { midiInput: e.target.value || null })}
             >
               <option value="">All inputs</option>
               {options.map((name) => (
@@ -53,7 +58,7 @@ export function RemoteMidiSection({
               id="remote-midi-channel"
               className="w-24"
               value={state.midiChannel}
-              onChange={(e) => void save({ midiChannel: Number(e.target.value) })}
+              onChange={(e) => void save('midiChannel', { midiChannel: Number(e.target.value) })}
             >
               {CHANNELS.map((c) => (
                 <option key={c} value={c}>
@@ -68,10 +73,8 @@ export function RemoteMidiSection({
                 {midiError}
               </p>
             )}
-            {error && (
-              <p role="alert" className="text-warn">
-                {error}
-              </p>
+            {[errors.midiInput, errors.midiChannel].map(
+              (m) => m && <FieldError key={m} message={m} />
             )}
             <p>Last MIDI message: {lastMidi ?? 'none yet'}</p>
           </div>

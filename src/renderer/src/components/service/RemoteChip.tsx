@@ -20,7 +20,11 @@ export function RemoteChip(): JSX.Element | null {
       type="button"
       title={title}
       aria-pressed={paused}
-      onClick={() => setPaused(!paused)}
+      onClick={(e) => {
+        // Drop focus so the operator's next Space goes to slides, not this button.
+        e.currentTarget.blur()
+        setPaused(!paused)
+      }}
       className={cn(
         'inline-flex items-center rounded px-1.5 py-[3px] text-[11px] font-semibold leading-none ring-1 ring-inset transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
