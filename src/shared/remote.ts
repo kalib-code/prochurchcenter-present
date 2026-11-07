@@ -189,3 +189,18 @@ export interface RemoteConfig {
   midiChannel: number // 1..16
   token: string
 }
+
+/** One cue forwarded from a main-process listener to the operator window. */
+export interface RemoteCommandEvent {
+  id: string
+  command: RemoteCommand
+  source: RemoteSource
+  from: string | null
+}
+
+/** What Settings shows: the saved config plus live listener status. */
+export type RemoteState = RemoteConfig & {
+  status: 'off' | 'starting' | 'running' | 'error'
+  error: string | null
+  addresses: string[]
+}

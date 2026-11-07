@@ -31,6 +31,7 @@ import type {
   CanvaImportResult
 } from './canva'
 import type { LibraryChange, McpState } from './mcp'
+import type { RemoteCommandEvent, RemoteConfig, RemoteResult, RemoteState } from './remote'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output slide payload — what the output window renders at any given moment
@@ -596,6 +597,18 @@ export interface PresentApi {
     onStateChange(callback: (state: McpState) => void): () => void
   }
 
+  /** Remote cues (HTTP / OSC / MIDI) driving Service Mode. See shared/remote.ts. */
+  remote: {
+    getState(): Promise<RemoteState>
+    /** Rejects with a readable message when a value is invalid. */
+    update(patch: Partial<Omit<RemoteConfig, 'token'>>): Promise<RemoteState>
+    regenerateToken(): Promise<RemoteState>
+    /** Operator window answers a forwarded cue. */
+    reply(id: string, result: RemoteResult): Promise<void>
+    onStateChange(callback: (state: RemoteState) => void): () => void
+    onCommand(callback: (event: RemoteCommandEvent) => void): () => void
+  }
+
   library: {
     /**
      * Fired when something outside the renderer (an AI tool) changed
@@ -844,6 +857,15 @@ export const CHANNELS = {
     setPort: 'mcp:setPort',
     // Broadcast main -> operator window on status or activity change
     eventState: 'mcp:event:state'
+  },
+  remote: {
+    getState: 'remote:getState',
+    update: 'remote:update',
+    regenerateToken: 'remote:regenerateToken',
+    reply: 'remote:reply',
+    // Broadcasts main -> operator window
+    eventState: 'remote:event:state',
+    eventCommand: 'remote:event:command'
   },
   library: {
     // Broadcast main -> operator window after an AI tool changes the library

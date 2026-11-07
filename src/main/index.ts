@@ -9,6 +9,7 @@ import { readAllSetlists } from './storage/setlists'
 import { sweepOrphanPdfs } from './canva/import'
 import { registerAllIpcHandlers } from './ipc'
 import { initMcp, shutdownMcp } from './mcp'
+import { initRemote, shutdownRemote } from './remote'
 import { isAllowedExternalUrl } from './ipc/system'
 import { attachOutputReplay } from './ipc/output'
 import {
@@ -455,6 +456,8 @@ app.whenReady().then(async () => {
   // on. After createWindows so its first status broadcast has a window
   // to reach. Failures (port taken) land in Settings, never here.
   void initMcp().catch((err) => console.error('[mcp] init failed', err))
+  // Remote cues (HTTP/OSC): same timing; failures surface in Settings.
+  void initRemote().catch((err) => console.error('[remote] init failed', err))
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindows()
@@ -522,4 +525,5 @@ app.on('will-quit', (event) => holdQuitForPendingWrites(event, 'will-quit'))
 // launch straight away. Process exit would close it too; this is tidy.
 app.on('will-quit', () => {
   void shutdownMcp()
+  void shutdownRemote()
 })

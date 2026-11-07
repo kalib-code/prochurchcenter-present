@@ -20,6 +20,7 @@ import { registerSystemHandlers } from './system'
 import { registerFilesHandlers } from './files'
 import { registerCanvaHandlers } from './canva'
 import { registerMcpHandlers } from './mcp'
+import { registerRemoteHandlers } from './remote'
 
 export function registerAllIpcHandlers(): void {
   registerSongHandlers()
@@ -36,4 +37,5 @@ export function registerAllIpcHandlers(): void {
   registerFilesHandlers()
   registerCanvaHandlers()
   registerMcpHandlers()
+  registerRemoteHandlers()
 }

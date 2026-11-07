@@ -20,6 +20,7 @@ import {
 } from '@shared/ipc-contract'
 import type { CanvaImportProgress } from '@shared/canva'
 import type { LibraryChange, McpState } from '@shared/mcp'
+import type { RemoteCommandEvent, RemoteConfig, RemoteResult, RemoteState } from '@shared/remote'
 import type { Theme, ThemeOverride } from '@shared/types'
 
 /**
@@ -134,6 +135,24 @@ const api: PresentApi = {
       const listener = (_: IpcRendererEvent, state: McpState): void => callback(state)
       ipcRenderer.on(CHANNELS.mcp.eventState, listener)
       return () => ipcRenderer.removeListener(CHANNELS.mcp.eventState, listener)
+    }
+  },
+  remote: {
+    getState: () => ipcRenderer.invoke(CHANNELS.remote.getState),
+    update: (patch: Partial<Omit<RemoteConfig, 'token'>>) =>
+      ipcRenderer.invoke(CHANNELS.remote.update, patch),
+    regenerateToken: () => ipcRenderer.invoke(CHANNELS.remote.regenerateToken),
+    reply: (id: string, result: RemoteResult) =>
+      ipcRenderer.invoke(CHANNELS.remote.reply, id, result),
+    onStateChange: (callback: (state: RemoteState) => void): (() => void) => {
+      const listener = (_: IpcRendererEvent, state: RemoteState): void => callback(state)
+      ipcRenderer.on(CHANNELS.remote.eventState, listener)
+      return () => ipcRenderer.removeListener(CHANNELS.remote.eventState, listener)
+    },
+    onCommand: (callback: (event: RemoteCommandEvent) => void): (() => void) => {
+      const listener = (_: IpcRendererEvent, event: RemoteCommandEvent): void => callback(event)
+      ipcRenderer.on(CHANNELS.remote.eventCommand, listener)
+      return () => ipcRenderer.removeListener(CHANNELS.remote.eventCommand, listener)
     }
   },
   library: {
