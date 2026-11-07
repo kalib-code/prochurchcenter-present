@@ -27,6 +27,17 @@ export interface RemoteHttpOptions {
 
 class BodyTooLarge extends Error {}
 
+/**
+ * Socket hygiene for a LAN-facing server: slow or idle clients can't hold
+ * sockets open, and the number of concurrent connections is capped.
+ */
+export function applyHttpLimits(server: Server): void {
+  server.headersTimeout = 10_000
+  server.requestTimeout = 10_000
+  server.keepAliveTimeout = 5_000
+  server.maxConnections = 32
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   if (res.headersSent) return
   res.writeHead(status, { 'Content-Type': 'application/json', ...headers })
@@ -98,6 +109,8 @@ export async function startRemoteHttpServer(
       sendJson(res, 500, { ok: false, reason: 'invalid' })
     })
   })
+
+  applyHttpLimits(http)
 
   await new Promise<void>((resolve, reject) => {
     const onError = (err: NodeJS.ErrnoException): void => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RemoteCommand, RemoteResult } from '@shared/remote'
-import { startRemoteHttpServer } from './httpServer'
+import { createServer } from 'http'
+import { applyHttpLimits, startRemoteHttpServer } from './httpServer'
 
 const TOKEN = 'test-token-0123456789-0123456789-abcdef'
 const OK: RemoteResult = { ok: true, position: null }
@@ -104,5 +105,16 @@ describe('remote http server', () => {
     expect(res.status).toBe(500)
     const again = await post('{"type":"next"}')
     expect(again.status).toBe(500)
+  })
+})
+
+describe('remote http socket limits', () => {
+  it('sets timeouts and a connection cap on the server', () => {
+    const server = createServer()
+    applyHttpLimits(server)
+    expect(server.headersTimeout).toBe(10_000)
+    expect(server.requestTimeout).toBe(10_000)
+    expect(server.keepAliveTimeout).toBe(5_000)
+    expect(server.maxConnections).toBe(32)
   })
 })
