@@ -246,6 +246,12 @@ export interface RemoteCommandEvent {
   command: RemoteCommand
   source: RemoteSource
   from: string | null
+  /**
+   * Epoch ms after which main has already answered `timeout`. The operator
+   * window must discard the cue past this point rather than run it late
+   * (e.g. when a modal dialog blocked the renderer and cues queued up).
+   */
+  expiresAt: number
 }
 
 /** What Settings shows: the saved config plus live listener status. */

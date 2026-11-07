@@ -27,7 +27,7 @@ export function createDispatcher(
         const id = randomUUID()
         let sent = false
         try {
-          sent = send({ id, command, source, from })
+          sent = send({ id, command, source, from, expiresAt: Date.now() + timeoutMs })
         } catch {
           sent = false
         }

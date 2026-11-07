@@ -15,6 +15,14 @@ describe('createDispatcher', () => {
     await expect(p).resolves.toEqual({ ok: true, position: null })
   })
 
+  it('stamps each cue with an expiry the renderer can enforce', () => {
+    vi.setSystemTime(new Date('2026-11-08T10:00:00.000Z'))
+    const sent: RemoteCommandEvent[] = []
+    const d = createDispatcher((m) => (sent.push(m), true), 1000)
+    void d.dispatch({ type: 'next' }, 'osc', null)
+    expect(sent[0].expiresAt).toBe(Date.parse('2026-11-08T10:00:01.000Z'))
+  })
+
   it('times out when no reply arrives', async () => {
     const d = createDispatcher(() => true, 1000)
     const p = d.dispatch({ type: 'next' }, 'osc', null)
